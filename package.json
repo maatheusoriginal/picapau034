@@ -10,7 +10,6 @@
     "dev": "tsx server/index.ts",
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
-    "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

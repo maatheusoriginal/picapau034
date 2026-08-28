@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  bootstrapCurrentUserAsSuperAdmin,
   createManagedUser,
   defaultFirebasePermissions,
   deleteManagedUser,
   firebaseErrorMessage,
-  firebaseProjectId,
   listManagedUsers,
   observeAccessProfile,
   observeCollection,
@@ -14,6 +14,7 @@ import {
   observeFirebaseAuth,
   replaceCollection,
   replaceEmployees,
+  requestFirebasePasswordReset,
   setManagedUserPassword,
   signInFirebase,
   signOutFirebase,
@@ -205,7 +206,7 @@ type MotorcycleRecord = {
   color: string;
 };
 
-type FirebaseConnectionState = "demo" | "checking" | "needs-profile" | "connected" | "error";
+type FirebaseConnectionState = "checking" | "signed-out" | "needs-profile" | "connected" | "disabled" | "error";
 
 const formatBRL = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const parseBRL = (value: string) => Number(value.replace(/[^\d,]/g, "").replace(",", ".")) || 0;
@@ -453,13 +454,11 @@ function useFirebaseSession() {
     let stopProfile: () => void = () => undefined;
     let stopAuth: () => void = () => undefined;
 
-    const fallbackToDemo = (firebaseError?: unknown) => {
-      // O Firebase não pode impedir a hidratação/interação da interface.
-      // Em previews/sandboxes bloqueados, o sistema permanece utilizável em demonstração.
+    const handleAuthError = (firebaseError: unknown) => {
       setUser(null);
       setProfile(null);
-      setState("demo");
-      setError(firebaseError ? firebaseErrorMessage(firebaseError) : "");
+      setState("error");
+      setError(firebaseErrorMessage(firebaseError));
     };
 
     try {
@@ -469,7 +468,7 @@ function useFirebaseSession() {
         setProfile(null);
         setError("");
         if (!nextUser) {
-          setState("demo");
+          setState("signed-out");
           return;
         }
         setState("checking");
@@ -481,8 +480,8 @@ function useFirebaseSession() {
               return;
             }
             if (!nextProfile.active) {
-              setState("error");
-              setError("Este acesso está desativado no cadastro de usuários.");
+              setState("disabled");
+              setError("Seu acesso ao sistema está desativado. Procure o responsável pela oficina.");
               return;
             }
             setState("connected");
@@ -491,11 +490,11 @@ function useFirebaseSession() {
             setError(firebaseErrorMessage(firebaseError));
           });
         } catch (firebaseError) {
-          fallbackToDemo(firebaseError);
+          handleAuthError(firebaseError);
         }
-      }, fallbackToDemo);
+      }, handleAuthError);
     } catch (firebaseError) {
-      fallbackToDemo(firebaseError);
+      handleAuthError(firebaseError);
     }
 
     return () => { stopProfile(); stopAuth(); };
@@ -507,7 +506,7 @@ function useFirebaseSession() {
     try {
       await signInFirebase(email, password);
     } catch (firebaseError) {
-      setState("demo");
+      setState("signed-out");
       const message = firebaseErrorMessage(firebaseError);
       setError(message);
       throw new Error(message);
@@ -516,16 +515,39 @@ function useFirebaseSession() {
 
   const logout = async () => {
     await signOutFirebase();
-    setState("demo");
+    setUser(null);
+    setProfile(null);
+    setState("signed-out");
     setError("");
   };
 
+  const resetPassword = async (email: string) => {
+    setError("");
+    try {
+      await requestFirebasePasswordReset(email);
+    } catch (firebaseError) {
+      const message = firebaseErrorMessage(firebaseError);
+      setError(message);
+      throw new Error(message);
+    }
+  };
+
+  const bootstrapAdmin = async () => {
+    setError("");
+    try {
+      await bootstrapCurrentUserAsSuperAdmin();
+    } catch (firebaseError) {
+      const message = firebaseErrorMessage(firebaseError);
+      setError(message);
+      throw new Error(message);
+    }
+  };
+
   const reportSyncError = (firebaseError: unknown) => {
-    setState("error");
     setError(firebaseErrorMessage(firebaseError));
   };
 
-  return { user, profile, state, error, login, logout, reportSyncError };
+  return { user, profile, state, error, login, logout, resetPassword, bootstrapAdmin, reportSyncError };
 }
 
 function useFirebaseSyncedCollection<T extends { id: string }>(
@@ -535,7 +557,7 @@ function useFirebaseSyncedCollection<T extends { id: string }>(
   writable: boolean,
   onError: (error: unknown) => void,
 ) {
-  const [records, setRecords] = useState<T[]>(initialRecords);
+  const [records, setRecords] = useState<T[]>([]);
   const remoteSignature = useRef("");
   const remoteReady = useRef(false);
   const errorHandler = useRef(onError);
@@ -546,7 +568,7 @@ function useFirebaseSyncedCollection<T extends { id: string }>(
     if (!enabled) {
       remoteReady.current = false;
       remoteSignature.current = "";
-      const timer = window.setTimeout(() => setRecords(initialRecords), 0);
+      const timer = window.setTimeout(() => setRecords([]), 0);
       return () => window.clearTimeout(timer);
     }
     const stop = observeCollection<T>(collectionName, (remoteRecords) => {
@@ -581,7 +603,7 @@ function useFirebaseSyncedEmployees(
   isAdmin: boolean,
   onError: (error: unknown) => void,
 ) {
-  const [records, setRecords] = useState<UserConfig[]>(initialRecords);
+  const [records, setRecords] = useState<UserConfig[]>([]);
   const remoteSignature = useRef("");
   const remoteReady = useRef(false);
   const errorHandler = useRef(onError);
@@ -592,7 +614,7 @@ function useFirebaseSyncedEmployees(
     if (!enabled) {
       remoteReady.current = false;
       remoteSignature.current = "";
-      const timer = window.setTimeout(() => setRecords(initialRecords), 0);
+      const timer = window.setTimeout(() => setRecords([]), 0);
       return () => window.clearTimeout(timer);
     }
     return observeEmployees<UserConfig>(isAdmin, (remoteRecords) => {
@@ -2265,72 +2287,126 @@ function AppDialog({
   );
 }
 
-function FirebaseAccessDialog({
-  close,
-  user,
-  profile,
-  state,
-  error,
-  login,
-  logout,
-}: {
-  close: () => void;
-  user: FirebaseUserSummary | null;
-  profile: FirebaseAccessProfile | null;
-  state: FirebaseConnectionState;
-  error: string;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
-}) {
+function AuthGate({ session }: { session: ReturnType<typeof useFirebaseSession> }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [bootstrapping, setBootstrapping] = useState(false);
+  const [message, setMessage] = useState("");
   const [localError, setLocalError] = useState("");
-  const connected = state === "connected" && Boolean(profile);
+
   const submitLogin = async () => {
-    if (!email.trim() || !password) return setLocalError("Informe o e-mail e a senha cadastrados no Firebase.");
+    if (!email.trim() || !password) {
+      setLocalError("Informe seu e-mail e sua senha.");
+      return;
+    }
     setSubmitting(true);
     setLocalError("");
+    setMessage("");
     try {
-      await login(email, password);
-    } catch (loginError) {
-      setLocalError(loginError instanceof Error ? loginError.message : "Não foi possível entrar.");
+      await session.login(email, password);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Não foi possível entrar.");
     } finally {
       setSubmitting(false);
     }
   };
 
+  const resetPassword = async () => {
+    if (!email.trim()) {
+      setLocalError("Digite seu e-mail acima para recuperar a senha.");
+      return;
+    }
+    setResetting(true);
+    setLocalError("");
+    setMessage("");
+    try {
+      await session.resetPassword(email);
+      setMessage("Enviamos um e-mail de recuperação de senha.");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Não foi possível enviar o e-mail de recuperação.");
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const bootstrap = async () => {
+    setBootstrapping(true);
+    setLocalError("");
+    setMessage("");
+    try {
+      await session.bootstrapAdmin();
+      setMessage("Administrador configurado. Finalizando seu acesso...");
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Não foi possível concluir a configuração inicial.");
+    } finally {
+      setBootstrapping(false);
+    }
+  };
+
+  if (session.state === "checking") {
+    return <main className="auth-shell"><section className="auth-loading"><div className="auth-brand-mark">PP</div><span className="auth-spinner"/><strong>Carregando Pica Pau Motos</strong><small>Validando sua sessão...</small></section></main>;
+  }
+
+  if (session.state === "needs-profile" && session.user) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card auth-card-state">
+          <div className="auth-brand"><div className="auth-brand-mark">PP</div><div><strong>Pica Pau Motos</strong><span>Gestão da oficina</span></div></div>
+          <div className="auth-state-icon"><Icon name="shield" size={28}/></div>
+          <h1>Conta autenticada</h1>
+          <p>Seu login existe no Firebase, mas ainda não possui um perfil de acesso no sistema.</p>
+          <div className="auth-account"><span>Conta</span><strong>{session.user.email}</strong><small>{session.user.uid}</small></div>
+          {localError || session.error ? <div className="auth-alert error"><Icon name="alert" size={17}/><span>{localError || session.error}</span></div> : null}
+          {message ? <div className="auth-alert success"><Icon name="check" size={17}/><span>{message}</span></div> : null}
+          <button className="auth-primary" disabled={bootstrapping} onClick={() => void bootstrap()}><Icon name="shield" size={18}/>{bootstrapping ? "Configurando..." : "Configurar primeiro administrador"}</button>
+          <small className="auth-help">Este botão só funciona para o e-mail definido em <b>INITIAL_SUPER_ADMIN_EMAIL</b> e somente enquanto ainda não existir nenhum administrador.</small>
+          <button className="auth-link-button" onClick={() => void session.logout()}>Sair desta conta</button>
+        </section>
+      </main>
+    );
+  }
+
+  if ((session.state === "disabled" || session.state === "error") && session.user) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-card auth-card-state">
+          <div className="auth-brand"><div className="auth-brand-mark">PP</div><div><strong>Pica Pau Motos</strong><span>Gestão da oficina</span></div></div>
+          <div className="auth-state-icon danger"><Icon name="alert" size={28}/></div>
+          <h1>{session.state === "disabled" ? "Acesso desativado" : "Não foi possível liberar o sistema"}</h1>
+          <p>{session.error || "Ocorreu um erro ao validar suas permissões."}</p>
+          <div className="auth-account"><span>Conta conectada</span><strong>{session.user.email}</strong></div>
+          <button className="auth-secondary" onClick={() => void session.logout()}>Voltar para o login</button>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <div className="dialog-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <section className="dialog firebase-dialog" role="dialog" aria-modal="true" aria-labelledby="firebase-title">
-        <header className="dialog-header"><div><span>Banco de dados e acessos</span><h2 id="firebase-title">Integração com Firebase</h2><p>Login dos funcionários e sincronização em tempo real da oficina.</p></div><button aria-label="Fechar" onClick={close}>×</button></header>
-        <div className="dialog-body firebase-access-body">
-          <div className={`firebase-connection-card ${connected ? "connected" : state === "error" ? "error" : ""}`}><span className="firebase-logo">FB</span><div><small>Projeto conectado</small><strong>{firebaseProjectId}</strong><em>{connected ? `Sincronizando como ${profile?.role}` : user ? "Conta autenticada · aguardando permissão" : "Configuração reconhecida · faça login"}</em></div><b><i/>{connected ? "Online" : state === "checking" ? "Verificando" : "Modo demonstração"}</b></div>
-
-          {!user ? <div className="firebase-login-form"><div className="form-intro"><span className="form-icon"><Icon name="shield"/></span><div><h3>Entrar no sistema da oficina</h3><p>Use uma conta criada no Firebase Authentication.</p></div></div><div className="form-grid"><label className="field field-full"><span>E-mail</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="usuario@picapaumotos.com.br" autoComplete="username"/></label><label className="field field-full"><span>Senha</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submitLogin(); }} placeholder="Sua senha" autoComplete="current-password"/></label></div>{localError || error ? <div className="firebase-error"><Icon name="alert" size={17}/><span>{localError || error}</span></div> : null}<button className="primary-button firebase-login-button" disabled={submitting} onClick={() => void submitLogin()}><Icon name="shield" size={17}/>{submitting ? "Entrando..." : "Entrar e sincronizar"}</button></div> : null}
-
-          {user && !profile ? <div className="firebase-profile-needed"><div className="credit-warning"><Icon name="alert" size={18}/><div><strong>A conta entrou, mas ainda não foi liberada</strong><small>O Super Admin deve abrir “Usuários e acessos”, localizar esta conta do Authentication e clicar em Liberar.</small></div></div><div className="firebase-user-summary"><div><span>Conta encontrada no Authentication</span><strong>{user.email}</strong></div><label className="field"><span>UID do usuário</span><div className="copy-field"><input value={user.uid} readOnly/><button onClick={() => void navigator.clipboard.writeText(user.uid)}>Copiar</button></div></label></div><div className="firebase-bootstrap"><strong>Próxima etapa</strong><code>Usuários e acessos → Sem perfil → Liberar</code><div><span>Conta</span><b>Já existe no Authentication</b><span>Perfil</span><b>Definido pelo Super Admin</b><span>Permissões</span><b>Marcadas individualmente</b><span>Senha</span><b>Preservada</b></div></div>{error ? <div className="firebase-error"><Icon name="alert" size={17}/><span>{error}</span></div> : null}<button className="outline-button large" onClick={() => void logout()}>Sair desta conta</button></div> : null}
-
-          {connected && profile ? <div className="firebase-connected-content"><div className="firebase-user-summary connected"><span className="registry-avatar">{profile.name.split(" ").slice(0, 2).map((part) => part[0]).join("")}</span><div><span>Sessão ativa</span><strong>{profile.name}</strong><small>{user?.email} · {profile.role}</small></div><b>Sincronização ativa</b></div><div className="firebase-collections"><article><Icon name="users" size={18}/><div><strong>Cadastros</strong><small>Clientes, motos, equipe, parceiros e fornecedores</small></div><i>Tempo real</i></article><article><Icon name="wrench" size={18}/><div><strong>Operação</strong><small>Ordens de serviço, produtos, categorias e serviços rápidos</small></div><i>Tempo real</i></article><article><Icon name="wallet" size={18}/><div><strong>Financeiro protegido</strong><small>Gastos, pagamentos, taxas e remuneração separada</small></div><i>Com permissão</i></article></div><div className="info-strip"><Icon name="check" size={18}/><span>Alterações realizadas neste navegador são enviadas ao Firestore e atualizadas nos outros dispositivos conectados.</span></div><button className="outline-button large firebase-signout" onClick={() => void logout()}>Encerrar sessão do Firebase</button></div> : null}
-
-          <div className="firebase-setup-list"><div className="firebase-setup-head"><strong>Ativação necessária no Firebase Console</strong><small>O sistema continua no modo demonstração até concluir estes itens.</small></div>{[
-            ["1", "Authentication", "Ativar provedor E-mail/senha e criar o primeiro usuário"],
-            ["2", "Firestore Database", "Criar o banco e publicar as regras de segurança do projeto"],
-            ["3", "Perfil de acesso", "Sincronizar contas, vincular funcionário e marcar permissões"],
-          ].map(([number, title, detail]) => <article key={number}><span>{number}</span><div><strong>{title}</strong><small>{detail}</small></div><i>{connected ? "✓" : "Pendente"}</i></article>)}</div>
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="auth-brand"><div className="auth-brand-mark">PP</div><div><strong>Pica Pau Motos</strong><span>Gestão da oficina</span></div></div>
+        <div className="auth-copy"><span>Acesso seguro</span><h1>Entrar no sistema</h1><p>Use o e-mail e a senha cadastrados pelo administrador da oficina.</p></div>
+        <div className="auth-form">
+          <label><span>E-mail</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" placeholder="seuemail@exemplo.com" autoFocus/></label>
+          <label><span>Senha</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void submitLogin(); }} autoComplete="current-password" placeholder="Digite sua senha"/></label>
+          {localError || session.error ? <div className="auth-alert error"><Icon name="alert" size={17}/><span>{localError || session.error}</span></div> : null}
+          {message ? <div className="auth-alert success"><Icon name="check" size={17}/><span>{message}</span></div> : null}
+          <button className="auth-primary" disabled={submitting} onClick={() => void submitLogin()}><Icon name="shield" size={18}/>{submitting ? "Entrando..." : "Entrar"}</button>
+          <button className="auth-link-button" disabled={resetting} onClick={() => void resetPassword()}>{resetting ? "Enviando..." : "Esqueci minha senha"}</button>
         </div>
-        <footer className="dialog-footer"><button className="ghost-button" onClick={close}>Fechar</button><div><span className="firebase-safe-note"><Icon name="shield" size={15}/>Sem chave privada no navegador</span></div></footer>
+        <footer className="auth-footer"><span><i/>Conexão protegida pelo Firebase Authentication</span><small>O cadastro de novos usuários é feito pelo Super Admin dentro do sistema.</small></footer>
       </section>
-    </div>
+    </main>
   );
 }
 
-export default function Home() {
-  const firebaseSession = useFirebaseSession();
+function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof useFirebaseSession> }) {
   const firebaseEnabled = firebaseSession.state === "connected" && Boolean(firebaseSession.profile);
   const firebaseAdmin = firebaseSession.profile?.role === "Super Admin";
   const firebasePermissions = firebaseSession.profile?.permissions ?? defaultFirebasePermissions(firebaseSession.profile?.role ?? "Mecânico", firebaseSession.profile?.employeeId);
-  const hasPermission = (permission: FirebasePermission) => !firebaseEnabled || firebaseAdmin || firebasePermissions.includes(permission);
+  const hasPermission = (permission: FirebasePermission) => firebaseAdmin || firebasePermissions.includes(permission);
   const canViewOrders = hasPermission("orders.view");
   const canCreateOrders = hasPermission("orders.create");
   const canUpdateOrders = hasPermission("orders.update");
@@ -2343,7 +2419,7 @@ export default function Home() {
   const canSeeFinance = hasPermission("finance.view");
   const canManageFinance = hasPermission("finance.manage");
   const canViewTeam = hasPermission("team.view");
-  const canManageSettings = !firebaseEnabled || firebaseAdmin;
+  const canManageSettings = firebaseAdmin;
   const [mobileMenu, setMobileMenu] = useState(false);
   const [active, setActive] = useState("Visão geral");
   const [dialog, setDialog] = useState<DialogKind>(null);
@@ -2353,15 +2429,14 @@ export default function Home() {
   const [globalSearch, setGlobalSearch] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [showFirebaseAccess, setShowFirebaseAccess] = useState(false);
-  const canOperate = !firebaseEnabled || firebaseAdmin
+    const canOperate = firebaseAdmin
     || (["Ordens de serviço", "Orçamentos"].includes(active) && (canUpdateOrders || canCreateOrders))
     || (["PDV Balcão", "Vendas do balcão"].includes(active) && canUsePdv)
     || (active === "Serviço rápido" && canUseQuickService)
     || (["Produtos e estoque", "Compras e entradas", "Fornecedores"].includes(active) && canManageInventory)
     || (["Clientes", "Motocicletas"].includes(active) && canManageCustomers)
     || (["Financeiro", "Contas a receber", "Contas a pagar", "Relatórios"].includes(active) && canManageFinance);
-  const canOperateDialog = !firebaseEnabled || firebaseAdmin
+  const canOperateDialog = firebaseAdmin
     || (["osChoice", "os"].includes(dialog ?? "") && canCreateOrders)
     || (dialog === "order" && canUpdateOrders)
     || (["quick", "payment", "cash"].includes(dialog ?? "") && (canUseQuickService || canUsePdv))
@@ -2384,14 +2459,14 @@ export default function Home() {
   const visibleNavGroups = navGroups.map((group) => ({
     ...group,
     items: group.items.filter((item) => {
-      if (!firebaseEnabled || firebaseAdmin) return true;
+      if (firebaseAdmin) return true;
       const required = destinationPermissions[item.label] ?? [];
       return required.some((permission) => firebasePermissions.includes(permission));
     }),
   })).filter((group) => group.items.length > 0);
 
   useEffect(() => {
-    if (!firebaseEnabled || firebaseAdmin || active === "Visão geral") return;
+    if (firebaseAdmin || active === "Visão geral") return;
     const required = destinationPermissions[active];
     const allowed = Boolean(required?.some((permission) => firebasePermissions.includes(permission)));
     if (!allowed) {
@@ -2480,10 +2555,10 @@ export default function Home() {
           </button>
           <div className="user-card">
             <div className="avatar">{firebaseSession.profile?.name.split(" ").slice(0, 2).map((part) => part[0]).join("") || "ER"}</div>
-            <div><strong>{firebaseSession.profile?.name || "Erasmo"}</strong><span>{firebaseEnabled ? firebaseSession.profile?.role : "Modo demonstração"}</span></div>
+            <div><strong>{firebaseSession.profile?.name || "Usuário"}</strong><span>{firebaseSession.profile?.role}</span></div>
             <button aria-label="Opções do perfil" onClick={() => setShowProfile(!showProfile)}>•••</button>
           </div>
-          {showProfile ? <div className="profile-menu"><div><strong>{firebaseSession.profile?.name || "Erasmo"}</strong><span>{firebaseEnabled ? firebaseSession.profile?.role : "Demonstração local"}</span></div><button onClick={() => { setShowFirebaseAccess(true); setShowProfile(false); }}>Firebase e acesso</button>{canManageSettings ? <button onClick={() => { setActive("Configurações"); setShowProfile(false); }}>Configurações da oficina</button> : null}<button onClick={() => { setShowProfile(false); if (firebaseSession.user) void firebaseSession.logout(); else notify("O sistema já está no modo demonstração."); }}>{firebaseSession.user ? "Sair do sistema" : "Bloquear sistema"}</button></div> : null}
+          {showProfile ? <div className="profile-menu"><div><strong>{firebaseSession.profile?.name || "Usuário"}</strong><span>{firebaseSession.profile?.role}</span></div>{canManageSettings ? <button onClick={() => { setActive("Configurações"); setShowProfile(false); }}>Configurações da oficina</button> : null}<button onClick={() => { setShowProfile(false); void firebaseSession.logout(); }}>Sair do sistema</button></div> : null}
         </div>
       </aside>
 
@@ -2499,7 +2574,7 @@ export default function Home() {
             {globalSearch ? <div className="global-results">{globalResults.length ? globalResults.map((result) => <button key={`${result.destination}-${result.title}`} onClick={() => goToSearchResult(result.destination)}><span className="registry-avatar">{result.destination.slice(0,2).toUpperCase()}</span><div><strong>{result.title}</strong><small>{result.detail}</small></div><Icon name="arrow" size={16}/></button>) : <div className="no-results">Nenhum resultado encontrado.</div>}</div> : null}
           </label>
           <div className="topbar-actions">
-            <button className={`firebase-status-button ${firebaseEnabled ? "connected" : firebaseSession.state === "error" ? "error" : ""}`} onClick={() => setShowFirebaseAccess(true)}><i/><span>{firebaseEnabled ? "Firebase online" : firebaseSession.state === "checking" ? "Conectando..." : "Ativar Firebase"}</span></button>
+            <span className="system-online-badge"><i/><span>Sistema online</span></span>
             <div className="notification-wrap"><button className="icon-button" aria-label="Notificações" onClick={() => setShowNotifications(!showNotifications)}><Icon name="bell" /><span className="notification-dot" /></button>{showNotifications ? <div className="notification-menu"><div className="notification-head"><strong>Notificações</strong><button onClick={() => notify("Todas as notificações foram marcadas como lidas.")}>Marcar como lidas</button></div>{canViewOrders ? <button onClick={() => goToSearchResult("Ordens de serviço")}><span className="notice-icon red"><Icon name="clock" size={17}/></span><div><strong>4 orçamentos aguardando</strong><small>Dois estão parados há mais de 24 horas</small></div></button> : null}{canViewInventory ? <button onClick={() => goToSearchResult("Produtos e estoque")}><span className="notice-icon amber"><Icon name="alert" size={17}/></span><div><strong>Estoque crítico</strong><small>3 produtos estão sem estoque</small></div></button> : null}{canSeeFinance ? <button onClick={() => goToSearchResult("Financeiro")}><span className="notice-icon green"><Icon name="wallet" size={17}/></span><div><strong>Fechamento do caixa</strong><small>Conferência disponível a partir das 18h</small></div></button> : null}{!canViewOrders && !canViewInventory && !canSeeFinance ? <div className="no-results">Nenhuma notificação para os módulos liberados.</div> : null}</div> : null}</div>
             {canCreateOrders ? <button className="primary-button" onClick={() => openDialog("osChoice")}><Icon name="plus" size={18} />Abrir nova OS</button> : null}
           </div>
@@ -2540,7 +2615,7 @@ export default function Home() {
               <div className="stat-icon green"><Icon name="check" /></div>
               <div className="stat-info"><span>Prontas para entrega</span><strong>3</strong><small>2 clientes já avisados</small></div>
             </button>
-            </> : <div className="stat-card access-stat"><div className="stat-icon red"><Icon name="shield"/></div><div className="stat-info"><span>Seu perfil de acesso</span><strong>{firebaseSession.profile?.role ?? "Demonstração"}</strong><small>{firebasePermissions.length} permissões liberadas pelo Super Admin</small></div></div>}
+            </> : <div className="stat-card access-stat"><div className="stat-icon red"><Icon name="shield"/></div><div className="stat-info"><span>Seu perfil de acesso</span><strong>{firebaseSession.profile?.role ?? "Usuário"}</strong><small>{firebasePermissions.length} permissões liberadas pelo Super Admin</small></div></div>}
             {canSeeFinance ? <button className="stat-card" onClick={() => setActive("Financeiro")}>
               <div className="stat-icon blue"><Icon name="wallet" /></div>
               <div className="stat-info"><span>Recebido hoje</span><strong className="money">R$ 4.280</strong><small><b>+12%</b> sobre ontem</small></div>
@@ -2613,13 +2688,20 @@ export default function Home() {
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => setShowFirebaseAccess(true)} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients}/>
+            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients}/>
           )}
         </div>
       </section>
       <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles}/>
-      {showFirebaseAccess ? <FirebaseAccessDialog close={() => setShowFirebaseAccess(false)} user={firebaseSession.user} profile={firebaseSession.profile} state={firebaseSession.state} error={firebaseSession.error} login={firebaseSession.login} logout={firebaseSession.logout}/> : null}
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );
+}
+
+export default function Home() {
+  const firebaseSession = useFirebaseSession();
+  if (firebaseSession.state !== "connected" || !firebaseSession.user || !firebaseSession.profile) {
+    return <AuthGate session={firebaseSession}/>;
+  }
+  return <WorkshopApp firebaseSession={firebaseSession}/>;
 }

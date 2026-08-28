@@ -1,0 +1,112 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function profilePath() {
+      return /databases/$(database)/documents/userAccess/$(request.auth.uid);
+    }
+
+    function profileExists() {
+      return signedIn() && exists(profilePath());
+    }
+
+    function profile() {
+      return get(profilePath()).data;
+    }
+
+    function activeUser() {
+      return profileExists() && profile().active == true;
+    }
+
+    function isSuperAdmin() {
+      return activeUser() && profile().role == 'Super Admin';
+    }
+
+    function can(permission) {
+      return isSuperAdmin() || (activeUser() && permission in profile().permissions);
+    }
+
+    match /userAccess/{userId} {
+      allow get: if signedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow list: if isSuperAdmin();
+      // Perfis são alterados somente pelo backend com Firebase Admin.
+      allow create, update, delete: if false;
+    }
+
+    match /serviceOrders/{documentId} {
+      allow read: if can('orders.view');
+      allow create: if can('orders.create');
+      allow update, delete: if can('orders.update');
+    }
+
+    match /products/{documentId} {
+      allow read: if can('inventory.view');
+      allow create, update, delete: if can('inventory.manage');
+    }
+
+    match /clients/{documentId} {
+      allow read: if can('customers.view');
+      allow create, update, delete: if can('customers.manage');
+    }
+
+    match /motorcycles/{documentId} {
+      allow read: if can('customers.view');
+      allow create, update, delete: if can('customers.manage');
+    }
+
+    match /expenses/{documentId} {
+      allow read: if can('finance.view');
+      allow create, update, delete: if can('finance.manage');
+    }
+
+    match /employees/{documentId} {
+      allow read: if can('team.view') || can('orders.create') || can('orders.update');
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /employeeCompensation/{documentId} {
+      allow read, create, update, delete: if isSuperAdmin();
+    }
+
+    match /partners/{documentId} {
+      allow read: if can('customers.view') || can('orders.create');
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /quickServices/{documentId} {
+      allow read: if can('quickService.use') || can('orders.create');
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /categories/{documentId} {
+      allow read: if can('inventory.view');
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /suppliers/{documentId} {
+      allow read, create, update, delete: if can('inventory.manage');
+    }
+
+    match /paymentMachines/{documentId} {
+      allow read: if can('finance.view');
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /paymentMethods/{documentId} {
+      allow read: if can('finance.view') || can('pos.use');
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /auditLogs/{documentId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

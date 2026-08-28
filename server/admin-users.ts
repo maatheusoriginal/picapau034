@@ -199,7 +199,7 @@ export async function postAdminUsers(request: Request, response: Response) {
       let created: UserRecord | null = null;
       try {
         created = await auth.createUser({ email, password, displayName: name, disabled: !active });
-        await auth.setCustomUserClaims(created.uid, { role, employeeId, permissions: userPermissions });
+        await auth.setCustomUserClaims(created.uid, { role, employeeId });
         const batch = db.batch();
         batch.set(db.collection("userAccess").doc(created.uid), {
           uid: created.uid, name, email, phone, role, employeeId, active, permissions: userPermissions,
@@ -240,7 +240,7 @@ export async function postAdminUsers(request: Request, response: Response) {
       let authUser: UserRecord | undefined;
       try {
         authUser = await auth.updateUser(uid, { email, displayName: name, disabled: !active });
-        await auth.setCustomUserClaims(uid, { ...(authUser.customClaims || {}), role, employeeId, permissions: userPermissions });
+        await auth.setCustomUserClaims(uid, { role, employeeId });
       } catch (error) {
         const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
         if (!code.includes("user-not-found")) throw error;

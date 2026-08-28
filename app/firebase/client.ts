@@ -5,6 +5,7 @@ import {
   onAuthStateChanged,
   setPersistence,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
   type User,
 } from "firebase/auth";
@@ -21,12 +22,12 @@ import {
 } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyD29XX1forYBID5KFbD4PptOi4IZSPibY8",
-  authDomain: "oficinapicapaumotos34.firebaseapp.com",
-  projectId: "oficinapicapaumotos34",
-  storageBucket: "oficinapicapaumotos34.firebasestorage.app",
-  messagingSenderId: "754527262085",
-  appId: "1:754527262085:web:b9b94d26280639461e20ec",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyD29XX1forYBID5KFbD4PptOi4IZSPibY8",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "oficinapicapaumotos34.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "oficinapicapaumotos34",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "oficinapicapaumotos34.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "754527262085",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:754527262085:web:b9b94d26280639461e20ec",
 };
 
 export type FirebaseUserSummary = {
@@ -132,6 +133,8 @@ export function firebaseErrorMessage(error: unknown) {
   if (code.includes("network-request-failed") || code.includes("unavailable")) return "Sem conexão com o Firebase. Confira a internet.";
   if (code.includes("permission-denied")) return "A conta entrou, mas ainda não possui permissão no banco de dados.";
   if (code.includes("operation-not-allowed")) return "Ative o login por e-mail e senha no Firebase Authentication.";
+  if (code.includes("unauthorized-domain")) return "Este domínio ainda não está autorizado no Firebase Authentication.";
+  if (code.includes("user-disabled")) return "Esta conta foi desativada pelo administrador.";
   if (code.includes("email-already-in-use")) return "Este e-mail já está sendo usado por outro usuário.";
   if (code.includes("invalid-email")) return "Informe um endereço de e-mail válido.";
   if (code.includes("weak-password")) return "A senha precisa ter pelo menos 6 caracteres.";
@@ -168,6 +171,29 @@ export async function signInFirebase(email: string, password: string) {
 export async function signOutFirebase() {
   const { auth } = services();
   await signOut(auth);
+}
+
+export async function requestFirebasePasswordReset(email: string) {
+  const { auth } = services();
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("Informe seu e-mail para recuperar a senha.");
+  await sendPasswordResetEmail(auth, normalizedEmail);
+}
+
+export async function bootstrapCurrentUserAsSuperAdmin() {
+  const { auth } = services();
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error("Entre no sistema para continuar.");
+  const response = await fetch("/api/setup/bootstrap", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${await currentUser.getIdToken()}` },
+  });
+  const payload = await response.json().catch(() => ({})) as { data?: { success?: boolean }; error?: { message?: string; code?: string } };
+  if (!response.ok || !payload.data?.success) {
+    const error = new Error(payload.error?.message || "Não foi possível configurar o primeiro administrador.") as Error & { code?: string };
+    error.code = payload.error?.code || "bootstrap-failed";
+    throw error;
+  }
 }
 
 export function observeAccessProfile(uid: string, callback: (profile: FirebaseAccessProfile | null) => void, onError: (error: unknown) => void): Unsubscribe {

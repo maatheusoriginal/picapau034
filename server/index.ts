@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAdminUsers, postAdminUsers } from "./admin-users";
+import { bootstrapSuperAdmin } from "./bootstrap";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const port = Number(process.env.PORT || 3000);
@@ -18,6 +19,7 @@ app.get("/api/health", (_request, response) => {
 });
 app.get("/api/admin/users", getAdminUsers);
 app.post("/api/admin/users", postAdminUsers);
+app.post("/api/setup/bootstrap", bootstrapSuperAdmin);
 
 if (!isProduction) {
   const { createServer } = await import("vite");
