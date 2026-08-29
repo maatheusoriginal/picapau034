@@ -20,11 +20,13 @@ function LazyFallback() {
 }
 import {
   bootstrapCurrentUserAsSuperAdmin,
+  changeOwnPassword,
   createManagedUser,
   defaultFirebasePermissions,
   deleteManagedUser,
   firebaseErrorMessage,
   listManagedUsers,
+  MIN_PASSWORD_LENGTH,
   observeAccessProfile,
   observeCollection,
   observeEmployees,
@@ -311,6 +313,17 @@ function useFirebaseSession() {
     setError("");
   };
 
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    setError("");
+    try {
+      await changeOwnPassword(currentPassword, newPassword);
+    } catch (firebaseError) {
+      const message = firebaseErrorMessage(firebaseError);
+      setError(message);
+      throw new Error(message);
+    }
+  };
+
   const resetPassword = async (email: string) => {
     setError("");
     try {
@@ -337,7 +350,7 @@ function useFirebaseSession() {
     setError(firebaseErrorMessage(firebaseError));
   };
 
-  return { user, profile, state, error, login, logout, resetPassword, bootstrapAdmin, reportSyncError };
+  return { user, profile, state, error, login, logout, resetPassword, changePassword, bootstrapAdmin, reportSyncError };
 }
 
 function useFirebaseSyncedCollection<T extends { id: string }>(
@@ -2134,6 +2147,54 @@ function AppDialog({
   );
 }
 
+// Primeiro acesso (ou logo após o Super Admin redefinir a senha): o servidor
+// grava mustChangePassword no perfil e o app não abre até a pessoa escolher uma
+// senha própria. Sem esta tela, a senha temporária de 6 dígitos entregue pelo
+// administrador virava a senha definitiva do funcionário — a flag era gravada
+// no Firestore e nunca lida por ninguém.
+function ForcePasswordChange({ session }: { session: ReturnType<typeof useFirebaseSession> }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState("");
+
+  const submit = async () => {
+    if (!currentPassword || !newPassword) return setLocalError("Preencha a senha atual e a nova senha.");
+    if (newPassword !== confirmPassword) return setLocalError("A confirmação não é igual à nova senha.");
+    setSubmitting(true);
+    setLocalError("");
+    try {
+      await session.changePassword(currentPassword, newPassword);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Não foi possível trocar a senha.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitOnEnter = (event: React.KeyboardEvent) => { if (event.key === "Enter") void submit(); };
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="auth-brand"><div className="auth-brand-mark">PP</div><div><strong>Pica Pau Motos</strong><span>Gestão da oficina</span></div></div>
+        <div className="auth-copy"><span>Primeiro acesso</span><h1>Crie a sua senha</h1><p>Você entrou com a senha temporária cadastrada pelo administrador. Escolha agora uma senha só sua para continuar.</p></div>
+        <div className="auth-account"><span>Conta</span><strong>{session.user?.email}</strong></div>
+        <div className="auth-form">
+          <label><span>Senha temporária</span><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} onKeyDown={submitOnEnter} autoComplete="current-password" placeholder="A senha que o administrador passou" autoFocus/></label>
+          <label><span>Nova senha</span><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} onKeyDown={submitOnEnter} autoComplete="new-password" placeholder={`Pelo menos ${MIN_PASSWORD_LENGTH} caracteres`}/></label>
+          <label><span>Repita a nova senha</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} onKeyDown={submitOnEnter} autoComplete="new-password" placeholder="Digite a nova senha de novo"/></label>
+          {localError || session.error ? <div className="auth-alert error"><Icon name="alert" size={17}/><span>{localError || session.error}</span></div> : null}
+          <button className="auth-primary" disabled={submitting} onClick={() => void submit()}><Icon name="check" size={18}/>{submitting ? "Salvando..." : "Salvar e entrar no sistema"}</button>
+          <small className="auth-help">Use pelo menos {MIN_PASSWORD_LENGTH} caracteres, misturando letras e números. Não use apenas números.</small>
+          <button className="auth-link-button" onClick={() => void session.logout()}>Sair desta conta</button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function AuthGate({ session }: { session: ReturnType<typeof useFirebaseSession> }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -2278,6 +2339,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [globalSearch, setGlobalSearch] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
     const canOperate = firebaseAdmin
     || (["Ordens de serviço", "Orçamentos"].includes(active) && (canUpdateOrders || canCreateOrders))
     || (["PDV Balcão", "Vendas do balcão"].includes(active) && canUsePdv)
@@ -2323,6 +2385,25 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
       return () => window.clearTimeout(timer);
     }
   }, [active, firebaseAdmin, firebaseEnabled, firebasePermissions]);
+
+  // A topbar sempre anunciou o atalho no badge "Ctrl K", mas nada o escutava.
+  // Esc fecha a busca sem precisar do mouse.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInput.current?.focus();
+        searchInput.current?.select();
+        return;
+      }
+      if (event.key === "Escape" && document.activeElement === searchInput.current) {
+        setGlobalSearch("");
+        searchInput.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const openDialog = (next: Exclude<DialogKind, null>) => {
     setOsStep(1);
@@ -2418,7 +2499,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           <button className="mobile-menu" aria-label="Abrir menu" onClick={() => setMobileMenu(true)}><Icon name="menu" /></button>
           <label className="search-box">
             <Icon name="search" size={19} />
-            <input aria-label="Buscar" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && globalResults[0]) goToSearchResult(globalResults[0].destination); }} placeholder="Buscar OS, cliente, placa ou peça..." />
+            <input ref={searchInput} aria-label="Buscar" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && globalResults[0]) goToSearchResult(globalResults[0].destination); }} placeholder="Buscar OS, cliente, placa ou peça..." />
             <kbd>Ctrl K</kbd>
             {globalSearch ? <div className="global-results">{globalResults.length ? globalResults.map((result) => <button key={`${result.destination}-${result.title}`} onClick={() => goToSearchResult(result.destination)}><span className="registry-avatar">{result.destination.slice(0,2).toUpperCase()}</span><div><strong>{result.title}</strong><small>{result.detail}</small></div><Icon name="arrow" size={16}/></button>) : <div className="no-results">Nenhum resultado encontrado.</div>}</div> : null}
           </label>
@@ -2559,6 +2640,9 @@ export default function Home() {
   const firebaseSession = useFirebaseSession();
   if (firebaseSession.state !== "connected" || !firebaseSession.user || !firebaseSession.profile) {
     return <AuthGate session={firebaseSession}/>;
+  }
+  if (firebaseSession.profile.mustChangePassword) {
+    return <ForcePasswordChange session={firebaseSession}/>;
   }
   return <WorkshopApp firebaseSession={firebaseSession}/>;
 }
