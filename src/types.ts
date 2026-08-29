@@ -50,7 +50,12 @@ export type DialogKind =
   | "changePassword"
   | null;
 
-export type OpenDialog = (dialog: Exclude<DialogKind, null>) => void;
+/**
+ * `recordId` diz qual registro o diálogo deve abrir — sem ele, o detalhe da OS
+ * mostrava sempre `orders[0]`, então clicar em qualquer linha da lista abria a
+ * primeira ordem de serviço.
+ */
+export type OpenDialog = (dialog: Exclude<DialogKind, null>, recordId?: string) => void;
 
 export type ExpenseRecord = {
   id: string;
@@ -239,7 +244,37 @@ export type OrderRecord = {
   priority?: string;
   /** Resumo do serviço principal, usado nas listagens. */
   service?: string;
+  /** Cliente cadastrado que abriu a OS, quando existe. */
+  clientId?: string;
+  /** Motocicleta cadastrada, quando existe. */
+  motorcycleId?: string;
+  /** Quilometragem registrada na recepção. */
+  mileage?: string;
+  /** OS entregue e recebida: sai das listas de serviço em andamento. */
+  closed?: boolean;
+  /** Data do encerramento, no formato brasileiro. */
+  closedAt?: string;
+  /** Forma de pagamento usada no encerramento. */
+  paymentMethod?: string;
 };
+
+export const serviceOrderStatuses = ["Recepção", "Avaliação", "Aprovação", "Em serviço", "Entrega"] as const;
+
+export type ServiceOrderStatus = (typeof serviceOrderStatuses)[number];
+
+/**
+ * Cor do selo de situação. Fonte única: antes a tela do diálogo calculava a
+ * dela em uma expressão solta e as listagens liam um campo `tone` gravado no
+ * banco, então uma OS criada com o tone errado ficava com a cor errada para
+ * sempre.
+ */
+export function statusTone(status: string): string {
+  if (status === "Entrega") return "green";
+  if (status === "Em serviço") return "amber";
+  if (status === "Aprovação") return "red";
+  if (status === "Avaliação") return "violet";
+  return "blue";
+}
 
 export type ProductRecord = {
   id: string;

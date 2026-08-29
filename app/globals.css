@@ -575,6 +575,9 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .history-list > div i { width: 7px; height: 7px; flex: 0 0 auto; margin-top: 3px; border-radius: 50%; background: var(--red); }
 .history-list > div span { display: flex; gap: 12px; }
 .history-list > div b { color: #444549; font-weight: 700; }
+/* Erro de gravação do diálogo: mesma paleta do .auth-alert.error, ancorado
+   logo acima do rodapé para a pessoa ver o motivo sem rolar a janela. */
+.dialog-error-strip { flex: 0 0 auto; display: flex; gap: 9px; align-items: flex-start; margin: 0 23px 12px; padding: 11px 12px; border-radius: 10px; font-size: 12px; line-height: 1.4; background: #fff1f1; border: 1px solid #f3caca; color: #9f1d1d; }
 .dialog-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 14px 23px; border-top: 1px solid #eceae7; background: #faf9f7; }
 .dialog-footer > div { display: flex; align-items: center; gap: 8px; }
 .ghost-button { height: 38px; padding: 0 11px; border: 0; background: transparent; color: #747579; font-size: 10px; font-weight: 700; }
@@ -1350,6 +1353,7 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   .form-grid, .choice-grid, .review-grid { grid-template-columns: 1fr; }
   .field-full { grid-column: auto; }
   .review-grid > div { border-right: 0; }
+  .dialog-error-strip { margin-left: 17px; margin-right: 17px; }
   .dialog-footer { padding-left: 17px; padding-right: 17px; }
   .dialog-footer .primary-button { padding: 0 12px; }
   .firebase-user-summary, .firebase-user-summary.connected { grid-template-columns: 1fr; align-items: stretch; }

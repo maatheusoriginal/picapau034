@@ -569,6 +569,34 @@ export async function saveFirestoreDoc<T extends Record<string, unknown>>(collec
   }
 }
 
+/**
+ * Cria a ordem de serviço com o próximo número livre da sequência.
+ *
+ * A numeração não vem de settings/global.nextOsNumber de propósito: as regras
+ * do Firestore só deixam o Super Admin escrever em settings, então um usuário
+ * de Balcão não conseguiria incrementar o contador ao abrir uma OS. O próximo
+ * número sai da maior OS já existente, e antes de gravar conferimos se o
+ * documento está livre — se duas pessoas abrirem uma OS no mesmo instante, a
+ * segunda avança para o número seguinte em vez de sobrescrever a primeira
+ * (setDoc com merge não reclamaria da colisão).
+ */
+export async function createServiceOrder(prefix: string, startNumber: number, data: Record<string, unknown>) {
+  const { db } = services();
+  const safePrefix = (prefix || "OS").trim().replace(/-+$/, "") || "OS";
+  try {
+    for (let number = Math.max(1, startNumber); number < startNumber + 50; number += 1) {
+      const id = `${safePrefix}-${String(number).padStart(4, "0")}`;
+      const reference = doc(db, "serviceOrders", id);
+      if ((await getDoc(reference)).exists()) continue;
+      await setDoc(reference, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      return id;
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "serviceOrders");
+  }
+  throw new Error("Não foi possível gerar um número livre para a ordem de serviço. Tente novamente.");
+}
+
 export async function deleteFirestoreDoc(collectionName: string, id: string) {
   const { db } = services();
   try {
