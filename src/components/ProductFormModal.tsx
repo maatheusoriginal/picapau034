@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import type { CategoryConfig, ProductRecord, SupplierConfig } from "../types";
+import type { CategoryConfig, ProductRecord, SettingsConfig, SupplierConfig } from "../types";
 import { defaultSystemLists } from "../types";
+import { markupFromPrice, priceFromMarkup } from "../inventory";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 
 interface ProductFormModalProps {
@@ -14,6 +15,8 @@ interface ProductFormModalProps {
   allProducts: ProductRecord[];
   /** Unidades configuradas em Configurações → Listas do sistema. */
   units?: string[];
+  /** Padrões da oficina (markup sugerido, estoque mínimo, unidade e modo de preço). */
+  settings?: Partial<SettingsConfig> | null;
 }
 
 export const ProductFormModal: React.FC<ProductFormModalProps> = ({
@@ -26,6 +29,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   notify,
   allProducts,
   units = [],
+  settings = null,
 }) => {
   const [activeTab, setActiveTab] = useState<"ident" | "prices" | "stock" | "compat" | "extra">("ident");
   const [isSaving, setIsSaving] = useState(false);
@@ -75,7 +79,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setPartNumber(editingProduct.partNumber || "");
       setCategory(editingProduct.category || defaultCategories[0] || "Peças");
       setBrand(editingProduct.brand || "");
-      setUnit(editingProduct.unit || "UN");
+      setUnit(editingProduct.unit || settings?.defaultUnit || "UN");
       setLocation(editingProduct.location || "");
 
       const parsedCost = typeof editingProduct.cost === "number" ? editingProduct.cost : Number(String(editingProduct.cost).replace(/[^\d,.]/g, "").replace(",", ".")) || 0;
@@ -88,11 +92,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         const calculatedMarkup = Math.round(((parsedPrice - parsedCost) / parsedCost) * 100);
         setMarkup(calculatedMarkup);
       } else {
-        setMarkup(editingProduct.markup ?? 45);
+        setMarkup(editingProduct.markup ?? settings?.suggestedMarkup ?? 45);
       }
 
       setStock(editingProduct.stock ?? 0);
-      setMinimum(editingProduct.minimum ?? 2);
+      setMinimum(editingProduct.minimum ?? settings?.defaultMinStock ?? 2);
       setMaximum(editingProduct.maximum ?? 20);
       setAlertLowStock(editingProduct.alertLowStock !== false);
       setCompatibility(editingProduct.compatibility || "");
@@ -110,13 +114,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setPartNumber("");
       setCategory(defaultCategories[0] || "Peças");
       setBrand("");
-      setUnit("UN");
+      setUnit(settings?.defaultUnit || unitOptions[0] || "UN");
       setLocation("");
       setCost(0);
-      setMarkup(45);
+      setMarkup(settings?.suggestedMarkup ?? 45);
       setPrice(0);
       setStock(0);
-      setMinimum(2);
+      setMinimum(settings?.defaultMinStock ?? 2);
       setMaximum(20);
       setAlertLowStock(true);
       setCompatibility("");
@@ -125,31 +129,29 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setActive(true);
     }
     setActiveTab("ident");
-  }, [isOpen, editingProduct, allProducts.length]);
+  }, [isOpen, editingProduct, allProducts.length, settings?.defaultUnit, settings?.suggestedMarkup, settings?.defaultMinStock]);
 
-  // Recalculate price when cost or markup change
+  // "markup": o preço de venda é sempre custo + margem, e o campo fica travado —
+  // é a configuração que garante a margem e impede vender abaixo do custo por
+  // um erro de digitação. "fixed": o preço é digitado à mão e a margem apenas
+  // acompanha. Definido em Configurações → Estoque & Reposição.
+  const pricingMode = settings?.pricingMode ?? "fixed";
+  const priceFollowsMarkup = pricingMode === "markup";
+
   const handleCostChange = (newCost: number) => {
     setCost(newCost);
-    if (newCost > 0) {
-      const calculatedPrice = Number((newCost * (1 + markup / 100)).toFixed(2));
-      setPrice(calculatedPrice);
-    }
+    if (newCost > 0) setPrice(priceFromMarkup(newCost, markup));
   };
 
   const handleMarkupChange = (newMarkup: number) => {
     setMarkup(newMarkup);
-    if (cost > 0) {
-      const calculatedPrice = Number((cost * (1 + newMarkup / 100)).toFixed(2));
-      setPrice(calculatedPrice);
-    }
+    if (cost > 0) setPrice(priceFromMarkup(cost, newMarkup));
   };
 
   const handlePriceChange = (newPrice: number) => {
+    if (priceFollowsMarkup) return;
     setPrice(newPrice);
-    if (cost > 0 && newPrice >= cost) {
-      const calculatedMarkup = Math.round(((newPrice - cost) / cost) * 100);
-      setMarkup(calculatedMarkup);
-    }
+    if (cost > 0 && newPrice >= cost) setMarkup(markupFromPrice(cost, newPrice));
   };
 
   const applyQuickMarkup = (quickMarkup: number) => {
@@ -425,8 +427,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                       value={price === 0 ? "" : price}
                       onChange={(e) => handlePriceChange(parseFloat(e.target.value) || 0)}
                       placeholder="0,00"
-                      className="dialog-input bold-number highlight-price"
+                      readOnly={priceFollowsMarkup}
+                      className={`dialog-input bold-number highlight-price ${priceFollowsMarkup ? "is-derived" : ""}`}
                     />
+                    {priceFollowsMarkup ? (
+                      <small className="field-help">Calculado pelo custo e pela margem. Para digitar o preço à mão, mude o modo de precificação em Configurações.</small>
+                    ) : null}
                   </label>
                 </div>
 

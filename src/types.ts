@@ -347,6 +347,24 @@ export type SaleRecord = {
   soldAt: string;
 };
 
+/** Uma compra de peças que entrou no estoque. */
+export type StockEntryRecord = {
+  id: string;
+  supplierId?: string;
+  supplierName?: string;
+  /** Data no formato brasileiro. */
+  date: string;
+  /** ISO 8601, para ordenar e filtrar por período. */
+  entryAt: string;
+  payment: string;
+  /** Como o custo foi tratado nesta entrada: "Custo médio" ou "Último preço". */
+  costMode: string;
+  total: number;
+  items: Array<{ productId: string; name: string; quantity: number; unitCost: number; total: number }>;
+  operatorUid?: string;
+  operatorName?: string;
+};
+
 export const serviceOrderStatuses = ["Recepção", "Avaliação", "Aprovação", "Em serviço", "Entrega"] as const;
 
 export type ServiceOrderStatus = (typeof serviceOrderStatuses)[number];

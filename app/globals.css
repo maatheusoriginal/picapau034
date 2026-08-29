@@ -1610,6 +1610,10 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   gap: 16px;
 }
 
+/* Campo calculado pelo sistema (preço no modo markup): continua legível, mas
+   sinaliza que não é digitável. */
+.dialog-input.is-derived { background: #f4f2ef; color: #6c6a66; cursor: not-allowed; }
+
 /* Aba "Listas do sistema": cada bloco é uma lista de opções editável por
    etiquetas, no lugar de uma tabela inteira para valores de uma palavra. */
 .settings-list-grid {

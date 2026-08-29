@@ -11,7 +11,8 @@
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "check:finance": "tsx scripts/check-finance.ts"
+    "check:finance": "tsx scripts/check-finance.ts",
+    "check:inventory": "tsx scripts/check-inventory.ts"
   },
   "dependencies": {
     "express": "4.21.2",

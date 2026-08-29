@@ -35,6 +35,7 @@ npm run dev             # http://localhost:3000
 | `npm run dev` | Sobe a API e a interface em modo desenvolvimento com hot reload |
 | `npm run typecheck` | Verifica os tipos (`tsc --noEmit`) — deve terminar sem nenhum erro |
 | `npm run check:finance` | Confere as contas do financeiro contra um cenário montado à mão |
+| `npm run check:inventory` | Confere as contas de estoque e precificação (markup e custo médio) |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -82,9 +83,11 @@ server/
 src/
   types.ts           Fonte única dos tipos de domínio e das permissões
   finance.ts         Cálculos do financeiro (funções puras, sem Firebase)
+  inventory.ts       Precificação e custo de estoque (funções puras)
   components/        Modais de cadastro e a área de Configurações
 scripts/
   check-finance.ts   Confere as contas do financeiro
+  check-inventory.ts Confere as contas de estoque e precificação
 firestore.rules      Regras de segurança do banco
 ```
 
@@ -126,6 +129,34 @@ funcionário" — porque disparam comportamento próprio no formulário.
 
 Toda lista tem um padrão de fábrica: enquanto a oficina não ajustar nada, o
 sistema usa a lista original, sem tela vazia.
+
+## Preço e custo das peças
+
+Duas escolhas em **Configurações → Estoque & Reposição** mudam como o sistema
+trata preço e custo. As contas ficam em `src/inventory.ts` e são conferidas por
+`npm run check:inventory`.
+
+**Modo de precificação**
+
+- *Preço digitado à mão* (padrão): o preço de venda é livre e a margem apenas
+  acompanha o que foi digitado.
+- *Preço calculado pela margem*: o preço fica travado em `custo + margem`. Não
+  há como vender abaixo do custo por um erro de digitação.
+
+**Custo das peças**, aplicado a cada entrada de estoque:
+
+- *Último preço pago* (padrão): o custo da peça vira o preço da compra mais
+  recente.
+- *Custo médio ponderado*: o custo vira a média pesada pela quantidade de cada
+  lote. Dez peças a R$ 10 mais dez a R$ 20 dão custo de R$ 15, não R$ 20 — sem
+  isso, o lucro das dez primeiras apareceria menor do que foi de verdade.
+
+A entrada de estoque (**Compras e entradas → Nova entrada**) soma a quantidade e
+recalcula o custo dentro de uma transação do Firestore, porque o custo médio
+depende do estoque e do custo gravados naquele instante.
+
+O cadastro de produto também passou a nascer com os padrões da oficina: markup
+sugerido, estoque mínimo e unidade de medida.
 
 ## Como o dinheiro é contado
 
@@ -173,6 +204,7 @@ sessões anteriores daquele usuário.
 
 - [ ] `npm run typecheck` sem erros
 - [ ] `npm run check:finance` com todas as contas batendo
+- [ ] `npm run check:inventory` com todas as contas batendo
 - [ ] `npm run build` conclui sem erros
 - [ ] Variáveis `VITE_FIREBASE_*` configuradas no ambiente de produção
 - [ ] `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` e `INITIAL_SUPER_ADMIN_EMAIL` cadastradas
