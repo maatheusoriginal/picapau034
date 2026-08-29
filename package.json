@@ -10,7 +10,8 @@
     "dev": "tsx server/index.ts",
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:finance": "tsx scripts/check-finance.ts"
   },
   "dependencies": {
     "express": "4.21.2",
