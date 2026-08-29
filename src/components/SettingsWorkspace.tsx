@@ -6,7 +6,9 @@ import type {
   PaymentMethodConfig,
   QuickServiceConfig,
   SettingsConfig,
+  SystemLists,
 } from "../types";
+import { defaultSystemLists, systemList, systemListLabels } from "../types";
 import { saveFirestoreDoc, deleteFirestoreDoc, observeFirestoreDoc } from "../../app/firebase/client";
 
 interface SettingsWorkspaceProps {
@@ -25,7 +27,7 @@ interface SettingsWorkspaceProps {
   initialTab?: SettingsTab;
 }
 
-export type SettingsTab = "general" | "services" | "categories" | "payments" | "partners" | "stock" | "print";
+export type SettingsTab = "general" | "services" | "categories" | "payments" | "partners" | "stock" | "print" | "lists";
 
 export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
   quickServices,
@@ -80,6 +82,59 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
     });
     return () => unsub();
   }, []);
+
+  // Listas do sistema (unidades, marcas, contas, prioridades...). Ficam em
+  // settings/lists, ao lado de settings/global.
+  const [lists, setLists] = useState<SystemLists>(defaultSystemLists);
+  const [isSavingLists, setIsSavingLists] = useState(false);
+  const [newListItem, setNewListItem] = useState<Partial<Record<keyof SystemLists, string>>>({});
+
+  useEffect(() => {
+    const unsub = observeFirestoreDoc<Partial<SystemLists>>("settings", "lists", (data) => {
+      if (!data) return;
+      setLists((prev) => {
+        const next = { ...prev };
+        (Object.keys(defaultSystemLists) as (keyof SystemLists)[]).forEach((key) => {
+          next[key] = systemList(data, key);
+        });
+        return next;
+      });
+    });
+    return () => unsub();
+  }, []);
+
+  const addListItem = (key: keyof SystemLists) => {
+    const value = (newListItem[key] ?? "").trim();
+    if (!value) return;
+    if (lists[key].some((item) => item.toLowerCase() === value.toLowerCase())) {
+      notify(`"${value}" já está na lista.`);
+      return;
+    }
+    setLists({ ...lists, [key]: [...lists[key], value] });
+    setNewListItem({ ...newListItem, [key]: "" });
+  };
+
+  const removeListItem = (key: keyof SystemLists, value: string) => {
+    if (lists[key].length <= 1) {
+      notify("A lista precisa ter ao menos uma opção.");
+      return;
+    }
+    setLists({ ...lists, [key]: lists[key].filter((item) => item !== value) });
+  };
+
+  const handleSaveLists = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingLists(true);
+    try {
+      await saveFirestoreDoc("settings", "lists", lists);
+      notify("Listas do sistema salvas com sucesso!");
+    } catch (err: unknown) {
+      console.error("Erro ao salvar listas:", err);
+      notify("Erro ao salvar as listas do sistema.");
+    } finally {
+      setIsSavingLists(false);
+    }
+  };
 
   const handleSaveGeneral = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -448,6 +503,13 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
           onClick={() => setActiveTab("print")}
         >
           Impressão & WhatsApp
+        </button>
+        <button
+          type="button"
+          className={`settings-tab-button ${activeTab === "lists" ? "active" : ""}`}
+          onClick={() => setActiveTab("lists")}
+        >
+          Listas do sistema
         </button>
       </div>
 
@@ -918,14 +980,13 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                   onChange={(e) => setGeneralSettings({ ...generalSettings, defaultUnit: e.target.value })}
                   className="settings-select"
                 >
-                  <option value="UN">Unidade (UN)</option>
-                  <option value="LT">Litro (LT)</option>
-                  <option value="PC">Peça (PC)</option>
-                  <option value="PAR">Par (PAR)</option>
-                  <option value="JG">Jogo (JG)</option>
-                  <option value="MT">Metro (MT)</option>
+                  {/* A lista vem da aba "Listas do sistema". Antes esta lista e a do
+                      cadastro de produto eram fixas e diferentes entre si (JG/MT aqui,
+                      JOGO/KG/M lá), então a unidade padrão escolhida aqui podia nem
+                      existir como opção na hora de cadastrar a peça. */}
+                  {lists.units.map((unit) => <option value={unit} key={unit}>{unit}</option>)}
                 </select>
-                <span className="settings-hint">Unidade pré-selecionada no cadastro de peças</span>
+                <span className="settings-hint">Unidade pré-selecionada no cadastro de peças. Edite a lista em "Listas do sistema".</span>
               </label>
             </div>
 
@@ -1401,6 +1462,67 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
             </form>
           </section>
         </div>
+      )}
+
+      {/* TAB 8: LISTAS DO SISTEMA */}
+      {activeTab === "lists" && (
+        <form onSubmit={handleSaveLists} className="settings-card">
+          <div className="settings-card-header">
+            <div>
+              <h2>Listas do Sistema</h2>
+              <p>As opções que aparecem nos campos de escolha do sistema inteiro</p>
+            </div>
+            <button type="submit" className="primary-button" disabled={isSavingLists}>
+              {isSavingLists ? "Salvando..." : "Salvar Alterações"}
+            </button>
+          </div>
+
+          <div className="settings-card-body">
+            <div className="settings-list-grid">
+              {(Object.keys(defaultSystemLists) as (keyof SystemLists)[]).map((key) => (
+                <section className="settings-list-block" key={key}>
+                  <div className="settings-list-head">
+                    <strong>{systemListLabels[key].title}</strong>
+                    <small>{systemListLabels[key].hint}</small>
+                  </div>
+                  <div className="settings-chips">
+                    {lists[key].map((item) => (
+                      <span className="settings-chip" key={item}>
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() => removeListItem(key, item)}
+                          aria-label={`Remover ${item}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="settings-chip-add">
+                    <input
+                      value={newListItem[key] ?? ""}
+                      onChange={(e) => setNewListItem({ ...newListItem, [key]: e.target.value })}
+                      onKeyDown={(e) => {
+                        // Enter adiciona o item em vez de enviar o formulário
+                        // inteiro, que salvaria sem o que acabou de ser digitado.
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addListItem(key);
+                        }
+                      }}
+                      placeholder={systemListLabels[key].placeholder}
+                      className="dialog-input"
+                    />
+                    <button type="button" className="outline-button" onClick={() => addListItem(key)}>
+                      Adicionar
+                    </button>
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
+        </form>
       )}
     </div>
   );

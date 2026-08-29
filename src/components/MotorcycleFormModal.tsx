@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { ClientRecord, MotorcycleRecord } from "../types";
 import { saveFirestoreDoc } from "../../app/firebase/client";
+import { defaultSystemLists } from "../types";
 
 interface MotorcycleFormModalProps {
   isOpen: boolean;
@@ -11,6 +12,8 @@ interface MotorcycleFormModalProps {
   notify: (msg: string) => void;
   allMotorcycles: MotorcycleRecord[];
   preselectedClientId?: string;
+  /** Marcas configuradas em Configurações → Listas do sistema. */
+  brands?: string[];
 }
 
 export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
@@ -22,6 +25,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   notify,
   allMotorcycles,
   preselectedClientId,
+  brands = [],
 }) => {
   const [isSaving, setIsSaving] = useState(false);
 
@@ -38,20 +42,9 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   const [renavam, setRenavam] = useState("");
   const [notes, setNotes] = useState("");
 
-  const brandOptions = [
-    "Honda",
-    "Yamaha",
-    "Suzuki",
-    "Shineray",
-    "Kawasaki",
-    "BMW",
-    "Dafra",
-    "Triumph",
-    "Royal Enfield",
-    "Haojue",
-    "Bajaj",
-    "Outra",
-  ];
+  // Marcas vindas de Configurações → Listas do sistema, com a lista de fábrica
+  // como padrão enquanto a oficina não ajustar a dela.
+  const brandOptions = brands.length ? brands : defaultSystemLists.motorcycleBrands;
 
   const colorOptions = [
     "Preta",
