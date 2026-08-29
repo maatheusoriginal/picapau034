@@ -1,13 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ProductFormModal } from "../src/components/ProductFormModal";
-import { SupplierFormModal } from "../src/components/SupplierFormModal";
-import { MotorcycleFormModal } from "../src/components/MotorcycleFormModal";
-import { ClientFormModal } from "../src/components/ClientFormModal";
-import { EmployeeFormModal } from "../src/components/EmployeeFormModal";
-import { SettingsWorkspace } from "../src/components/SettingsWorkspace";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMechanicUser, type UserConfig as UserConfigType } from "../src/types";
+
+// Carregados sob demanda: cada um só é montado quando o diálogo/aba
+// correspondente é aberto (ver DialogRouter e a aba "Configurações" mais
+// abaixo), então não precisam entrar no bundle inicial. Isso tira ~1.400
+// linhas do SettingsWorkspace e mais 5 modais do JS que todo usuário baixa
+// só para abrir a tela de login ou a Visão geral.
+const ProductFormModal = lazy(() => import("../src/components/ProductFormModal").then((m) => ({ default: m.ProductFormModal })));
+const SupplierFormModal = lazy(() => import("../src/components/SupplierFormModal").then((m) => ({ default: m.SupplierFormModal })));
+const MotorcycleFormModal = lazy(() => import("../src/components/MotorcycleFormModal").then((m) => ({ default: m.MotorcycleFormModal })));
+const ClientFormModal = lazy(() => import("../src/components/ClientFormModal").then((m) => ({ default: m.ClientFormModal })));
+const EmployeeFormModal = lazy(() => import("../src/components/EmployeeFormModal").then((m) => ({ default: m.EmployeeFormModal })));
+const SettingsWorkspace = lazy(() => import("../src/components/SettingsWorkspace").then((m) => ({ default: m.SettingsWorkspace })));
+
+function LazyFallback() {
+  return <div className="lazy-loading" role="status" aria-live="polite">Carregando…</div>;
+}
 import {
   bootstrapCurrentUserAsSuperAdmin,
   createManagedUser,
@@ -19,12 +29,12 @@ import {
   observeCollection,
   observeEmployees,
   observeFirebaseAuth,
-  replaceCollection,
-  replaceEmployees,
   requestFirebasePasswordReset,
   setManagedUserPassword,
   signInFirebase,
   signOutFirebase,
+  syncCollectionDiff,
+  syncEmployeesDiff,
   updateManagedUser,
   type FirebaseAccessProfile,
   type FirebaseManagedUser,
@@ -476,6 +486,7 @@ function useFirebaseSyncedCollection<T extends { id: string }>(
 ) {
   const [records, setRecords] = useState<T[]>([]);
   const remoteSignature = useRef("");
+  const remoteRecordMap = useRef(new Map<string, string>());
   const remoteReady = useRef(false);
   const errorHandler = useRef(onError);
 
@@ -485,6 +496,7 @@ function useFirebaseSyncedCollection<T extends { id: string }>(
     if (!enabled) {
       remoteReady.current = false;
       remoteSignature.current = "";
+      remoteRecordMap.current = new Map();
       const timer = window.setTimeout(() => setRecords([]), 0);
       return () => window.clearTimeout(timer);
     }
@@ -494,6 +506,7 @@ function useFirebaseSyncedCollection<T extends { id: string }>(
       // sempre que todos os documentos eram apagados no Firestore.
       remoteReady.current = true;
       remoteSignature.current = JSON.stringify(remoteRecords);
+      remoteRecordMap.current = new Map(remoteRecords.map((record) => [record.id, JSON.stringify(record)]));
       setRecords(remoteRecords);
     }, (firebaseError) => errorHandler.current(firebaseError));
     return stop;
@@ -504,8 +517,21 @@ function useFirebaseSyncedCollection<T extends { id: string }>(
     const signature = JSON.stringify(records);
     if (signature === remoteSignature.current) return;
     const timer = window.setTimeout(() => {
-      replaceCollection(collectionName, records).then(() => {
+      // Grava só os registros que mudaram desde o último snapshot recebido do
+      // Firestore, em vez de reescrever a coleção inteira a cada edição local
+      // (era o comportamento antigo de replaceCollection).
+      const previousMap = remoteRecordMap.current;
+      const nextMap = new Map<string, string>();
+      const changed: T[] = [];
+      records.forEach((record) => {
+        const recordSignature = JSON.stringify(record);
+        nextMap.set(record.id, recordSignature);
+        if (previousMap.get(record.id) !== recordSignature) changed.push(record);
+      });
+      const deletedIds = [...previousMap.keys()].filter((id) => !nextMap.has(id));
+      syncCollectionDiff(collectionName, changed, deletedIds).then(() => {
         remoteSignature.current = signature;
+        remoteRecordMap.current = nextMap;
       }).catch((firebaseError) => errorHandler.current(firebaseError));
     }, 450);
     return () => window.clearTimeout(timer);
@@ -522,6 +548,7 @@ function useFirebaseSyncedEmployees(
 ) {
   const [records, setRecords] = useState<UserConfig[]>([]);
   const remoteSignature = useRef("");
+  const remoteRecordMap = useRef(new Map<string, string>());
   const remoteReady = useRef(false);
   const errorHandler = useRef(onError);
 
@@ -531,6 +558,7 @@ function useFirebaseSyncedEmployees(
     if (!enabled) {
       remoteReady.current = false;
       remoteSignature.current = "";
+      remoteRecordMap.current = new Map();
       const timer = window.setTimeout(() => setRecords([]), 0);
       return () => window.clearTimeout(timer);
     }
@@ -539,6 +567,7 @@ function useFirebaseSyncedEmployees(
       // quando as coleções employees/employeeCompensation estiverem vazias.
       remoteReady.current = true;
       remoteSignature.current = JSON.stringify(remoteRecords);
+      remoteRecordMap.current = new Map(remoteRecords.map((record) => [record.id, JSON.stringify(record)]));
       setRecords(remoteRecords);
     }, (firebaseError) => errorHandler.current(firebaseError));
   }, [enabled, initialRecords, isAdmin]);
@@ -548,8 +577,20 @@ function useFirebaseSyncedEmployees(
     const signature = JSON.stringify(records);
     if (signature === remoteSignature.current) return;
     const timer = window.setTimeout(() => {
-      replaceEmployees(records).then(() => {
+      // Mesma lógica de diff pontual usada em useFirebaseSyncedCollection,
+      // aplicada ao par employees/employeeCompensation.
+      const previousMap = remoteRecordMap.current;
+      const nextMap = new Map<string, string>();
+      const changed: UserConfig[] = [];
+      records.forEach((record) => {
+        const recordSignature = JSON.stringify(record);
+        nextMap.set(record.id, recordSignature);
+        if (previousMap.get(record.id) !== recordSignature) changed.push(record);
+      });
+      const deletedIds = [...previousMap.keys()].filter((id) => !nextMap.has(id));
+      syncEmployeesDiff(changed, deletedIds).then(() => {
         remoteSignature.current = signature;
+        remoteRecordMap.current = nextMap;
       }).catch((firebaseError) => errorHandler.current(firebaseError));
     }, 450);
     return () => window.clearTimeout(timer);
@@ -571,27 +612,31 @@ function PdvWorkspace({
 }) {
   const [cart, setCart] = useState<Array<{ code: string; name: string; unit: number; quantity: number; stock: number }>>([]);
   const [pdvSearch, setPdvSearch] = useState("");
-  const total = cart.reduce((sum, item) => sum + item.unit * item.quantity, 0);
-  const addToCart = (product: { code: string; name: string; unit: number; stock: number }) => {
+  // Antes recalculado em toda renderização (inclusive a cada tecla digitada em
+  // qualquer outro campo da tela), mesmo quando `products`/`cart` não mudaram.
+  const total = useMemo(() => cart.reduce((sum, item) => sum + item.unit * item.quantity, 0), [cart]);
+  const addToCart = useCallback((product: { code: string; name: string; unit: number; stock: number }) => {
     if (product.stock === 0) return notify(`${product.name} está sem estoque.`);
     setCart((current) => current.some((item) => item.code === product.code)
       ? current.map((item) => item.code === product.code ? { ...item, quantity: item.quantity + 1 } : item)
       : [...current, { ...product, quantity: 1 }]);
     setPdvSearch("");
-  };
-  const pdvCatalog = products.map((p) => ({
+  }, [notify]);
+  const pdvCatalog = useMemo(() => products.map((p) => ({
     code: p.code,
     barcode: p.code,
     name: p.name,
     unit: parseBRL(p.price),
     stock: p.stock,
-  }));
-  const pdvSuggestions = pdvSearch ? pdvCatalog.filter((product) => `${product.name} ${product.code} ${product.barcode}`.toLowerCase().includes(pdvSearch.toLowerCase())).slice(0, 8) : [];
-  const changeQuantity = (code: string, difference: number) => {
+  })), [products]);
+  const pdvSuggestions = useMemo(() => (
+    pdvSearch ? pdvCatalog.filter((product) => `${product.name} ${product.code} ${product.barcode}`.toLowerCase().includes(pdvSearch.toLowerCase())).slice(0, 8) : []
+  ), [pdvCatalog, pdvSearch]);
+  const changeQuantity = useCallback((code: string, difference: number) => {
     setCart((current) => current
       .map((item) => item.code === code ? { ...item, quantity: Math.max(0, item.quantity + difference) } : item)
       .filter((item) => item.quantity > 0));
-  };
+  }, []);
 
   return (
     <>
@@ -735,19 +780,18 @@ function AccountsWorkspace({
   const [accountSearch, setAccountSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("Todos");
   const isReceivable = kind === "receber";
-  const receivables: Array<{ id: string; person: string; description: string; dueDate: string; original: number; open: number; status: string }> = [];
-  const payables = [
-    ...expenses.filter((expense) => expense.status === "Agendado").map((expense) => ({ id: expense.id, person: "Despesa manual", description: expense.description, dueDate: expense.dueDate, original: expense.amount, open: expense.amount, status: "A vencer" })),
-  ];
-  const records = isReceivable ? receivables : payables;
-  const filteredRecords = records.filter((record) => {
+  const records = useMemo(() => {
+    if (isReceivable) return [] as Array<{ id: string; person: string; description: string; dueDate: string; original: number; open: number; status: string }>;
+    return expenses.filter((expense) => expense.status === "Agendado").map((expense) => ({ id: expense.id, person: "Despesa manual", description: expense.description, dueDate: expense.dueDate, original: expense.amount, open: expense.amount, status: "A vencer" }));
+  }, [isReceivable, expenses]);
+  const filteredRecords = useMemo(() => records.filter((record) => {
     const matchesSearch = `${record.id} ${record.person} ${record.description}`.toLowerCase().includes(accountSearch.toLowerCase());
     const matchesStatus = accountFilter === "Todos" || record.status === accountFilter;
     return matchesSearch && matchesStatus;
-  });
-  const total = records.reduce((sum, record) => sum + record.open, 0);
-  const overdue = records.filter((record) => record.status === "Atrasado").reduce((sum, record) => sum + record.open, 0);
-  const dueToday = records.filter((record) => record.status === "Vence hoje").reduce((sum, record) => sum + record.open, 0);
+  }), [records, accountSearch, accountFilter]);
+  const total = useMemo(() => records.reduce((sum, record) => sum + record.open, 0), [records]);
+  const overdue = useMemo(() => records.filter((record) => record.status === "Atrasado").reduce((sum, record) => sum + record.open, 0), [records]);
+  const dueToday = useMemo(() => records.filter((record) => record.status === "Vence hoje").reduce((sum, record) => sum + record.open, 0), [records]);
 
   return (
     <>
@@ -774,10 +818,13 @@ function TeamWorkspace({ users, setUsers, openDialog, notify }: { users: UserCon
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [selectedEmployeeForEdit, setSelectedEmployeeForEdit] = useState<UserConfig | null>(null);
 
-  const activeUsers = users.filter((user) => user.active !== false);
-  const activeMechanicsCount = activeUsers.filter((user) => isMechanicUser(user)).length;
-  const monthlyPayroll = activeUsers.filter((user) => user.employmentType === "Fixo").reduce((sum, user) => sum + (user.baseSalary || 0), 0);
-  const filteredUsers = users.filter((user) => {
+  // Essas quatro derivações rodavam de novo em toda renderização de
+  // TeamWorkspace — inclusive ao digitar em outro campo ou ao abrir o modal
+  // de edição — mesmo quando a lista de usuários e os filtros não mudaram.
+  const activeUsers = useMemo(() => users.filter((user) => user.active !== false), [users]);
+  const activeMechanicsCount = useMemo(() => activeUsers.filter((user) => isMechanicUser(user)).length, [activeUsers]);
+  const monthlyPayroll = useMemo(() => activeUsers.filter((user) => user.employmentType === "Fixo").reduce((sum, user) => sum + (user.baseSalary || 0), 0), [activeUsers]);
+  const filteredUsers = useMemo(() => users.filter((user) => {
     const isMech = isMechanicUser(user);
     const matchesFilter = teamFilter === "Todos"
       || (teamFilter === "Mecânicos" && isMech)
@@ -785,19 +832,19 @@ function TeamWorkspace({ users, setUsers, openDialog, notify }: { users: UserCon
       || (teamFilter === "Avulsos" && user.employmentType === "Avulso");
     const haystack = `${user.name} ${user.role} ${user.position} ${user.phone}`.toLowerCase();
     return matchesFilter && haystack.includes(teamSearch.toLowerCase());
-  });
+  }), [users, teamFilter, teamSearch]);
 
-  const handleEditEmployee = (emp: UserConfig) => {
+  const handleEditEmployee = useCallback((emp: UserConfig) => {
     setSelectedEmployeeForEdit(emp);
     setIsEmployeeModalOpen(true);
-  };
+  }, []);
 
-  const handleAddEmployee = () => {
+  const handleAddEmployee = useCallback(() => {
     setSelectedEmployeeForEdit(null);
     setIsEmployeeModalOpen(true);
-  };
+  }, []);
 
-  const handleEmployeeSaved = (saved: UserConfig) => {
+  const handleEmployeeSaved = useCallback((saved: UserConfig) => {
     setUsers((current) => {
       const idx = current.findIndex((u) => u.id === saved.id);
       if (idx >= 0) {
@@ -807,7 +854,7 @@ function TeamWorkspace({ users, setUsers, openDialog, notify }: { users: UserCon
       }
       return [...current, saved];
     });
-  };
+  }, [setUsers]);
 
   return (
     <>
@@ -849,14 +896,16 @@ function TeamWorkspace({ users, setUsers, openDialog, notify }: { users: UserCon
         }) : <div className="no-results" style={{ padding: "32px 16px", textAlign: "center" }}>Nenhum funcionário encontrado.</div>}</div>
       </section>
 
-      <EmployeeFormModal
-        isOpen={isEmployeeModalOpen}
-        onClose={() => { setIsEmployeeModalOpen(false); setSelectedEmployeeForEdit(null); }}
-        onSaved={handleEmployeeSaved}
-        editingEmployee={selectedEmployeeForEdit}
-        notify={notify}
-        allEmployees={users}
-      />
+      <Suspense fallback={null}>
+        <EmployeeFormModal
+          isOpen={isEmployeeModalOpen}
+          onClose={() => { setIsEmployeeModalOpen(false); setSelectedEmployeeForEdit(null); }}
+          onSaved={handleEmployeeSaved}
+          editingEmployee={selectedEmployeeForEdit}
+          notify={notify}
+          allEmployees={users}
+        />
+      </Suspense>
     </>
   );
 }
@@ -1292,7 +1341,11 @@ function ModuleWorkspace({
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses}/>;
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} />;
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
-  if (active === "Configurações") return <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify}/>;
+  if (active === "Configurações") return (
+    <Suspense fallback={<LazyFallback />}>
+      <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify}/>
+    </Suspense>
+  );
   if (active === "Administração") return <AdminWorkspace navigate={navigate} />;
 
   if (active === "Ordens de serviço" || active === "Orçamentos") {
@@ -1526,64 +1579,74 @@ function AppDialog({
 }) {
   if (dialog === "product") {
     return (
-      <ProductFormModal
-        isOpen={true}
-        onClose={close}
-        onSaved={(prod) => finish(`Produto "${prod.name}" salvo com sucesso no Firestore!`)}
-        categories={categories}
-        suppliers={suppliers}
-        notify={notify || finish}
-        allProducts={products}
-      />
+      <Suspense fallback={<LazyFallback />}>
+        <ProductFormModal
+          isOpen={true}
+          onClose={close}
+          onSaved={(prod) => finish(`Produto "${prod.name}" salvo com sucesso no Firestore!`)}
+          categories={categories}
+          suppliers={suppliers}
+          notify={notify || finish}
+          allProducts={products}
+        />
+      </Suspense>
     );
   }
 
   if (dialog === "supplier") {
     return (
-      <SupplierFormModal
-        isOpen={true}
-        onClose={close}
-        onSaved={(sup) => finish(`Fornecedor "${sup.name}" salvo com sucesso no Firestore!`)}
-        notify={notify || finish}
-        allSuppliers={suppliers}
-      />
+      <Suspense fallback={<LazyFallback />}>
+        <SupplierFormModal
+          isOpen={true}
+          onClose={close}
+          onSaved={(sup) => finish(`Fornecedor "${sup.name}" salvo com sucesso no Firestore!`)}
+          notify={notify || finish}
+          allSuppliers={suppliers}
+        />
+      </Suspense>
     );
   }
 
   if (dialog === "motorcycle") {
     return (
-      <MotorcycleFormModal
-        isOpen={true}
-        onClose={close}
-        onSaved={(moto) => finish(`Motocicleta placa ${moto.plate} salva com sucesso no Firestore!`)}
-        clients={clients}
-        notify={notify || finish}
-        allMotorcycles={motorcycles}
-      />
+      <Suspense fallback={<LazyFallback />}>
+        <MotorcycleFormModal
+          isOpen={true}
+          onClose={close}
+          onSaved={(moto) => finish(`Motocicleta placa ${moto.plate} salva com sucesso no Firestore!`)}
+          clients={clients}
+          notify={notify || finish}
+          allMotorcycles={motorcycles}
+        />
+      </Suspense>
     );
   }
 
   if (dialog === "client") {
     return (
-      <ClientFormModal
-        isOpen={true}
-        onClose={close}
-        onSaved={(cli) => finish(`Cliente "${cli.name}" salvo com sucesso no Firestore!`)}
-        notify={notify || finish}
-        allClients={clients}
-      />
+      <Suspense fallback={<LazyFallback />}>
+        <ClientFormModal
+          isOpen={true}
+          onClose={close}
+          onSaved={(cli) => finish(`Cliente "${cli.name}" salvo com sucesso no Firestore!`)}
+          notify={notify || finish}
+          allClients={clients}
+        />
+      </Suspense>
     );
   }
 
   if (dialog === "employee") {
     return (
-      <EmployeeFormModal
-        isOpen={true}
-        onClose={close}
-        onSaved={(emp) => finish(`Funcionário "${emp.name}" salvo com sucesso no Firestore!`)}
-        notify={notify || finish}
-        allEmployees={users}
-      />
+      <Suspense fallback={<LazyFallback />}>
+        <EmployeeFormModal
+          isOpen={true}
+          onClose={close}
+          onSaved={(emp) => finish(`Funcionário "${emp.name}" salvo com sucesso no Firestore!`)}
+          notify={notify || finish}
+          allEmployees={users}
+        />
+      </Suspense>
     );
   }
 

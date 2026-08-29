@@ -87,6 +87,48 @@ export type UserConfig = {
   notes?: string;
 };
 
+export type UserRole = UserConfig["role"];
+
+export const allUserRoles: UserRole[] = ["Super Admin", "Balcão", "Mecânico"];
+
+// Única fonte de verdade para as permissões do sistema. Antes esta lista (e os
+// defaults por cargo) existia duplicada em app/firebase/client.ts,
+// server/admin-users.ts e server/bootstrap.ts — bastava adicionar uma
+// permissão em um lugar e esquecer os outros para o front e o back saírem de
+// sincronia. Client e servidor agora importam tudo daqui.
+export type FirebasePermission =
+  | "orders.view"
+  | "orders.create"
+  | "orders.update"
+  | "budgets.view"
+  | "pos.use"
+  | "quickService.use"
+  | "inventory.view"
+  | "inventory.manage"
+  | "customers.view"
+  | "customers.manage"
+  | "finance.view"
+  | "finance.manage"
+  | "team.view";
+
+export const allFirebasePermissions: FirebasePermission[] = [
+  "orders.view", "orders.create", "orders.update", "budgets.view",
+  "pos.use", "quickService.use", "inventory.view", "inventory.manage",
+  "customers.view", "customers.manage", "finance.view", "finance.manage", "team.view",
+];
+
+export function defaultPermissionsForRole(role: UserRole, employeeId = ""): FirebasePermission[] {
+  if (role === "Super Admin") return [...allFirebasePermissions];
+  if (role === "Balcão") return [
+    "orders.view", "orders.create", "orders.update", "budgets.view",
+    "pos.use", "quickService.use", "inventory.view", "inventory.manage",
+    "customers.view", "customers.manage", "finance.view", "finance.manage",
+  ];
+  const mechanicDefaults: FirebasePermission[] = ["orders.view", "orders.update", "budgets.view", "inventory.view", "customers.view"];
+  if (employeeId === "USR-003") mechanicDefaults.push("orders.create", "team.view");
+  return mechanicDefaults;
+}
+
 export function isMechanicUser(user: Partial<UserConfig>): boolean {
   if (user.isMechanic === true || user.isResponsibleMechanic === true || user.canReceiveServiceOrders === true) {
     return true;

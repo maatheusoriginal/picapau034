@@ -1,15 +1,11 @@
 import type { Request, Response } from "express";
 import type { UserRecord } from "firebase-admin/auth";
 import { firebaseAdmin } from "./firebase-admin";
+import { allFirebasePermissions, allUserRoles, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../src/types";
 
-const roles = ["Super Admin", "Balcão", "Mecânico"] as const;
-type UserRole = (typeof roles)[number];
-const permissions = [
-  "orders.view", "orders.create", "orders.update", "budgets.view",
-  "pos.use", "quickService.use", "inventory.view", "inventory.manage",
-  "customers.view", "customers.manage", "finance.view", "finance.manage", "team.view",
-] as const;
-type UserPermission = (typeof permissions)[number];
+const roles = allUserRoles;
+const permissions = allFirebasePermissions;
+type UserPermission = FirebasePermission;
 
 type UserInput = {
   uid?: unknown;
@@ -40,21 +36,9 @@ function roleValue(data: unknown): UserRole {
   return role;
 }
 
-function defaultPermissions(role: UserRole, employeeId = ""): UserPermission[] {
-  if (role === "Super Admin") return [...permissions];
-  if (role === "Balcão") return [
-    "orders.view", "orders.create", "orders.update", "budgets.view",
-    "pos.use", "quickService.use", "inventory.view", "inventory.manage",
-    "customers.view", "customers.manage", "finance.view", "finance.manage",
-  ];
-  const mechanicDefaults: UserPermission[] = ["orders.view", "orders.update", "budgets.view", "inventory.view", "customers.view"];
-  if (employeeId === "USR-003") mechanicDefaults.push("orders.create", "team.view");
-  return mechanicDefaults;
-}
-
 function permissionValues(data: unknown, role: UserRole, employeeId: string): UserPermission[] {
   if (role === "Super Admin") return [...permissions];
-  if (!Array.isArray(data)) return defaultPermissions(role, employeeId);
+  if (!Array.isArray(data)) return defaultPermissionsForRole(role, employeeId);
   return data.filter((item): item is UserPermission => typeof item === "string" && permissions.includes(item as UserPermission));
 }
 

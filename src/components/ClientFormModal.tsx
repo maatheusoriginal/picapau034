@@ -45,7 +45,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
       setPhone(editingClient.phone || "");
       setEmail(editingClient.email || "");
       setAddress(editingClient.address || "");
-      setCondition((editingClient.condition as any) || "Pagamento normal");
+      setCondition((editingClient.condition as "Pagamento normal" | "Cliente a prazo" | "Troca de serviços") || "Pagamento normal");
       setCreditLimit(editingClient.creditLimit ?? 500);
       setTradeDetails(editingClient.tradeDetails || "");
       setNotes(editingClient.notes || "");
@@ -183,7 +183,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                   <span className="field-label">Tipo de Cadastro</span>
                   <select
                     value={type}
-                    onChange={(e) => setType(e.target.value as any)}
+                    onChange={(e) => setType(e.target.value as "Pessoa física" | "Empresa")}
                     className="dialog-select"
                   >
                     <option value="Pessoa física">Pessoa Física (CPF)</option>
@@ -259,7 +259,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                 <span className="field-label">Condição de Pagamento e Relacionamento</span>
                 <select
                   value={condition}
-                  onChange={(e) => setCondition(e.target.value as any)}
+                  onChange={(e) => setCondition(e.target.value as "Pagamento normal" | "Cliente a prazo" | "Troca de serviços")}
                   className="dialog-select"
                 >
                   <option value="Pagamento normal">Pagamento Normal (À vista ou Cartão no ato)</option>

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { firebaseAdmin } from "./firebase-admin";
+import { allFirebasePermissions } from "../src/types";
 
 function sendError(response: Response, status: number, code: string, message: string) {
   response.status(status).json({ error: { code, message } });
@@ -44,11 +45,7 @@ export async function bootstrapSuperAdmin(request: Request, response: Response) 
     const userDocData = userDocSnap.exists ? userDocSnap.data() : null;
     const authUser = await auth.getUser(decoded.uid);
     const name = String(userDocData?.name ?? "").trim() || authUser.displayName?.trim() || "Administrador";
-    const permissions = [
-      "orders.view", "orders.create", "orders.update", "budgets.view",
-      "pos.use", "quickService.use", "inventory.view", "inventory.manage",
-      "customers.view", "customers.manage", "finance.view", "finance.manage", "team.view",
-    ];
+    const permissions = [...allFirebasePermissions];
 
     await auth.setCustomUserClaims(decoded.uid, {
       role: "Super Admin",

@@ -267,7 +267,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   <span className="field-label">Tipo de Contrato</span>
                   <select
                     value={employmentType}
-                    onChange={(e) => setEmploymentType(e.target.value as any)}
+                    onChange={(e) => setEmploymentType(e.target.value as "Fixo" | "Avulso")}
                     className="dialog-select"
                   >
                     <option value="Fixo">Fixo (Mensalista)</option>

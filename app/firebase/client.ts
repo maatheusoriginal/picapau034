@@ -23,15 +23,38 @@ import {
   type DocumentData,
   type Unsubscribe,
 } from "firebase/firestore";
+import { allFirebasePermissions, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../../src/types";
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCW677q7krjXUjdi1OyPfJ-_oGYC2d6Lu8",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "oficina-picapau.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "oficina-picapau",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "oficina-picapau.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "54216669706",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:54216669706:web:42eab6e934d5b5f45b7df3",
+type FirebaseWebConfig = {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket: string;
+  messagingSenderId: string;
+  appId: string;
 };
+
+// As variáveis abaixo NÃO têm valor padrão de propósito: um ambiente sem essas
+// variáveis configuradas deve falhar de forma clara em vez de silenciosamente
+// conectar no projeto Firebase de produção. Configure-as em .env (veja
+// .env.example) ou nas variáveis de servidor do Google AI Studio.
+const envFirebaseConfig: Partial<FirebaseWebConfig> = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
+function resolveFirebaseConfig(): FirebaseWebConfig {
+  const missing = (Object.keys(envFirebaseConfig) as (keyof FirebaseWebConfig)[]).filter((key) => !envFirebaseConfig[key]);
+  if (missing.length) {
+    const varNames = missing.map((key) => `VITE_FIREBASE_${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`);
+    throw new Error(`Configuração do Firebase incompleta. Defina no ambiente: ${varNames.join(", ")}. Veja .env.example e CONFIGURAR-FIREBASE.md.`);
+  }
+  return envFirebaseConfig as FirebaseWebConfig;
+}
 
 export type FirebaseUserSummary = {
   uid: string;
@@ -39,44 +62,15 @@ export type FirebaseUserSummary = {
   displayName: string;
 };
 
-export type FirebasePermission =
-  | "orders.view"
-  | "orders.create"
-  | "orders.update"
-  | "budgets.view"
-  | "pos.use"
-  | "quickService.use"
-  | "inventory.view"
-  | "inventory.manage"
-  | "customers.view"
-  | "customers.manage"
-  | "finance.view"
-  | "finance.manage"
-  | "team.view";
-
-export const allFirebasePermissions: FirebasePermission[] = [
-  "orders.view", "orders.create", "orders.update", "budgets.view",
-  "pos.use", "quickService.use", "inventory.view", "inventory.manage",
-  "customers.view", "customers.manage", "finance.view", "finance.manage", "team.view",
-];
-
-export function defaultFirebasePermissions(role: FirebaseAccessProfile["role"], employeeId = ""): FirebasePermission[] {
-  if (role === "Super Admin") return [...allFirebasePermissions];
-  if (role === "Balcão") return [
-    "orders.view", "orders.create", "orders.update", "budgets.view",
-    "pos.use", "quickService.use", "inventory.view", "inventory.manage",
-    "customers.view", "customers.manage", "finance.view", "finance.manage",
-  ];
-  const mechanicDefaults: FirebasePermission[] = ["orders.view", "orders.update", "budgets.view", "inventory.view", "customers.view"];
-  if (employeeId === "USR-003") mechanicDefaults.push("orders.create", "team.view");
-  return mechanicDefaults;
-}
+export type { FirebasePermission };
+export { allFirebasePermissions };
+export const defaultFirebasePermissions = defaultPermissionsForRole;
 
 export type FirebaseAccessProfile = {
   uid: string;
   employeeId: string;
   name: string;
-  role: "Super Admin" | "Balcão" | "Mecânico";
+  role: UserRole;
   active: boolean;
   permissions: FirebasePermission[];
 };
@@ -120,14 +114,14 @@ let persistenceReady: Promise<void> | null = null;
 
 function services() {
   if (typeof window === "undefined") throw new Error("Firebase está disponível somente no navegador.");
-  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  const app = getApps().length ? getApp() : initializeApp(resolveFirebaseConfig());
   const auth = getAuth(app);
   const db = getFirestore(app);
   if (!persistenceReady) persistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => undefined);
   return { app, auth, db };
 }
 
-export const firebaseProjectId = firebaseConfig.projectId;
+export const firebaseProjectId = envFirebaseConfig.projectId ?? "";
 
 export function firebaseErrorMessage(error: unknown) {
   const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
@@ -371,6 +365,28 @@ export async function replaceCollection<T extends { id: string }>(name: string, 
   }
 }
 
+// Escreve só os registros que mudaram (`changed`) e apaga só os removidos
+// (`deletedIds`), em vez de ler e regravar a coleção inteira a cada edição
+// local (era o que `replaceCollection` fazia sempre que qualquer campo de
+// qualquer registro mudava). Quem chama já sabe o que mudou porque compara
+// contra o último snapshot recebido do Firestore — ver useFirebaseSyncedCollection.
+export async function syncCollectionDiff<T extends { id: string }>(name: string, changed: T[], deletedIds: string[]) {
+  if (!changed.length && !deletedIds.length) return;
+  const { db } = services();
+  const reference = collection(db, name);
+  try {
+    const batch = writeBatch(db);
+    deletedIds.forEach((id) => batch.delete(doc(reference, id)));
+    changed.forEach((record) => {
+      const { id, ...data } = record;
+      batch.set(doc(reference, id), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, name);
+  }
+}
+
 function normalizeEmployeeData<T extends EmployeeLike>(id: string, raw: DocumentData): T {
   const data = cleanDocument<T>(id, raw) as unknown as Record<string, unknown>;
   const isMech = data.isMechanic === true
@@ -454,6 +470,29 @@ export async function replaceEmployees<T extends EmployeeLike>(records: T[]) {
     currentEmployees.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
     currentCompensation.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
     records.forEach((record) => {
+      const { id, baseSalary, paymentDay, ...publicData } = record;
+      batch.set(doc(employeeReference, id), { ...publicData, updatedAt: serverTimestamp() }, { merge: true });
+      batch.set(doc(compensationReference, id), { baseSalary, paymentDay, updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, "employees");
+  }
+}
+
+// Equivalente a syncCollectionDiff, mas para o par employees/employeeCompensation.
+export async function syncEmployeesDiff<T extends EmployeeLike>(changed: T[], deletedIds: string[]) {
+  if (!changed.length && !deletedIds.length) return;
+  const { db } = services();
+  const employeeReference = collection(db, "employees");
+  const compensationReference = collection(db, "employeeCompensation");
+  try {
+    const batch = writeBatch(db);
+    deletedIds.forEach((id) => {
+      batch.delete(doc(employeeReference, id));
+      batch.delete(doc(compensationReference, id));
+    });
+    changed.forEach((record) => {
       const { id, baseSalary, paymentDay, ...publicData } = record;
       batch.set(doc(employeeReference, id), { ...publicData, updatedAt: serverTimestamp() }, { merge: true });
       batch.set(doc(compensationReference, id), { baseSalary, paymentDay, updatedAt: serverTimestamp() }, { merge: true });

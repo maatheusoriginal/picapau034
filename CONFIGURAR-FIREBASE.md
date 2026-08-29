@@ -20,7 +20,25 @@ No Firebase Console do projeto `oficina-picapau`:
 
 As regras fazem o bloqueio de verdade no banco. Esconder um botão na tela não é usado como segurança.
 
-## 3. Firebase Admin no Google AI Studio
+## 3. Configuração do Firebase Web App (cliente)
+
+O app não traz mais nenhuma chave de Firebase embutida no código-fonte. Configure estas
+variáveis (arquivo `.env` local, ou variáveis de servidor no Google AI Studio) com os
+valores de **Project settings → General → Your apps → SDK setup and configuration**:
+
+```
+VITE_FIREBASE_API_KEY=
+VITE_FIREBASE_AUTH_DOMAIN=
+VITE_FIREBASE_PROJECT_ID=
+VITE_FIREBASE_STORAGE_BUCKET=
+VITE_FIREBASE_MESSAGING_SENDER_ID=
+VITE_FIREBASE_APP_ID=
+```
+
+Sem essas variáveis o app não inicia — ele mostra um erro claro em vez de conectar
+silenciosamente em outro projeto Firebase.
+
+## 4. Firebase Admin no Google AI Studio
 
 Acesse **Project settings → Service accounts** no Firebase Console e gere uma nova chave privada.
 
@@ -30,7 +48,7 @@ No Google AI Studio, cadastre o JSON completo como Secret/variável de servidor:
 
 O JSON da conta de serviço é privado. Não coloque esse conteúdo em `.env` enviado ao GitHub e não faça commit da chave.
 
-## 4. Defina quem será o primeiro Super Admin
+## 5. Defina quem será o primeiro Super Admin
 
 No Google AI Studio adicione outra variável de servidor:
 
@@ -44,7 +62,7 @@ Exemplo de formato:
 
 Não precisa colocar aspas.
 
-## 5. Primeiro acesso
+## 6. Primeiro acesso
 
 1. Reinicie o app depois de cadastrar as variáveis.
 2. Entre na nova tela de login com a conta definida em `INITIAL_SUPER_ADMIN_EMAIL`.
@@ -55,7 +73,7 @@ Não precisa colocar aspas.
 
 O bootstrap deixa de funcionar assim que existir um **Super Admin ativo** em `userAccess`.
 
-## 6. Liberar os outros usuários que já existem
+## 7. Liberar os outros usuários que já existem
 
 Depois de entrar como Super Admin:
 
@@ -68,7 +86,7 @@ Depois de entrar como Super Admin:
 
 Para usuários novos, use **Criar novo usuário** nessa mesma tela. O sistema cria a conta no Firebase Authentication e o perfil no Firestore juntos.
 
-## 7. Resultado
+## 8. Resultado
 
 - O botão **Ativar Firebase** não existe mais.
 - Sem autenticação, só aparece Login.

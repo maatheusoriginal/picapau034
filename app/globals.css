@@ -1863,3 +1863,12 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   max-width: 320px;
 }
 
+.lazy-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  font-size: 13px;
+  color: #8c8d91;
+}
+
