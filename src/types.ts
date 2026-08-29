@@ -258,6 +258,45 @@ export type OrderRecord = {
   paymentMethod?: string;
 };
 
+/** Item no carrinho do PDV. Carrega o id do produto no Firestore para a baixa de estoque. */
+export type CartItem = {
+  id: string;
+  code: string;
+  name: string;
+  unit: number;
+  quantity: number;
+  stock: number;
+};
+
+/**
+ * Venda concluída — no balcão (PDV) ou como serviço rápido. É o registro de
+ * entrada de dinheiro da oficina: o financeiro soma daqui o que foi recebido.
+ */
+export type SaleRecord = {
+  id: string;
+  origin: "PDV" | "Serviço rápido";
+  items: ServiceOrderItem[];
+  total: number;
+  paymentMethod: string;
+  /** Taxa da maquininha, quando a venda foi no cartão. */
+  fee?: number;
+  /** Valor líquido depois da taxa. */
+  net?: number;
+  machineName?: string;
+  installments?: number;
+  customer?: string;
+  clientId?: string;
+  mechanicId?: string;
+  mechanicName?: string;
+  /** Quem operou a venda. */
+  operatorUid?: string;
+  operatorName?: string;
+  /** Data no formato brasileiro, para exibição direta nas listas. */
+  date: string;
+  /** ISO 8601, para ordenar e filtrar por período sem depender do formato local. */
+  soldAt: string;
+};
+
 export const serviceOrderStatuses = ["Recepção", "Avaliação", "Aprovação", "Em serviço", "Entrega"] as const;
 
 export type ServiceOrderStatus = (typeof serviceOrderStatuses)[number];

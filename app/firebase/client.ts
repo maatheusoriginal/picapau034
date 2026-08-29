@@ -20,6 +20,7 @@ import {
   getDocs,
   getFirestore,
   onSnapshot,
+  increment,
   serverTimestamp,
   setDoc,
   writeBatch,
@@ -595,6 +596,37 @@ export async function createServiceOrder(prefix: string, startNumber: number, da
     handleFirestoreError(error, OperationType.CREATE, "serviceOrders");
   }
   throw new Error("Não foi possível gerar um número livre para a ordem de serviço. Tente novamente.");
+}
+
+/**
+ * Grava a venda e a baixa de estoque no MESMO lote.
+ *
+ * Os dois precisam acontecer juntos: uma venda registrada sem a baixa deixa o
+ * estoque mentindo, e uma baixa sem a venda tira a peça da prateleira sem o
+ * dinheiro entrar. Como writeBatch é atômico, se o usuário não tiver permissão
+ * para escrever em products a venda inteira falha com um erro claro, em vez de
+ * gravar metade.
+ */
+export async function recordSale(
+  saleId: string,
+  sale: Record<string, unknown>,
+  stockUpdates: Array<{ productId: string; quantity: number }>,
+) {
+  const { db } = services();
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "sales", saleId), { ...sale, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    stockUpdates.forEach(({ productId, quantity }) => {
+      // increment() em vez de gravar (estoque - vendido): a quantidade que o
+      // carrinho conhece foi lida quando o item entrou na venda e pode estar
+      // velha. Duas vendas simultâneas da mesma peça, gravando valor absoluto,
+      // fariam a segunda desfazer a baixa da primeira.
+      batch.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, "sales");
+  }
 }
 
 export async function deleteFirestoreDoc(collectionName: string, id: string) {
