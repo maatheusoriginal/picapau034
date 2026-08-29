@@ -219,6 +219,11 @@ export type ServiceOrderItem = {
   price: number;
   quantity?: number;
   cost?: number;
+  /**
+   * Produto no Firestore, quando o item veio do estoque. `id` guarda o código
+   * da peça (visível para a oficina), que não serve para dar baixa.
+   */
+  productId?: string;
 };
 
 export type OrderRecord = {
@@ -258,6 +263,11 @@ export type OrderRecord = {
   closedAt?: string;
   /** Forma de pagamento usada no encerramento. */
   paymentMethod?: string;
+  /**
+   * Peças que esta OS já tirou do estoque. Comparar com os itens atuais é o que
+   * evita baixa dobrada e devolve a peça quando ela sai da ordem.
+   */
+  deductedItems?: Array<{ productId: string; quantity: number }>;
 };
 
 /**

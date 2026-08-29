@@ -63,6 +63,53 @@ export function costAfterEntry(
     : round2(entryCost);
 }
 
+/** Peça reservada por uma OS: quanto dela está fora do estoque por causa dessa ordem. */
+export type ReservedPart = { productId: string; quantity: number };
+
+/**
+ * O que precisa sair (ou voltar) do estoque para que a OS passe a ter
+ * exatamente `target` reservado, sabendo que hoje ela já tem `reserved`.
+ *
+ * Delta positivo tira do estoque, negativo devolve. Guardar o que já foi
+ * baixado é o que impede baixa dobrada quando a OS é salva duas vezes, e é o
+ * que devolve a peça à prateleira quando ela sai da ordem ou quando a OS volta
+ * para orçamento.
+ */
+export function stockDeltas(target: ReservedPart[], reserved: ReservedPart[]): ReservedPart[] {
+  const totals = new Map<string, number>();
+  const add = (parts: ReservedPart[], sign: number) => {
+    parts.forEach((part) => {
+      if (!part.productId) return;
+      totals.set(part.productId, (totals.get(part.productId) ?? 0) + sign * Math.max(0, part.quantity));
+    });
+  };
+  add(target, 1);
+  add(reserved, -1);
+  return [...totals.entries()]
+    .filter(([, quantity]) => quantity !== 0)
+    .map(([productId, quantity]) => ({ productId, quantity }));
+}
+
+/** Junta itens repetidos do mesmo produto em uma linha só. */
+export function mergeParts(parts: ReservedPart[]): ReservedPart[] {
+  return stockDeltas(parts, []);
+}
+
+/**
+ * A OS já deve ter as peças fora do estoque?
+ *
+ * Com "baixar somente quando a OS for iniciada" ligado, a peça só sai da
+ * prateleira quando o serviço começa — durante recepção, avaliação e aprovação
+ * a OS ainda é orçamento, e reservar peça de orçamento some com o estoque de
+ * quem está vendendo no balcão. Desligado, a baixa acontece já na abertura.
+ */
+export function shouldReserveStock(status: string, deductOnlyWhenStarted: boolean, statuses: readonly string[]): boolean {
+  if (!deductOnlyWhenStarted) return true;
+  const started = statuses.indexOf("Em serviço");
+  const current = statuses.indexOf(status);
+  return started >= 0 && current >= started;
+}
+
 /** Converte "R$ 1.234,56" ou 1234.56 em número. Os produtos gravam o custo dos dois jeitos. */
 export function toAmount(value: unknown): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;

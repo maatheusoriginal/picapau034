@@ -155,6 +155,19 @@ A entrada de estoque (**Compras e entradas → Nova entrada**) soma a quantidade
 recalcula o custo dentro de uma transação do Firestore, porque o custo médio
 depende do estoque e do custo gravados naquele instante.
 
+**Baixa de estoque pela OS.** As peças de uma ordem de serviço saem do estoque
+conforme a opção *"Baixar peça do estoque somente quando a OS for iniciada"*:
+
+- Ligada (padrão): a peça só sai da prateleira quando a OS chega em **Em
+  serviço**. Durante recepção, avaliação e aprovação a ordem ainda é orçamento,
+  e reservar peça de orçamento some com o estoque de quem vende no balcão.
+- Desligada: a peça sai já na abertura da OS.
+
+A ordem guarda o que já tirou do estoque, então salvar duas vezes não baixa duas
+vezes, tirar uma peça da OS devolve ela à prateleira, e voltar a ordem para
+orçamento desfaz a reserva. No encerramento, os itens conferidos são os que de
+fato foram usados e o estoque é acertado pela diferença.
+
 O cadastro de produto também passou a nascer com os padrões da oficina: markup
 sugerido, estoque mínimo e unidade de medida.
 

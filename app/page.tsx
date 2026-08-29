@@ -3,6 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { financeSummary, payableEntries, receivableEntries } from "../src/finance";
+import { mergeParts, shouldReserveStock, stockDeltas, type ReservedPart } from "../src/inventory";
 import type { SettingsTab } from "../src/components/SettingsWorkspace";
 
 // Carregados sob demanda: cada um só é montado quando o diálogo/aba
@@ -27,6 +28,7 @@ import {
   createServiceOrder,
   recordSale,
   recordStockEntry,
+  saveOrderWithStock,
   defaultFirebasePermissions,
   deleteManagedUser,
   firebaseErrorMessage,
@@ -2097,6 +2099,9 @@ function AppDialog({
       });
     }
 
+    // Com a trava desligada, a peça já sai do estoque na abertura; com ela
+    // ligada, a OS nasce sem reservar nada e a baixa espera o serviço começar.
+    const reservedOnCreate = shouldReserveStock("Recepção", deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(osItems) : [];
     const orderId = await createServiceOrder(osPrefix, nextOrderNumber, {
       customer: customerName,
       bike: bike || "Motocicleta",
@@ -2114,13 +2119,28 @@ function AppDialog({
       delivery: osDelivery ? osDelivery.split("-").reverse().join("/") : "",
       origin: osOrigin === "partner" ? `Encaminhado por ${selectedPartner?.name ?? "parceiro"}` : "Cliente direto",
       total: osTotal,
+      deductedItems: [],
       ...(clientId ? { clientId } : {}),
       ...(motorcycleId ? { motorcycleId } : {}),
     });
+    if (reservedOnCreate.length) {
+      // A OS nasce marcada como "nada baixado" e a reserva vai num lote só,
+      // junto da marcação. Assim, se a baixa falhar, a OS fica coerente (sem
+      // reserva e sem marca) em vez de dizer que baixou peça que continua na
+      // prateleira.
+      await saveOrderWithStock(orderId, { deductedItems: reservedOnCreate }, stockDeltas(reservedOnCreate, []));
+    }
     return orderId;
   };
 
   const useAverageCost = settings?.useAverageCost === true;
+  // "Baixar peça do estoque somente quando a OS for iniciada": durante recepção,
+  // avaliação e aprovação a OS ainda é orçamento, e reservar peça de orçamento
+  // some com o estoque de quem está vendendo no balcão.
+  const deductStockOnlyWhenStarted = settings?.deductStockOnlyWhenUsed !== false;
+  const partsOf = (items: ServiceOrderItem[] | undefined) => mergeParts((items ?? [])
+    .filter((item) => item.type === "Peça" && item.productId)
+    .map((item) => ({ productId: item.productId!, quantity: item.quantity ?? 1 })));
   const allowMultipleMechanics = settings?.allowMultipleMechanics !== false;
   // "Mostrar carga de trabalho": a contagem de OS ao lado de cada mecânico.
   const showWorkload = settings?.showWorkload !== false;
@@ -2191,12 +2211,18 @@ function AppDialog({
 
   const saveOrderChanges = async () => {
     if (!currentOrder) throw new Error("Nenhuma ordem de serviço selecionada.");
-    await saveFirestoreDoc("serviceOrders", currentOrder.id, {
+    // Mudar a situação pode disparar a baixa (ao iniciar o serviço) ou a
+    // devolução (se a OS voltar para orçamento).
+    const reserved = (currentOrder.deductedItems ?? []) as ReservedPart[];
+    const target = shouldReserveStock(orderStatus, deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(currentOrder.items) : [];
+    const deltas = stockDeltas(target, reserved);
+    await saveOrderWithStock(currentOrder.id, {
       status: orderStatus,
       tone: statusTone(orderStatus),
       mechanicIds: orderMechanicIds,
       mechanic: activeMechanics.find((mechanic) => mechanic.id === orderMechanicIds[0])?.name ?? currentOrder.mechanic,
-    });
+      deductedItems: target,
+    }, deltas);
   };
 
   const submit = async () => {
@@ -2257,7 +2283,12 @@ function AppDialog({
         // O encerramento grava o que foi realmente executado e marca a OS como
         // concluída, para ela sair da fila de motos prontas aguardando retirada.
         if (currentOrder) {
-          await saveFirestoreDoc("serviceOrders", currentOrder.id, {
+          // No encerramento os itens revisados são os que de fato foram usados,
+          // então o estoque é acertado pela diferença: peça retirada da OS na
+          // conferência volta para a prateleira.
+          const reserved = (currentOrder.deductedItems ?? []) as ReservedPart[];
+          const target = partsOf(checkoutItems);
+          await saveOrderWithStock(currentOrder.id, {
             items: checkoutItems,
             total: checkoutTotal,
             status: "Entrega",
@@ -2265,7 +2296,8 @@ function AppDialog({
             paymentMethod,
             closed: true,
             closedAt: new Date().toLocaleDateString("pt-BR"),
-          });
+            deductedItems: target,
+          }, stockDeltas(target, reserved));
         }
       } catch (error) {
         setSaving(false);
@@ -2544,7 +2576,7 @@ function AppDialog({
                 <div className="form-section">
                   <div className="form-intro"><span className="form-icon"><Icon name="box"/></span><div><h3>Peças e mão de obra</h3><p>Peças usam o preço fixo do cadastro. A mão de obra é informada manualmente.</p></div></div>
                   <div className="os-items-builder">
-                    <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{products.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{products.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
+                    <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{products.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{products.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
                     <section className="os-labor-panel"><div className="os-builder-title"><div><strong>Adicionar mão de obra</strong><small>Descrição e valor digitados para esta OS</small></div></div><div className="form-grid"><label className="field field-full"><span>Descrição</span><input value={laborDescription} onChange={(event) => setLaborDescription(event.target.value)} placeholder="Ex.: Troca do kit relação"/></label><label className="field"><span>Valor da mão de obra</span><input type="number" value={laborValue} onChange={(event) => setLaborValue(event.target.value)}/></label><button className="primary-button labor-add-button" onClick={() => { if (!laborDescription.trim() || Number(laborValue) <= 0) return; setOsItems((current) => [...current, { id: `LAB-${Date.now()}`, type: "Mão de obra", name: laborDescription.trim(), price: Number(laborValue) }]); setLaborDescription(""); setLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar mão de obra</button></div><div className="labor-rule"><Icon name="check" size={17}/><span>O valor vale somente para esta OS e não altera o cadastro de serviços.</span></div></section>
                   </div>
                   <div className="selected-os-items"><div className="os-builder-title"><div><strong>Itens incluídos</strong><small>{osItems.length ? `${osItems.length} item${osItems.length === 1 ? "" : "s"} nesta OS` : "Nenhum item adicionado ainda"}</small></div></div>{osItems.length ? osItems.map((item) => <div className="selected-os-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do cadastro" : "Valor manual desta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setOsItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>×</button></div>) : <div className="empty-os-items"><Icon name="box"/><span>Adicione as peças e a mão de obra que já souber. Você poderá completar depois.</span></div>}<div className="os-items-total"><span>Peças <b>{formatBRL(partsTotal)}</b></span><span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>{partnerDiscount > 0 ? <span className="discount">Desconto parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}<strong>Total inicial {formatBRL(osTotal)}</strong></div></div>
@@ -2784,7 +2816,7 @@ function AppDialog({
                 <div className="checkout-item-list">{checkoutItems.length ? checkoutItems.map((item, index) => <div className="checkout-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do produto" : "Valor informado nesta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setCheckoutItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>) : <div className="empty-panel"><Icon name="box" size={20}/><span>Nenhum item adicionado ao fechamento.</span></div>}</div>
                 <div className="checkout-totals"><span>Peças <b>{formatBRL(checkoutPartsTotal)}</b></span><span>Mão de obra <b>{formatBRL(checkoutLaborTotal)}</b></span><strong>Total da OS <b>{formatBRL(checkoutTotal)}</b></strong></div>
 
-                <div className="checkout-add-block"><div className="checkout-add-title"><Icon name="box" size={17}/><div><strong>Adicionar outra peça</strong><small>O valor de venda vem bloqueado do cadastro.</small></div></div><label className="mini-search"><Icon name="search" size={16}/><input value={checkoutPieceSearch} onChange={(event) => setCheckoutPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="checkout-product-results">{products.filter((product) => product.stock > 0 && `${product.name} ${product.code}`.toLowerCase().includes(checkoutPieceSearch.toLowerCase())).slice(0, 3).map((product) => { const added = checkoutItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={added} onClick={() => setCheckoutItems((current) => [...current, { id: product.code, type: "Peça", name: product.name, price: parseBRL(product.price) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.stock} em estoque · preço fixo</small></div><b>{product.price}</b><i>{added ? "✓" : "+"}</i></button>; })}</div></div>
+                <div className="checkout-add-block"><div className="checkout-add-title"><Icon name="box" size={17}/><div><strong>Adicionar outra peça</strong><small>O valor de venda vem bloqueado do cadastro.</small></div></div><label className="mini-search"><Icon name="search" size={16}/><input value={checkoutPieceSearch} onChange={(event) => setCheckoutPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="checkout-product-results">{products.filter((product) => product.stock > 0 && `${product.name} ${product.code}`.toLowerCase().includes(checkoutPieceSearch.toLowerCase())).slice(0, 3).map((product) => { const added = checkoutItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={added} onClick={() => setCheckoutItems((current) => [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.stock} em estoque · preço fixo</small></div><b>{product.price}</b><i>{added ? "✓" : "+"}</i></button>; })}</div></div>
 
                 <div className="checkout-add-block labor"><div className="checkout-add-title"><Icon name="wrench" size={17}/><div><strong>Adicionar mão de obra</strong><small>Descrição e valor são manuais para esta OS.</small></div></div><div className="checkout-labor-row"><label className="field"><span>Descrição</span><input value={checkoutLaborDescription} onChange={(event) => setCheckoutLaborDescription(event.target.value)} placeholder="Ex.: Regulagem final"/></label><label className="field compact-field"><span>Valor</span><input type="number" min="0" value={checkoutLaborValue} onChange={(event) => setCheckoutLaborValue(event.target.value)}/></label><button className="outline-button large" onClick={() => { if (!checkoutLaborDescription.trim() || Number(checkoutLaborValue) <= 0) return; setCheckoutItems((current) => [...current, { id: `LAB-CHECKOUT-${Date.now()}`, type: "Mão de obra", name: checkoutLaborDescription.trim(), price: Number(checkoutLaborValue) }]); setCheckoutLaborDescription(""); setCheckoutLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar</button></div></div>
                 <div className="approval-note"><Icon name="alert" size={17}/><span>Qualquer item adicional deve estar aprovado pelo cliente antes do fechamento. Itens não executados ou não usados não devem ser cobrados.</span></div>

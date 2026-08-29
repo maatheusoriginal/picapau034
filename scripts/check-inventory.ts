@@ -7,7 +7,11 @@
  *
  * Rode com: npm run check:inventory
  */
-import { costAfterEntry, markupFromPrice, priceFromMarkup, toAmount, weightedAverageCost } from "../src/inventory";
+import { costAfterEntry, markupFromPrice, mergeParts, priceFromMarkup, shouldReserveStock, stockDeltas, toAmount, weightedAverageCost } from "../src/inventory";
+import { serviceOrderStatuses } from "../src/types";
+
+const st = serviceOrderStatuses;
+const json = (value: unknown) => JSON.stringify(value);
 
 const casos: Array<[string, unknown, unknown]> = [
   // Preço a partir do markup
@@ -42,6 +46,21 @@ const casos: Array<[string, unknown, unknown]> = [
   ["lê o custo gravado como número", toAmount(12.5), 12.5],
   ["texto vazio vira zero", toAmount(""), 0],
   ["texto inválido vira zero", toAmount("abc"), 0],
+  // Reserva de peça pela OS
+  ["primeira baixa tira tudo do estoque", json(stockDeltas([{ productId: "p1", quantity: 2 }], [])), json([{ productId: "p1", quantity: 2 }])],
+  ["salvar de novo sem mudar nada não baixa outra vez", json(stockDeltas([{ productId: "p1", quantity: 2 }], [{ productId: "p1", quantity: 2 }])), json([])],
+  ["aumentar a quantidade baixa só a diferença", json(stockDeltas([{ productId: "p1", quantity: 5 }], [{ productId: "p1", quantity: 2 }])), json([{ productId: "p1", quantity: 3 }])],
+  ["reduzir a quantidade devolve a diferença", json(stockDeltas([{ productId: "p1", quantity: 1 }], [{ productId: "p1", quantity: 4 }])), json([{ productId: "p1", quantity: -3 }])],
+  ["tirar a peça da OS devolve tudo", json(stockDeltas([], [{ productId: "p1", quantity: 3 }])), json([{ productId: "p1", quantity: -3 }])],
+  ["duas linhas do mesmo produto viram uma", json(mergeParts([{ productId: "p1", quantity: 2 }, { productId: "p1", quantity: 3 }])), json([{ productId: "p1", quantity: 5 }])],
+  ["item sem produto vinculado é ignorado", json(mergeParts([{ productId: "", quantity: 9 }])), json([])],
+
+  // Momento da baixa
+  ["com a trava ligada, orçamento não reserva", shouldReserveStock("Avaliação", true, st), false],
+  ["com a trava ligada, aprovação ainda não reserva", shouldReserveStock("Aprovação", true, st), false],
+  ["com a trava ligada, serviço iniciado reserva", shouldReserveStock("Em serviço", true, st), true],
+  ["com a trava ligada, entrega segue reservada", shouldReserveStock("Entrega", true, st), true],
+  ["com a trava desligada, a recepção já reserva", shouldReserveStock("Recepção", false, st), true],
 ];
 
 let falhas = 0;

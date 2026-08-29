@@ -680,6 +680,32 @@ export async function recordStockEntry(
   }
 }
 
+/**
+ * Grava a OS e a baixa (ou devolução) das peças no mesmo lote.
+ *
+ * `deltas` positivos tiram do estoque, negativos devolvem — é o que acontece
+ * quando uma peça sai da ordem ou quando a OS volta para orçamento. Usa
+ * increment pelo mesmo motivo da venda no PDV: a quantidade lida na tela pode
+ * estar velha, e gravar valor absoluto faria uma operação apagar a outra.
+ */
+export async function saveOrderWithStock(
+  orderId: string,
+  order: Record<string, unknown>,
+  deltas: Array<{ productId: string; quantity: number }>,
+) {
+  const { db } = services();
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "serviceOrders", orderId), { ...order, updatedAt: serverTimestamp() }, { merge: true });
+    deltas.forEach(({ productId, quantity }) => {
+      batch.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `serviceOrders/${orderId}`);
+  }
+}
+
 export async function deleteFirestoreDoc(collectionName: string, id: string) {
   const { db } = services();
   try {
