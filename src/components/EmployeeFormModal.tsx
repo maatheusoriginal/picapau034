@@ -19,7 +19,10 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
   notify,
   allEmployees,
 }) => {
-  const [activeTab, setActiveTab] = useState<"ident" | "salary" | "workshop" | "notes">("ident");
+  // A aba "notes" não existe: não há botão que a selecione nem bloco que a
+  // renderize, então deixá-la no union só fazia a navegação Anterior/Próxima
+  // deixar de compilar.
+  const [activeTab, setActiveTab] = useState<"ident" | "salary" | "workshop">("ident");
   const [isSaving, setIsSaving] = useState(false);
 
   // Form fields

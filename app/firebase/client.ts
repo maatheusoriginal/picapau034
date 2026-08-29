@@ -503,10 +503,15 @@ export async function syncEmployeesDiff<T extends EmployeeLike>(changed: T[], de
   }
 }
 
-export async function saveFirestoreDoc<T extends { id: string }>(collectionName: string, id: string, data: Partial<T>) {
+// O payload é inferido do próprio objeto passado pelo formulário. A assinatura
+// antiga (`<T extends { id: string }>` recebendo `Partial<T>`) fazia o
+// TypeScript inferir T como `{ id: string }` em todas as chamadas — nenhum
+// formulário passa o tipo explicitamente —, e aí qualquer campo real do
+// cadastro virava "propriedade desconhecida". Eram 7 dos erros de typecheck.
+export async function saveFirestoreDoc<T extends Record<string, unknown>>(collectionName: string, id: string, data: T) {
   const { db } = services();
-  const cleanData = { ...data };
-  delete (cleanData as Record<string, unknown>).id;
+  const cleanData: Record<string, unknown> = { ...data };
+  delete cleanData.id;
   try {
     await setDoc(doc(db, collectionName, id), { ...cleanData, updatedAt: serverTimestamp() }, { merge: true });
   } catch (error) {
@@ -599,6 +604,9 @@ async function callAdmin<TOutput>(input?: object): Promise<TOutput> {
 
 async function listManagedUsersFromFirestore() {
   const { auth, db } = services();
+  // Guardado em uma constante: `auth.currentUser` é um getter e o TypeScript
+  // não mantém o estreitamento de null entre um acesso e o seguinte.
+  const currentUser = auth.currentUser;
   const [accessSnapshot, usersSnapshot] = await Promise.all([
     getDocs(collection(db, "userAccess")).catch(() => ({ docs: [] as DocumentData[] })),
     getDocs(collection(db, "users")).catch(() => ({ docs: [] as DocumentData[] })),
@@ -616,17 +624,17 @@ async function listManagedUsersFromFirestore() {
     const userDocData = usersMap.get(item.id);
     const resolvedName = (typeof userDocData?.name === "string" ? userDocData.name.trim() : "")
       || (typeof item.data()?.name === "string" ? item.data().name.trim() : "")
-      || (item.id === auth.currentUser?.uid ? auth.currentUser.displayName?.trim() : "")
+      || (currentUser && item.id === currentUser.uid ? currentUser.displayName?.trim() : "")
       || "Usuário";
     const mergedData = {
       ...item.data(),
       name: resolvedName,
     };
     const user = managedUserFromData(item.id, mergedData);
-    if (item.id === auth.currentUser?.uid) {
-      user.email ||= auth.currentUser.email ?? "";
+    if (currentUser && item.id === currentUser.uid) {
+      user.email ||= currentUser.email ?? "";
       user.name = resolvedName;
-      user.lastSignInAt ||= auth.currentUser.metadata.lastSignInTime ?? "";
+      user.lastSignInAt ||= currentUser.metadata.lastSignInTime ?? "";
     }
     list.push(user);
   }
@@ -634,13 +642,13 @@ async function listManagedUsersFromFirestore() {
   for (const [uid, userDocData] of usersMap.entries()) {
     if (accessUids.has(uid)) continue;
     const resolvedName = (typeof userDocData?.name === "string" ? userDocData.name.trim() : "")
-      || (uid === auth.currentUser?.uid ? auth.currentUser?.displayName?.trim() : "")
+      || (currentUser && uid === currentUser.uid ? currentUser.displayName?.trim() : "")
       || "Usuário";
     const user = managedUserFromData(uid, { ...userDocData, name: resolvedName, hasAccessProfile: false });
-    if (uid === auth.currentUser?.uid) {
-      user.email ||= auth.currentUser.email ?? "";
+    if (currentUser && uid === currentUser.uid) {
+      user.email ||= currentUser.email ?? "";
       user.name = resolvedName;
-      user.lastSignInAt ||= auth.currentUser.metadata.lastSignInTime ?? "";
+      user.lastSignInAt ||= currentUser.metadata.lastSignInTime ?? "";
     }
     list.push(user);
   }
