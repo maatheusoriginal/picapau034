@@ -335,6 +335,17 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 
 .system-healthy { display: flex !important; align-items: center; gap: 8px; margin: 0 !important; padding: 9px 12px; border: 1px solid #cde7d8; border-radius: 9px; background: #f1faf5; color: #3c725c !important; font-size: 9px !important; }
 .system-healthy i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+/* Variação âmbar do selo verde, para quando ainda falta configurar algo. */
+.system-healthy.pending { border-color: #efdcb4; background: #fdf7ec; color: #8a6420 !important; }
+.system-healthy.pending i { background: var(--amber); }
+/* Faixa com o que falta configurar, no topo do painel administrativo. */
+.admin-pending { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 13px; padding: 13px 15px; border: 1px solid #efdcb4; border-radius: 12px; background: #fdf7ec; color: #8a6420; }
+.admin-pending strong { display: block; font-size: 11px; }
+.admin-pending small { display: block; margin-top: 3px; color: #a08040; font-size: 9px; }
+.admin-pending > div:first-of-type { flex: 1; min-width: 180px; }
+.admin-pending-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.admin-pending-actions button { height: 30px; padding: 0 11px; border: 1px solid #e4c98f; border-radius: 8px; background: white; color: #8a6420; font-size: 9px; font-weight: 700; }
+.admin-pending-actions button:hover { border-color: #d1ae6a; }
 .admin-overview { display: grid; grid-template-columns: 1.5fr 1fr; gap: 13px; margin-bottom: 13px; }
 .admin-welcome { min-height: 126px; display: flex; align-items: center; gap: 15px; padding: 19px; border-radius: 13px; background: linear-gradient(135deg, #191a1d, #2b2c30); color: white; box-shadow: 0 12px 30px rgba(25,26,29,.12); }
 .admin-shield { width: 52px; height: 52px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 14px; background: var(--red); font-size: 15px; font-weight: 900; box-shadow: 0 8px 24px rgba(214,40,40,.3); }
