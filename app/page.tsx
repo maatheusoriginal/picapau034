@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ProductFormModal } from "../src/components/ProductFormModal";
+import { SupplierFormModal } from "../src/components/SupplierFormModal";
+import { MotorcycleFormModal } from "../src/components/MotorcycleFormModal";
+import { ClientFormModal } from "../src/components/ClientFormModal";
+import { EmployeeFormModal } from "../src/components/EmployeeFormModal";
+import { SettingsWorkspace } from "../src/components/SettingsWorkspace";
+import { isMechanicUser, type UserConfig as UserConfigType } from "../src/types";
 import {
   bootstrapCurrentUserAsSuperAdmin,
   createManagedUser,
@@ -87,20 +94,7 @@ type ExpenseRecord = {
   employeeId?: string;
 };
 
-type UserConfig = {
-  id: string;
-  name: string;
-  role: "Super Admin" | "Balcão" | "Mecânico";
-  position: string;
-  phone: string;
-  active: boolean;
-  canReceiveServiceOrders: boolean;
-  canManageAllOrders: boolean;
-  employmentType: "Fixo" | "Avulso";
-  baseSalary: number;
-  paymentDay: number;
-  currentOrders: number;
-};
+type UserConfig = UserConfigType;
 
 type PaymentMachineConfig = {
   id: string;
@@ -229,66 +223,21 @@ const formatPhone = (value: string) => {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 };
 
-const initialExpenses: ExpenseRecord[] = [
-  { id: "GST-0184", description: "Retificador CG 160 comprado para a OS-1047", category: "Peça comprada fora do estoque", amount: 85, charged: 130, order: "OS-1047", dueDate: "24/08/2026", status: "Pago", method: "PIX" },
-  { id: "GST-0183", description: "Frete da Moto Peças Triângulo", category: "Frete e motoboy", amount: 40, dueDate: "24/08/2026", status: "Pago", method: "Dinheiro" },
-  { id: "GST-0182", description: "Conta de energia da oficina", category: "Despesas fixas", amount: 486, dueDate: "28/08/2026", status: "Agendado", method: "Banco Inter" },
-];
+const initialExpenses: ExpenseRecord[] = [];
 
-const initialUsers: UserConfig[] = [
-  { id: "USR-001", name: "Erasmo", role: "Super Admin", position: "Dono / Mecânico", phone: "", active: true, canReceiveServiceOrders: true, canManageAllOrders: true, employmentType: "Fixo", baseSalary: 0, paymentDay: 5, currentOrders: 1 },
-  { id: "USR-002", name: "Rayane", role: "Super Admin", position: "Atendente / Administradora", phone: "", active: true, canReceiveServiceOrders: false, canManageAllOrders: true, employmentType: "Fixo", baseSalary: 0, paymentDay: 5, currentOrders: 0 },
-  { id: "USR-003", name: "Ronaldo", role: "Mecânico", position: "Responsável pela oficina", phone: "", active: true, canReceiveServiceOrders: true, canManageAllOrders: false, employmentType: "Fixo", baseSalary: 0, paymentDay: 5, currentOrders: 4 },
-  { id: "USR-004", name: "Matheus", role: "Mecânico", position: "Mecânico", phone: "", active: true, canReceiveServiceOrders: true, canManageAllOrders: false, employmentType: "Fixo", baseSalary: 0, paymentDay: 5, currentOrders: 2 },
-  { id: "USR-005", name: "Mecânico avulso 1", role: "Mecânico", position: "Mecânico", phone: "", active: true, canReceiveServiceOrders: true, canManageAllOrders: false, employmentType: "Avulso", baseSalary: 0, paymentDay: 5, currentOrders: 0 },
-  { id: "USR-006", name: "Mecânico avulso 2", role: "Mecânico", position: "Mecânico", phone: "", active: true, canReceiveServiceOrders: true, canManageAllOrders: false, employmentType: "Avulso", baseSalary: 0, paymentDay: 5, currentOrders: 0 },
-];
+const initialUsers: UserConfig[] = [];
 
-const initialPaymentMachines: PaymentMachineConfig[] = [
-  { id: "MAQ-001", name: "Infinity Pay", active: true, primary: true, debitFee: 1.37, credit1xFee: 3.15, credit2to6Fee: 6.49, credit7to12Fee: 12.49, settlementDays: 1 },
-  { id: "MAQ-002", name: "Stone", active: true, primary: false, debitFee: 1.29, credit1xFee: 3.11, credit2to6Fee: 5.99, credit7to12Fee: 11.49, settlementDays: 1 },
-];
+const initialPaymentMachines: PaymentMachineConfig[] = [];
 
-const initialPaymentMethods: PaymentMethodConfig[] = [
-  { id: "PGT-001", name: "PIX", active: true, usesMachine: false },
-  { id: "PGT-002", name: "Dinheiro", active: true, usesMachine: false },
-  { id: "PGT-003", name: "Débito", active: true, usesMachine: true },
-  { id: "PGT-004", name: "Crédito", active: true, usesMachine: true },
-  { id: "PGT-005", name: "Boleto", active: true, usesMachine: false },
-  { id: "PGT-006", name: "Transferência", active: true, usesMachine: false },
-  { id: "PGT-007", name: "Nota a prazo", active: true, usesMachine: false },
-  { id: "PGT-008", name: "Faturamento parceiro", active: true, usesMachine: false },
-  { id: "PGT-009", name: "Troca de serviços", active: true, usesMachine: false },
-];
+const initialPaymentMethods: PaymentMethodConfig[] = [];
 
-const initialPartners: PartnerConfig[] = [
-  { id: "PAR-001", name: "Gonzaga Motos", phone: "(34) 3235-0190", laborDiscount: 15, billingCycle: "Faturamento mensal", active: true },
-  { id: "PAR-002", name: "Moto Táxi União", phone: "(34) 99112-7840", laborDiscount: 10, billingCycle: "Pagamento semanal", active: true },
-];
+const initialPartners: PartnerConfig[] = [];
 
-const initialQuickServices: QuickServiceConfig[] = [
-  { id: "SRQ-001", name: "Troca de óleo", laborPrice: 25, duration: 20, productCategory: "Óleos", productRequired: true, active: true },
-  { id: "SRQ-002", name: "Regulagem de válvulas", laborPrice: 80, duration: 40, productCategory: "Sem produto obrigatório", productRequired: false, active: true },
-  { id: "SRQ-003", name: "Ajuste da relação", laborPrice: 30, duration: 20, productCategory: "Lubrificantes", productRequired: false, active: true },
-  { id: "SRQ-004", name: "Troca de lâmpada", laborPrice: 20, duration: 15, productCategory: "Elétrica", productRequired: true, active: true },
-];
+const initialQuickServices: QuickServiceConfig[] = [];
 
-const initialCategories: CategoryConfig[] = [
-  { id: "CAT-001", name: "Mecânica geral", group: "Serviços", active: true },
-  { id: "CAT-002", name: "Óleo e lubrificação", group: "Serviços", active: true },
-  { id: "CAT-003", name: "Freios", group: "Serviços", active: true },
-  { id: "CAT-004", name: "Óleos", group: "Produtos", active: true },
-  { id: "CAT-005", name: "Filtros", group: "Produtos", active: true },
-  { id: "CAT-006", name: "Transmissão", group: "Produtos", active: true },
-  { id: "CAT-007", name: "Fornecedores de peças", group: "Despesas", active: true },
-  { id: "CAT-008", name: "Frete e motoboy", group: "Despesas", active: true },
-];
+const initialCategories: CategoryConfig[] = [];
 
-const initialSuppliers: SupplierConfig[] = [
-  { id: "FOR-001", name: "Moto Peças Triângulo", phone: "(34) 3238-4430", categories: "Peças gerais, freios e transmissão", deliveryDays: 2, active: true },
-  { id: "FOR-002", name: "Distribuidora Minas", phone: "(34) 99184-2240", categories: "Freios e relação", deliveryDays: 3, active: true },
-  { id: "FOR-003", name: "Central dos Óleos", phone: "(34) 3224-0951", categories: "Óleos e lubrificantes", deliveryDays: 0, active: true },
-];
+const initialSuppliers: SupplierConfig[] = [];
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -321,14 +270,14 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 const navGroups: Array<{
   label: string;
   icon: IconName;
-  items: Array<{ label: string; icon: IconName; badge?: number }>;
+  items: Array<{ label: string; icon: IconName }>;
 }> = [
   {
     label: "Oficina",
     icon: "wrench",
     items: [
-      { label: "Ordens de serviço", icon: "wrench", badge: 8 },
-      { label: "Orçamentos", icon: "file", badge: 4 },
+      { label: "Ordens de serviço", icon: "wrench" },
+      { label: "Orçamentos", icon: "file" },
     ],
   },
   {
@@ -344,7 +293,7 @@ const navGroups: Array<{
     label: "Estoque",
     icon: "box",
     items: [
-      { label: "Produtos e estoque", icon: "box", badge: 12 },
+      { label: "Produtos e estoque", icon: "box" },
       { label: "Compras e entradas", icon: "file" },
       { label: "Fornecedores", icon: "users" },
     ],
@@ -363,8 +312,8 @@ const navGroups: Array<{
     icon: "chart",
     items: [
       { label: "Financeiro", icon: "wallet" },
-      { label: "Contas a receber", icon: "arrow", badge: 3 },
-      { label: "Contas a pagar", icon: "file", badge: 2 },
+      { label: "Contas a receber", icon: "arrow" },
+      { label: "Contas a pagar", icon: "file" },
       { label: "Relatórios", icon: "chart" },
     ],
   },
@@ -388,45 +337,13 @@ const destinationPermissions: Record<string, FirebasePermission[]> = {
   "Relatórios": ["finance.view"],
 };
 
-const initialOrders: OrderRecord[] = [
-  { id: "OS-1048", customer: "Carlos Eduardo", bike: "Honda CG 160 Fan", plate: "RTA-8B42", mechanic: "Ronaldo + Matheus", mechanicIds: ["USR-003", "USR-004"], time: "08:35", status: "Em serviço", tone: "blue" },
-  { id: "OS-1047", customer: "Marcos Vinícius", bike: "Yamaha Fazer 250", plate: "QOW-3J19", mechanic: "Matheus", mechanicIds: ["USR-004"], time: "09:10", status: "Avaliação", tone: "violet" },
-  { id: "OS-1046", customer: "Gonzaga Motos", bike: "Honda Biz 125", plate: "PZK-7F08", mechanic: "Erasmo + Ronaldo", mechanicIds: ["USR-001", "USR-003"], time: "09:42", status: "Aprovação", tone: "red" },
-  { id: "OS-1045", customer: "Juliana Martins", bike: "Honda Bros 160", plate: "SHD-2C71", mechanic: "Ronaldo", mechanicIds: ["USR-003"], time: "10:18", status: "Entrega", tone: "green" },
-  { id: "OS-1044", customer: "André Luiz", bike: "Yamaha Factor 150", plate: "QXI-5D33", mechanic: "Erasmo", mechanicIds: ["USR-001"], time: "10:54", status: "Recepção", tone: "amber" },
-];
+const initialOrders: OrderRecord[] = [];
 
-const flow = [
-  { label: "Recepção", value: 2, helper: "Entraram hoje", tone: "amber" },
-  { label: "Avaliação", value: 5, helper: "2 desde ontem", tone: "violet" },
-  { label: "Aprovação", value: 4, helper: "R$ 2.840,00", tone: "red" },
-  { label: "Em serviço", value: 6, helper: "4 mecânicos", tone: "blue" },
-  { label: "Entrega", value: 3, helper: "Prontas", tone: "green" },
-];
+const initialProducts: ProductRecord[] = [];
 
-const initialProducts: ProductRecord[] = [
-  { id: "PRD-0001", code: "PRD-0001", name: "Óleo Motul 3000 20W50", category: "Óleos", stock: 18, minimum: 8, cost: "R$ 29,90", price: "R$ 45,00", status: "Normal" },
-  { id: "PRD-0002", code: "PRD-0002", name: "Óleo Mobil Super Moto 20W50", category: "Óleos", stock: 4, minimum: 10, cost: "R$ 24,50", price: "R$ 38,00", status: "Crítico" },
-  { id: "PRD-0018", code: "PRD-0018", name: "Filtro de óleo CG 160", category: "Filtros", stock: 2, minimum: 6, cost: "R$ 8,70", price: "R$ 18,00", status: "Crítico" },
-  { id: "PRD-0031", code: "PRD-0031", name: "Pastilha de freio Bros 160", category: "Freios", stock: 0, minimum: 4, cost: "R$ 21,00", price: "R$ 39,90", status: "Sem estoque" },
-  { id: "PRD-0044", code: "PRD-0044", name: "Kit relação CG 160", category: "Transmissão", stock: 7, minimum: 3, cost: "R$ 86,00", price: "R$ 149,90", status: "Normal" },
-];
+const initialClients: ClientRecord[] = [];
 
-const initialClients: ClientRecord[] = [
-  { id: "CLI-001", name: "Carlos Eduardo", phone: "(34) 99142-8031", detail: "Honda CG 160 Fan", meta: "8 serviços", condition: "Pagamento normal", motorcycleIds: ["MOT-001", "MOT-005"] },
-  { id: "CLI-002", name: "Juliana Martins", phone: "(34) 99822-1150", detail: "Honda Bros 160", meta: "4 serviços", condition: "Pagamento normal", motorcycleIds: ["MOT-002"] },
-  { id: "CLI-003", name: "Marcos Vinícius", phone: "(34) 99276-4408", detail: "Yamaha Fazer 250", meta: "6 serviços", condition: "Troca de serviços", motorcycleIds: ["MOT-003"] },
-  { id: "CLI-004", name: "André Luiz", phone: "(34) 99741-3352", detail: "Yamaha Factor 150", meta: "3 serviços", condition: "Pagamento normal", motorcycleIds: ["MOT-004"] },
-  { id: "CLI-005", name: "Gonzaga Motos", phone: "(34) 3235-0190", detail: "Empresa parceira", meta: "15% mão de obra", condition: "Faturamento parceiro", motorcycleIds: [] },
-];
-
-const initialMotorcycles: MotorcycleRecord[] = [
-  { id: "MOT-001", ownerId: "CLI-001", plate: "RTA-8B42", model: "Honda CG 160 Fan", year: "2022", color: "Vermelha" },
-  { id: "MOT-005", ownerId: "CLI-001", plate: "HJK-1234", model: "Honda Biz 125", year: "2015", color: "Preta" },
-  { id: "MOT-002", ownerId: "CLI-002", plate: "SHD-2C71", model: "Honda Bros 160", year: "2021", color: "Vermelha" },
-  { id: "MOT-003", ownerId: "CLI-003", plate: "QOW-3J19", model: "Yamaha Fazer 250", year: "2020", color: "Azul" },
-  { id: "MOT-004", ownerId: "CLI-004", plate: "QXI-5D33", model: "Yamaha Factor 150", year: "2019", color: "Preta" },
-];
+const initialMotorcycles: MotorcycleRecord[] = [];
 
 const serviceOrderStatuses = ["Recepção", "Avaliação", "Aprovação", "Em serviço", "Entrega"] as const;
 
@@ -641,18 +558,18 @@ function useFirebaseSyncedEmployees(
   return [records, setRecords] as const;
 }
 
-function PdvWorkspace({ notify, openDialog }: { notify: (message: string) => void; openDialog: OpenDialog }) {
-  const pdvCatalog = [
-    { code: "PRD-0001", barcode: "7890000000000", name: "Óleo Motul 3000 20W50", unit: 45, stock: 18 },
-    { code: "PRD-0002", barcode: "7890000000001", name: "Óleo Mobil Super Moto 20W50", unit: 38, stock: 4 },
-    { code: "PRD-0018", barcode: "7890000000018", name: "Filtro de óleo CG 160", unit: 18, stock: 2 },
-    { code: "PRD-0031", barcode: "7890000000031", name: "Pastilha de freio Bros 160", unit: 39.9, stock: 0 },
-    { code: "PRD-0044", barcode: "7890000000044", name: "Kit relação CG 160", unit: 149.9, stock: 7 },
-  ];
-  const [cart, setCart] = useState([
-    { code: "PRD-0001", name: "Óleo Motul 3000 20W50", unit: 45, quantity: 2, stock: 18 },
-    { code: "PRD-0018", name: "Filtro de óleo CG 160", unit: 18, quantity: 1, stock: 2 },
-  ]);
+function PdvWorkspace({
+  notify,
+  openDialog,
+  products = [],
+  clients = [],
+}: {
+  notify: (message: string) => void;
+  openDialog: OpenDialog;
+  products?: ProductRecord[];
+  clients?: ClientRecord[];
+}) {
+  const [cart, setCart] = useState<Array<{ code: string; name: string; unit: number; quantity: number; stock: number }>>([]);
   const [pdvSearch, setPdvSearch] = useState("");
   const total = cart.reduce((sum, item) => sum + item.unit * item.quantity, 0);
   const addToCart = (product: { code: string; name: string; unit: number; stock: number }) => {
@@ -662,6 +579,13 @@ function PdvWorkspace({ notify, openDialog }: { notify: (message: string) => voi
       : [...current, { ...product, quantity: 1 }]);
     setPdvSearch("");
   };
+  const pdvCatalog = products.map((p) => ({
+    code: p.code,
+    barcode: p.code,
+    name: p.name,
+    unit: parseBRL(p.price),
+    stock: p.stock,
+  }));
   const pdvSuggestions = pdvSearch ? pdvCatalog.filter((product) => `${product.name} ${product.code} ${product.barcode}`.toLowerCase().includes(pdvSearch.toLowerCase())).slice(0, 8) : [];
   const changeQuantity = (code: string, difference: number) => {
     setCart((current) => current
@@ -673,15 +597,20 @@ function PdvWorkspace({ notify, openDialog }: { notify: (message: string) => voi
     <>
       <div className="module-heading pdv-heading">
         <div><p>Venda no balcão</p><h1>PDV Balcão</h1><span>Venda peças com poucos cliques e receba em mais de uma forma.</span></div>
-        <div className="pdv-heading-actions"><button className="outline-button large" onClick={() => openDialog("expense")}><Icon name="plus" size={16}/>Lançar gasto</button><div className="pdv-session"><i/><div><strong>Caixa aberto</strong><small>Desde 08:02 · Erasmo</small></div></div></div>
+        <div className="pdv-heading-actions"><button className="outline-button large" onClick={() => openDialog("expense")}><Icon name="plus" size={16}/>Lançar gasto</button><div className="pdv-session"><i/><div><strong>Caixa aberto</strong><small>Pronto para vendas</small></div></div></div>
       </div>
       <div className="pdv-layout">
         <section className="pdv-main">
           <div className="pdv-search-wrap"><label className="pdv-search"><Icon name="search"/><input autoFocus value={pdvSearch} onChange={(event) => setPdvSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && pdvSuggestions[0]) addToCart(pdvSuggestions[0]); }} placeholder="Digite o produto, código de barras ou código da peça"/><kbd>F2</kbd></label>{pdvSearch ? <div className="pdv-suggestions">{pdvSuggestions.length ? pdvSuggestions.map((product) => <button key={product.code} onClick={() => addToCart(product)} disabled={product.stock === 0}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.barcode}</small></div><b>{product.stock ? `${product.stock} un. · R$ ${product.unit.toFixed(2).replace(".", ",")}` : "Sem estoque"}</b><Icon name="plus" size={16}/></button>) : <div className="no-results">Nenhum produto encontrado.</div>}</div> : null}</div>
           <div className="pdv-shortcuts">
-            <button onClick={() => addToCart(pdvCatalog[4])}><span>01</span><div><strong>Kit relação CG 160</strong><small>7 em estoque</small></div><b>R$ 149,90</b></button>
-            <button onClick={() => addToCart(pdvCatalog[1])}><span>02</span><div><strong>Óleo Mobil 20W50</strong><small>4 em estoque</small></div><b>R$ 38,00</b></button>
-            <button onClick={() => openDialog("catalog")}><span>+</span><div><strong>Ver catálogo</strong><small>286 produtos</small></div><Icon name="arrow" size={17}/></button>
+            {pdvCatalog.filter((p) => p.stock > 0).slice(0, 2).map((prod, idx) => (
+              <button key={prod.code} onClick={() => addToCart(prod)}>
+                <span>{String(idx + 1).padStart(2, "0")}</span>
+                <div><strong>{prod.name}</strong><small>{prod.stock} em estoque</small></div>
+                <b>R$ {prod.unit.toFixed(2).replace(".", ",")}</b>
+              </button>
+            ))}
+            <button onClick={() => openDialog("catalog")}><span>+</span><div><strong>Ver catálogo</strong><small>{products.length} {products.length === 1 ? "produto" : "produtos"}</small></div><Icon name="arrow" size={17}/></button>
           </div>
           <section className="panel pdv-cart">
             <div className="pdv-cart-head"><div><h2>Itens da venda</h2><span>{cart.reduce((sum, item) => sum + item.quantity, 0)} unidades</span></div><button onClick={() => setCart([])}>Limpar venda</button></div>
@@ -704,7 +633,7 @@ function PdvWorkspace({ notify, openDialog }: { notify: (message: string) => voi
           </section>
         </section>
         <aside className="pdv-summary panel">
-          <div className="summary-title"><span>Resumo da venda</span><b>VENDA #0084</b></div>
+          <div className="summary-title"><span>Resumo da venda</span><b>VENDA NO BALCÃO</b></div>
           <button className="pdv-client" onClick={() => openDialog("client")}><span className="registry-avatar">CF</span><div><strong>Consumidor final</strong><small>Adicionar cliente ou usar crediário</small></div><Icon name="arrow" size={17}/></button>
           <div className="summary-lines">
             <div><span>Subtotal</span><b>R$ {total.toFixed(2).replace(".", ",")}</b></div>
@@ -729,15 +658,14 @@ function QuickServiceWorkspace({ openDialog, quickServices }: { openDialog: (dia
         <button className="primary-button" onClick={() => openDialog("quick")}><Icon name="plus" size={18}/>Novo serviço rápido</button>
       </div>
       <div className="quick-service-grid">
-        {enabledServices.map((service, index) => (
+        {enabledServices.length ? enabledServices.map((service, index) => (
           <button key={service.id} onClick={() => openDialog("quick")}><span className={index === 0 ? "quick-service-number active" : "quick-service-number"}>{String(index + 1).padStart(2, "0")}</span><div><strong>{service.name}</strong><small>{service.duration} min · {service.productRequired ? service.productCategory : "Produto opcional"}</small></div><b>{formatBRL(service.laborPrice)}</b><Icon name="arrow" size={17}/></button>
-        ))}
+        )) : <div className="no-results" style={{ gridColumn: "1 / -1", padding: "24px 16px", textAlign: "center" }}>Nenhum serviço rápido configurado. Adicione em Configurações.</div>}
       </div>
       <section className="panel module-panel">
-        <div className="panel-header"><div><h2>Atendimentos de hoje</h2><p>Serviços concluídos diretamente no balcão</p></div><span className="status green"><i/>6 concluídos</span></div>
+        <div className="panel-header"><div><h2>Atendimentos de hoje</h2><p>Serviços concluídos diretamente no balcão</p></div><span className="status green"><i/>0 concluídos</span></div>
         <div className="table-scroll"><table><thead><tr><th>Horário</th><th>Serviço</th><th>Produto</th><th>Pagamento</th><th>Valor</th><th>Status</th></tr></thead><tbody>
-          <tr><td>10:42</td><td><strong>Troca de óleo</strong><span>Sem cadastro</span></td><td>Motul 3000 20W50</td><td>PIX</td><td><strong className="mono">R$ 45,00</strong></td><td><span className="status green"><i/>Recebido</span></td></tr>
-          <tr><td>09:18</td><td><strong>Ajuste da relação</strong><span>Lucas · CG 160</span></td><td>Lubrificante corrente</td><td>Dinheiro</td><td><strong className="mono">R$ 30,00</strong></td><td><span className="status green"><i/>Recebido</span></td></tr>
+          <tr><td colSpan={6} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhum atendimento expresso realizado hoje.</td></tr>
         </tbody></table></div>
       </section>
     </>
@@ -757,13 +685,14 @@ function FinanceWorkspace({
   users: UserConfig[];
   paymentMachines: PaymentMachineConfig[];
 }) {
-  const grossRevenue = 38420;
-  const partsCost = 14680;
-  const cardRevenue = 10850;
+  const grossRevenue = 0;
+  const partsCost = 0;
+  const cardRevenue = 0;
   const primaryMachine = paymentMachines.find((machine) => machine.primary && machine.active) ?? paymentMachines.find((machine) => machine.active);
   const averageCardFee = primaryMachine ? (primaryMachine.debitFee + primaryMachine.credit1xFee) / 2 : 0;
   const cardFees = cardRevenue * (averageCardFee / 100);
   const paidExpenses = expenses.filter((expense) => expense.status === "Pago").reduce((sum, expense) => sum + expense.amount, 0);
+  const pendingExpenses = expenses.filter((expense) => expense.status === "Agendado").reduce((sum, expense) => sum + expense.amount, 0);
   const payrollPaid = expenses.filter((expense) => expense.status === "Pago" && expense.category === "Pagamento de funcionário").reduce((sum, expense) => sum + expense.amount, 0);
   const netProfit = grossRevenue - partsCost - paidExpenses - cardFees;
   return (
@@ -773,15 +702,15 @@ function FinanceWorkspace({
         <div className="heading-actions"><button className="outline-button large" onClick={() => openDialog("cash")}>Abrir caixa</button><button className="primary-button" onClick={() => openDialog("expense")}><Icon name="plus" size={18}/>Adicionar gasto</button></div>
       </div>
       <div className="finance-kpi-grid">
-        <button className="finance-kpi receive" onClick={() => navigate("Contas a receber")}><span className="finance-kpi-icon"><Icon name="arrow"/></span><div><small>Total a receber</small><strong>R$ 8.740,00</strong><em>R$ 1.320,00 vencidos</em></div><Icon name="arrow" size={18}/></button>
-        <button className="finance-kpi pay" onClick={() => navigate("Contas a pagar")}><span className="finance-kpi-icon"><Icon name="file"/></span><div><small>Total a pagar</small><strong>R$ 5.960,00</strong><em>R$ 860,00 vencem hoje</em></div><Icon name="arrow" size={18}/></button>
-        <button className="finance-kpi balance" onClick={() => openDialog("cash")}><span className="finance-kpi-icon"><Icon name="wallet"/></span><div><small>Saldo disponível hoje</small><strong>R$ 4.480,00</strong><em>Caixa + contas bancárias</em></div><Icon name="arrow" size={18}/></button>
+        <button className="finance-kpi receive" onClick={() => navigate("Contas a receber")}><span className="finance-kpi-icon"><Icon name="arrow"/></span><div><small>Total a receber</small><strong>R$ 0,00</strong><em>Nenhum valor em aberto</em></div><Icon name="arrow" size={18}/></button>
+        <button className="finance-kpi pay" onClick={() => navigate("Contas a pagar")}><span className="finance-kpi-icon"><Icon name="file"/></span><div><small>Total a pagar</small><strong>{formatBRL(pendingExpenses)}</strong><em>{expenses.filter((e) => e.status === "Agendado").length} contas agendadas</em></div><Icon name="arrow" size={18}/></button>
+        <button className="finance-kpi balance" onClick={() => openDialog("cash")}><span className="finance-kpi-icon"><Icon name="wallet"/></span><div><small>Saldo disponível hoje</small><strong>R$ 0,00</strong><em>Caixa + contas bancárias</em></div><Icon name="arrow" size={18}/></button>
       </div>
-      <section className="finance-result-strip panel"><div className="result-strip-head"><div><small>Resultado real da oficina</small><h2>Lucro líquido estimado</h2></div><strong>{formatBRL(netProfit)}</strong></div><div className="result-breakdown"><span><small>Faturamento</small><b>{formatBRL(grossRevenue)}</b></span><span><small>Custo das peças</small><b>− {formatBRL(partsCost)}</b></span><span><small>Gastos pagos</small><b>− {formatBRL(paidExpenses)}</b></span><span><small>Taxas de maquininha</small><b>− {formatBRL(cardFees)}</b></span></div><p>Considera vendas, custo das peças, gastos lançados, pagamentos de funcionários ({formatBRL(payrollPaid)}) e a taxa média da {primaryMachine?.name ?? "maquininha configurada"}. {users.filter((user) => user.employmentType === "Fixo" && user.baseSalary === 0).length ? "Há salários padrão ainda não definidos." : "Salários padrão conferidos."}</p></section>
+      <section className="finance-result-strip panel"><div className="result-strip-head"><div><small>Resultado real da oficina</small><h2>Lucro líquido estimado</h2></div><strong>{formatBRL(netProfit)}</strong></div><div className="result-breakdown"><span><small>Faturamento</small><b>{formatBRL(grossRevenue)}</b></span><span><small>Custo das peças</small><b>− {formatBRL(partsCost)}</b></span><span><small>Gastos pagos</small><b>− {formatBRL(paidExpenses)}</b></span><span><small>Taxas de maquininha</small><b>− {formatBRL(cardFees)}</b></span></div><p>Considera vendas, custo das peças, gastos lançados, pagamentos de funcionários ({formatBRL(payrollPaid)}) e a taxa média da {primaryMachine?.name ?? "maquininha configurada"}.</p></section>
       <div className="finance-body-grid">
         <section className="panel finance-movements">
           <div className="panel-header"><div><h2>Últimos gastos</h2><p>Lançamentos manuais e despesas agendadas</p></div><button className="outline-button" onClick={() => openDialog("expense")}>Novo gasto</button></div>
-          <div className="table-scroll"><table><thead><tr><th>Gasto</th><th>Categoria</th><th>Pagamento</th><th>Valor</th><th>Status</th></tr></thead><tbody>{expenses.map((expense) => <tr key={expense.id}><td><strong>{expense.description}</strong><span>{expense.id}{expense.order ? ` · ${expense.order}` : ""}</span></td><td>{expense.category}</td><td>{expense.method}<span>{expense.dueDate}</span></td><td><strong className="mono">{formatBRL(expense.amount)}</strong>{expense.charged ? <span className="margin-caption">Cobrado {formatBRL(expense.charged)}</span> : null}</td><td><span className={`status ${expense.status === "Pago" ? "green" : "amber"}`}><i/>{expense.status}</span></td></tr>)}</tbody></table></div>
+          <div className="table-scroll"><table><thead><tr><th>Gasto</th><th>Categoria</th><th>Pagamento</th><th>Valor</th><th>Status</th></tr></thead><tbody>{expenses.length ? expenses.map((expense) => <tr key={expense.id}><td><strong>{expense.description}</strong><span>{expense.id}{expense.order ? ` · ${expense.order}` : ""}</span></td><td>{expense.category}</td><td>{expense.method}<span>{expense.dueDate}</span></td><td><strong className="mono">{formatBRL(expense.amount)}</strong>{expense.charged ? <span className="margin-caption">Cobrado {formatBRL(expense.charged)}</span> : null}</td><td><span className={`status ${expense.status === "Pago" ? "green" : "amber"}`}><i/>{expense.status}</span></td></tr>) : <tr><td colSpan={5} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhum gasto registrado no momento.</td></tr>}</tbody></table></div>
         </section>
         <aside className="panel finance-quick-actions">
           <div className="panel-header"><div><h2>Atalhos financeiros</h2><p>Operações mais usadas</p></div></div>
@@ -806,17 +735,8 @@ function AccountsWorkspace({
   const [accountSearch, setAccountSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("Todos");
   const isReceivable = kind === "receber";
-  const receivables = [
-    { id: "REC-0318", person: "Gonzaga Motos", description: "Serviços encaminhados · agosto", dueDate: "05/09/2026", original: 3240, open: 3240, status: "A vencer" },
-    { id: "REC-0317", person: "Carlos Eduardo", description: "OS-1048 · revisão e peças", dueDate: "24/08/2026", original: 1850, open: 1850, status: "Vence hoje" },
-    { id: "REC-0312", person: "Juliana Martins", description: "OS-1045 · saldo parcial", dueDate: "22/08/2026", original: 1320, open: 1320, status: "Atrasado" },
-    { id: "REC-0309", person: "Marcos Vinícius", description: "Peças vendidas a prazo", dueDate: "30/08/2026", original: 980, open: 980, status: "A vencer" },
-    { id: "REC-0307", person: "André Luiz", description: "OS-1044 · parcela única", dueDate: "10/09/2026", original: 1350, open: 1350, status: "A vencer" },
-  ];
+  const receivables: Array<{ id: string; person: string; description: string; dueDate: string; original: number; open: number; status: string }> = [];
   const payables = [
-    { id: "PAG-0211", person: "Moto Peças Triângulo", description: "Reposição de freios e transmissão", dueDate: "24/08/2026", original: 1844, open: 1844, status: "Vence hoje" },
-    { id: "PAG-0209", person: "Distribuidora Minas", description: "Compra de peças · parcela 2/3", dueDate: "28/08/2026", original: 1650, open: 1650, status: "A vencer" },
-    { id: "PAG-0205", person: "Imobiliária Central", description: "Aluguel da oficina", dueDate: "10/09/2026", original: 1980, open: 1980, status: "A vencer" },
     ...expenses.filter((expense) => expense.status === "Agendado").map((expense) => ({ id: expense.id, person: "Despesa manual", description: expense.description, dueDate: expense.dueDate, original: expense.amount, open: expense.amount, status: "A vencer" })),
   ];
   const records = isReceivable ? receivables : payables;
@@ -836,168 +756,107 @@ function AccountsWorkspace({
         <div className="heading-actions">{!isReceivable ? <button className="outline-button large" onClick={() => openDialog("expense")}>Adicionar gasto</button> : null}<button className="primary-button" onClick={() => openDialog(isReceivable ? "receivable" : "payable")}><Icon name="plus" size={18}/>Nova conta</button></div>
       </div>
       <div className="module-summary account-summary">
-        <article><span>Total em aberto</span><strong>{formatBRL(total)}</strong><small>{records.length} lançamentos</small></article>
+        <article><span>Total em aberto</span><strong>{formatBRL(total)}</strong><small>{records.length} {records.length === 1 ? "lançamento" : "lançamentos"}</small></article>
         <article className={overdue ? "summary-danger" : ""}><span>Vencido</span><strong>{formatBRL(overdue)}</strong><small>{overdue ? "Precisa de atenção" : "Nenhuma conta atrasada"}</small></article>
-        <article><span>Vence hoje</span><strong>{formatBRL(dueToday)}</strong><small>24 de agosto</small></article>
+        <article><span>Vence hoje</span><strong>{formatBRL(dueToday)}</strong><small>{formatBRL(dueToday)}</small></article>
       </div>
       <section className="panel module-panel">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder={`Buscar ${isReceivable ? "cliente" : "fornecedor"}, descrição ou código`}/></label><div className="filter-pills">{["Todos", "A vencer", "Vence hoje", "Atrasado"].map((filter) => <button className={accountFilter === filter ? "selected" : ""} key={filter} onClick={() => setAccountFilter(filter)}>{filter}</button>)}</div></div>
-        <div className="table-scroll"><table><thead><tr><th>{isReceivable ? "Cliente / Pagador" : "Fornecedor / Favorecido"}</th><th>Descrição</th><th>Vencimento</th><th>Valor original</th><th>Saldo</th><th>Status</th><th>Ação</th></tr></thead><tbody>{filteredRecords.map((record) => <tr key={record.id}><td><strong>{record.person}</strong><span className="mono">{record.id}</span></td><td><strong>{record.description}</strong><span>{isReceivable ? "Receita operacional" : "Despesa da oficina"}</span></td><td>{record.dueDate}</td><td className="mono">{formatBRL(record.original)}</td><td><strong className="mono">{formatBRL(record.open)}</strong></td><td><span className={`status ${record.status === "Atrasado" ? "red" : record.status === "Vence hoje" ? "amber" : "blue"}`}><i/>{record.status}</span></td><td><button className="account-action" onClick={() => openDialog(isReceivable ? "settleReceivable" : "settlePayable")}>{isReceivable ? "Receber" : "Pagar"}</button></td></tr>)}</tbody></table></div>
+        <div className="table-scroll"><table><thead><tr><th>{isReceivable ? "Cliente / Pagador" : "Fornecedor / Favorecido"}</th><th>Descrição</th><th>Vencimento</th><th>Valor original</th><th>Saldo</th><th>Status</th><th>Ação</th></tr></thead><tbody>{filteredRecords.length ? filteredRecords.map((record) => <tr key={record.id}><td><strong>{record.person}</strong><span className="mono">{record.id}</span></td><td><strong>{record.description}</strong><span>{isReceivable ? "Receita operacional" : "Despesa da oficina"}</span></td><td>{record.dueDate}</td><td className="mono">{formatBRL(record.original)}</td><td><strong className="mono">{formatBRL(record.open)}</strong></td><td><span className={`status ${record.status === "Atrasado" ? "red" : record.status === "Vence hoje" ? "amber" : "blue"}`}><i/>{record.status}</span></td><td><button className="account-action" onClick={() => openDialog(isReceivable ? "settleReceivable" : "settlePayable")}>{isReceivable ? "Receber" : "Pagar"}</button></td></tr>) : <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhuma conta {isReceivable ? "a receber" : "a pagar"} cadastrada no momento.</td></tr>}</tbody></table></div>
       </section>
     </>
   );
 }
 
-function SettingsWorkspace({
-  users,
-  setUsers,
-  partners,
-  setPartners,
-  quickServices,
-  setQuickServices,
-  categories,
-  setCategories,
-  suppliers,
-  setSuppliers,
-  paymentMachines,
-  setPaymentMachines,
-  paymentMethods,
-  setPaymentMethods,
-  notify,
-}: {
-  users: UserConfig[];
-  setUsers: React.Dispatch<React.SetStateAction<UserConfig[]>>;
-  partners: PartnerConfig[];
-  setPartners: React.Dispatch<React.SetStateAction<PartnerConfig[]>>;
-  quickServices: QuickServiceConfig[];
-  setQuickServices: React.Dispatch<React.SetStateAction<QuickServiceConfig[]>>;
-  categories: CategoryConfig[];
-  setCategories: React.Dispatch<React.SetStateAction<CategoryConfig[]>>;
-  suppliers: SupplierConfig[];
-  setSuppliers: React.Dispatch<React.SetStateAction<SupplierConfig[]>>;
-  paymentMachines: PaymentMachineConfig[];
-  setPaymentMachines: React.Dispatch<React.SetStateAction<PaymentMachineConfig[]>>;
-  paymentMethods: PaymentMethodConfig[];
-  setPaymentMethods: React.Dispatch<React.SetStateAction<PaymentMethodConfig[]>>;
-  notify: (message: string) => void;
-}) {
-  const [section, setSection] = useState("Serviços rápidos");
-  const [newQuickName, setNewQuickName] = useState("");
-  const [newQuickPrice, setNewQuickPrice] = useState("30");
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [newCategoryGroup, setNewCategoryGroup] = useState<CategoryConfig["group"]>("Serviços");
-  const sections = [
-    { label: "Oficina e OS", icon: "wrench" as IconName, detail: "Numeração, prazos e regras" },
-    { label: "Serviços rápidos", icon: "clock" as IconName, detail: "Trocas expressas e preços" },
-    { label: "Categorias", icon: "box" as IconName, detail: "Serviços, produtos e gastos" },
-    { label: "Usuários e mecânicos", icon: "users" as IconName, detail: "Acesso e recebimento de OS" },
-    { label: "Parceiros", icon: "bike" as IconName, detail: "Descontos e faturamento" },
-    { label: "Fornecedores", icon: "file" as IconName, detail: "Contato, prazo e categorias" },
-    { label: "Produtos e estoque", icon: "box" as IconName, detail: "Preço, saldo e movimentações" },
-    { label: "Pagamentos", icon: "wallet" as IconName, detail: "Formas, máquinas e crediário" },
-    { label: "Impressão e WhatsApp", icon: "settings" as IconName, detail: "Cupom, A4 e mensagens" },
-  ];
-  const updateUser = (id: string, changes: Partial<UserConfig>) => setUsers((current) => current.map((user) => user.id === id ? { ...user, ...changes } : user));
-  const updatePartner = (id: string, changes: Partial<PartnerConfig>) => setPartners((current) => current.map((partner) => partner.id === id ? { ...partner, ...changes } : partner));
-  const updateQuickService = (id: string, changes: Partial<QuickServiceConfig>) => setQuickServices((current) => current.map((service) => service.id === id ? { ...service, ...changes } : service));
-  const updateSupplier = (id: string, changes: Partial<SupplierConfig>) => setSuppliers((current) => current.map((supplier) => supplier.id === id ? { ...supplier, ...changes } : supplier));
-  const updatePaymentMachine = (id: string, changes: Partial<PaymentMachineConfig>) => setPaymentMachines((current) => current.map((machine) => machine.id === id ? { ...machine, ...changes } : machine));
-  const updatePaymentMethod = (id: string, changes: Partial<PaymentMethodConfig>) => setPaymentMethods((current) => current.map((method) => method.id === id ? { ...method, ...changes } : method));
-  const setPrimaryMachine = (id: string) => setPaymentMachines((current) => current.map((machine) => ({ ...machine, primary: machine.id === id })));
-  const selected = sections.find((item) => item.label === section) ?? sections[0];
-
-  return (
-    <>
-      <div className="module-heading settings-heading">
-        <div><p>Configurações</p><h1>Central de configurações</h1><span>Altere cadastros e regras que alimentam o restante do sistema.</span></div>
-        <button className="primary-button" onClick={() => notify("Configurações salvas e aplicadas ao sistema.")}><Icon name="check" size={18}/>Salvar alterações</button>
-      </div>
-      <div className="settings-workspace">
-        <aside className="settings-navigation panel">
-          <div className="settings-navigation-head"><strong>Áreas do sistema</strong><small>{sections.length} grupos configuráveis</small></div>
-          {sections.map((item) => <button className={section === item.label ? "selected" : ""} key={item.label} onClick={() => setSection(item.label)}><span><Icon name={item.icon} size={17}/></span><div><strong>{item.label}</strong><small>{item.detail}</small></div><Icon name="arrow" size={15}/></button>)}
-        </aside>
-        <section className="settings-editor panel">
-          <div className="settings-editor-head"><span className="setting-icon"><Icon name={selected.icon}/></span><div><h2>{selected.label}</h2><p>{selected.detail}. Tudo que for alterado aqui será usado nas telas operacionais.</p></div></div>
-
-          {section === "Oficina e OS" ? <div className="settings-editor-body"><div className="form-grid"><label className="field field-full"><span>Nome da oficina</span><input defaultValue="Pica Pau Motos"/></label><label className="field"><span>Prefixo da OS</span><input defaultValue="OS"/></label><label className="field"><span>Próximo número</span><input type="number" defaultValue="1049"/></label><label className="field"><span>Previsão padrão</span><select><option>2 dias úteis</option><option>1 dia útil</option><option>3 dias úteis</option><option>Sem previsão automática</option></select></label><label className="field"><span>Garantia padrão da mão de obra</span><select><option>90 dias</option><option>60 dias</option><option>30 dias</option></select></label><label className="field field-full"><span>Observação padrão da OS</span><textarea defaultValue="A aprovação do orçamento é obrigatória antes do início dos serviços."/></label></div><div className="settings-toggles"><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Permitir vários mecânicos na mesma OS</strong><small>A equipe atribuída pode atualizar a situação e marcar o serviço como pronto.</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Mostrar carga de trabalho</strong><small>Exibe quantas OS cada mecânico já possui antes da atribuição.</small></div></label></div></div> : null}
-
-          {section === "Serviços rápidos" ? <div className="settings-editor-body"><div className="config-create-row"><label className="field"><span>Novo serviço rápido</span><input value={newQuickName} onChange={(event) => setNewQuickName(event.target.value)} placeholder="Ex.: Troca de cabo de embreagem"/></label><label className="field compact-field"><span>Mão de obra</span><input type="number" value={newQuickPrice} onChange={(event) => setNewQuickPrice(event.target.value)}/></label><button className="primary-button" onClick={() => { if (!newQuickName.trim()) return notify("Informe o nome do serviço rápido."); setQuickServices((current) => [...current, { id: `SRQ-${String(current.length + 1).padStart(3, "0")}`, name: newQuickName.trim(), laborPrice: Number(newQuickPrice) || 0, duration: 20, productCategory: "Sem produto obrigatório", productRequired: false, active: true }]); setNewQuickName(""); notify("Serviço rápido adicionado."); }}><Icon name="plus" size={16}/>Adicionar</button></div><div className="config-list">{quickServices.map((service) => <article className="config-record" key={service.id}><span className="config-record-code">{service.id.slice(-2)}</span><div className="config-record-main"><input value={service.name} onChange={(event) => updateQuickService(service.id, { name: event.target.value })}/><small>{service.productRequired ? `Produto obrigatório · ${service.productCategory}` : "Produto opcional"}</small></div><label><span>Mão de obra</span><input type="number" value={service.laborPrice} onChange={(event) => updateQuickService(service.id, { laborPrice: Number(event.target.value) })}/></label><label><span>Duração</span><select value={service.duration} onChange={(event) => updateQuickService(service.id, { duration: Number(event.target.value) })}><option value="15">15 min</option><option value="20">20 min</option><option value="30">30 min</option><option value="40">40 min</option><option value="60">60 min</option></select></label><button className={`config-status ${service.active ? "active" : ""}`} onClick={() => updateQuickService(service.id, { active: !service.active })}>{service.active ? "Ativo" : "Inativo"}</button></article>)}</div></div> : null}
-
-          {section === "Categorias" ? <div className="settings-editor-body"><div className="config-create-row category-create"><label className="field"><span>Nova categoria</span><input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Nome da categoria"/></label><label className="field compact-field"><span>Usada em</span><select value={newCategoryGroup} onChange={(event) => setNewCategoryGroup(event.target.value as CategoryConfig["group"])}><option>Serviços</option><option>Produtos</option><option>Despesas</option></select></label><button className="primary-button" onClick={() => { if (!newCategoryName.trim()) return notify("Informe o nome da categoria."); setCategories((current) => [...current, { id: `CAT-${String(current.length + 1).padStart(3, "0")}`, name: newCategoryName.trim(), group: newCategoryGroup, active: true }]); setNewCategoryName(""); notify("Categoria adicionada."); }}><Icon name="plus" size={16}/>Adicionar</button></div><div className="category-groups">{(["Serviços", "Produtos", "Despesas"] as CategoryConfig["group"][]).map((group) => <section key={group}><div><strong>{group}</strong><small>{categories.filter((category) => category.group === group).length} categorias</small></div>{categories.filter((category) => category.group === group).map((category) => <button className={category.active ? "active" : ""} key={category.id} onClick={() => setCategories((current) => current.map((item) => item.id === category.id ? { ...item, active: !item.active } : item))}><span>{category.name}</span><i>{category.active ? "Ativa" : "Inativa"}</i></button>)}</section>)}</div></div> : null}
-
-          {section === "Usuários e mecânicos" ? <div className="settings-editor-body">
-            <div className="settings-inline-head"><div><strong>Equipe, acessos e salário padrão</strong><small>Erasmo e Rayane têm acesso total. Mecânicos podem atualizar as OS atribuídas a eles.</small></div><button className="outline-button large" onClick={() => setUsers((current) => [...current, { id: `USR-${String(current.length + 1).padStart(3, "0")}`, name: "Novo funcionário", role: "Mecânico", position: "Mecânico", phone: "", active: true, canReceiveServiceOrders: true, canManageAllOrders: false, employmentType: "Avulso", baseSalary: 0, paymentDay: 5, currentOrders: 0 }])}><Icon name="plus" size={15}/>Adicionar funcionário</button></div>
-            <div className="staff-config-summary"><article><span>Equipe ativa</span><strong>{users.filter((user) => user.active).length}</strong><small>{users.filter((user) => user.employmentType === "Fixo").length} fixos · {users.filter((user) => user.employmentType === "Avulso").length} avulsos</small></article><article><span>Folha padrão configurada</span><strong>{formatBRL(users.filter((user) => user.active && user.employmentType === "Fixo").reduce((sum, user) => sum + user.baseSalary, 0))}</strong><small>Usada como sugestão ao lançar o pagamento</small></article></div>
-            <div className="staff-config-list">{users.map((user) => <article className="staff-config-card" key={user.id}>
-              <div className="staff-card-head"><span className="registry-avatar">{user.name.split(" ").slice(0, 2).map((part) => part[0]).join("")}</span><div><input value={user.name} onChange={(event) => updateUser(user.id, { name: event.target.value })}/><small>{user.position} · {user.currentOrders} OS em andamento</small></div><button className={`config-status ${user.active ? "active" : ""}`} onClick={() => updateUser(user.id, { active: !user.active })}>{user.active ? "Ativo" : "Inativo"}</button></div>
-              <div className="staff-card-fields"><label><span>Cargo / função</span><input value={user.position} onChange={(event) => updateUser(user.id, { position: event.target.value })}/></label><label><span>Perfil de acesso</span><select value={user.role} onChange={(event) => updateUser(user.id, { role: event.target.value as UserConfig["role"] })}><option>Super Admin</option><option>Balcão</option><option>Mecânico</option></select></label><label><span>Vínculo</span><select value={user.employmentType} onChange={(event) => updateUser(user.id, { employmentType: event.target.value as UserConfig["employmentType"] })}><option>Fixo</option><option>Avulso</option></select></label><label><span>Salário padrão</span><input type="number" min="0" value={user.baseSalary} onChange={(event) => updateUser(user.id, { baseSalary: Number(event.target.value) || 0 })}/></label><label><span>Dia de pagamento</span><select value={user.paymentDay} onChange={(event) => updateUser(user.id, { paymentDay: Number(event.target.value) })}><option value="5">Dia 05</option><option value="10">Dia 10</option><option value="30">Último dia útil</option></select></label></div>
-              <div className="staff-permissions"><button className={`permission-chip ${user.canReceiveServiceOrders ? "allowed" : ""}`} onClick={() => updateUser(user.id, { canReceiveServiceOrders: !user.canReceiveServiceOrders })}>{user.canReceiveServiceOrders ? "Recebe OS" : "Não recebe OS"}</button><button className={`permission-chip ${user.canManageAllOrders ? "allowed" : ""}`} onClick={() => updateUser(user.id, { canManageAllOrders: !user.canManageAllOrders })}>{user.canManageAllOrders ? "Acesso a todas as OS" : "Somente OS atribuídas"}</button><span>{user.employmentType === "Avulso" ? "Pagamento manual por trabalho ou período" : user.baseSalary > 0 ? `${formatBRL(user.baseSalary)} todo dia ${String(user.paymentDay).padStart(2, "0")}` : "Defina o salário para sugerir no Novo gasto"}</span></div>
-            </article>)}</div>
-          </div> : null}
-
-          {section === "Parceiros" ? <div className="settings-editor-body"><div className="settings-inline-head"><div><strong>Empresas que encaminham motos</strong><small>O desconto é aplicado somente na mão de obra.</small></div><button className="outline-button large" onClick={() => setPartners((current) => [...current, { id: `PAR-${String(current.length + 1).padStart(3, "0")}`, name: "Novo parceiro", phone: "", laborDiscount: 15, billingCycle: "Faturamento mensal", active: true }])}><Icon name="plus" size={15}/>Adicionar parceiro</button></div><div className="config-list">{partners.map((partner) => <article className="config-record partner-config-record" key={partner.id}><span className="registry-avatar">{partner.name.slice(0, 2).toUpperCase()}</span><div className="config-record-main"><input value={partner.name} onChange={(event) => updatePartner(partner.id, { name: event.target.value })}/><small>{partner.phone || "Telefone não informado"}</small></div><label><span>Desconto mão de obra</span><input type="number" value={partner.laborDiscount} onChange={(event) => updatePartner(partner.id, { laborDiscount: Number(event.target.value) })}/></label><label><span>Acerto</span><select value={partner.billingCycle} onChange={(event) => updatePartner(partner.id, { billingCycle: event.target.value })}><option>Faturamento mensal</option><option>Pagamento semanal</option><option>Pagamento por OS</option></select></label><button className={`config-status ${partner.active ? "active" : ""}`} onClick={() => updatePartner(partner.id, { active: !partner.active })}>{partner.active ? "Ativo" : "Inativo"}</button></article>)}</div></div> : null}
-
-          {section === "Fornecedores" ? <div className="settings-editor-body"><div className="settings-inline-head"><div><strong>Fornecedores cadastrados</strong><small>Usados nas compras, entradas e peças emergenciais.</small></div><button className="outline-button large" onClick={() => setSuppliers((current) => [...current, { id: `FOR-${String(current.length + 1).padStart(3, "0")}`, name: "Novo fornecedor", phone: "", categories: "Peças gerais", deliveryDays: 2, active: true }])}><Icon name="plus" size={15}/>Adicionar fornecedor</button></div><div className="config-list">{suppliers.map((supplier) => <article className="config-record supplier-config-record" key={supplier.id}><span className="registry-avatar">{supplier.name.slice(0, 2).toUpperCase()}</span><div className="config-record-main"><input value={supplier.name} onChange={(event) => updateSupplier(supplier.id, { name: event.target.value })}/><small>{supplier.phone || "Telefone não informado"} · {supplier.categories}</small></div><label><span>Prazo médio</span><select value={supplier.deliveryDays} onChange={(event) => updateSupplier(supplier.id, { deliveryDays: Number(event.target.value) })}><option value="0">No mesmo dia</option><option value="1">1 dia</option><option value="2">2 dias</option><option value="3">3 dias</option><option value="5">5 dias</option></select></label><button className={`config-status ${supplier.active ? "active" : ""}`} onClick={() => updateSupplier(supplier.id, { active: !supplier.active })}>{supplier.active ? "Ativo" : "Inativo"}</button></article>)}</div></div> : null}
-
-          {section === "Produtos e estoque" ? <div className="settings-editor-body"><div className="form-grid"><label className="field"><span>Estoque mínimo padrão</span><input type="number" defaultValue="5"/></label><label className="field"><span>Unidade padrão</span><select><option>UN · Unidade</option><option>LT · Litro</option><option>PC · Peça</option></select></label><label className="field"><span>Formação de preço</span><select><option>Custo + margem informada</option><option>Preço de venda manual</option></select></label><label className="field"><span>Margem sugerida</span><input defaultValue="45%"/></label></div><div className="settings-toggles"><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Bloquear venda sem estoque</strong><small>O sistema avisa antes de incluir uma peça zerada</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Baixar peça somente quando usada</strong><small>A reserva na OS não altera o saldo até a aplicação</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Usar custo médio ponderado</strong><small>Recalcula o custo a cada entrada de mercadoria</small></div></label></div></div> : null}
-
-          {section === "Pagamentos" ? <div className="settings-editor-body">
-            <div className="settings-inline-head"><div><strong>Formas disponíveis</strong><small>Ative somente as opções usadas no PDV e no fechamento da OS.</small></div></div>
-            <div className="payment-method-config">{paymentMethods.map((method) => <button className={method.active ? "active" : ""} key={method.id} onClick={() => updatePaymentMethod(method.id, { active: !method.active })}><span>{method.name.slice(0, 2).toUpperCase()}</span><div><strong>{method.name}</strong><small>{method.usesMachine ? "Usa as taxas da maquininha selecionada" : "Sem taxa automática de cartão"}</small></div><i>{method.active ? "Ativa" : "Inativa"}</i></button>)}</div>
-            <div className="settings-inline-head payment-machines-head"><div><strong>Maquininhas e taxas</strong><small>As taxas entram automaticamente no cálculo do valor líquido e do lucro.</small></div><button className="outline-button large" onClick={() => setPaymentMachines((current) => [...current, { id: `MAQ-${String(current.length + 1).padStart(3, "0")}`, name: "Nova maquininha", active: true, primary: false, debitFee: 0, credit1xFee: 0, credit2to6Fee: 0, credit7to12Fee: 0, settlementDays: 1 }])}><Icon name="plus" size={15}/>Adicionar máquina</button></div>
-            <div className="machine-config-list">{paymentMachines.map((machine) => <article className={`machine-config-card ${machine.primary ? "primary" : ""}`} key={machine.id}><div className="machine-card-head"><span className="machine-icon"><Icon name="wallet" size={17}/></span><div><input value={machine.name} onChange={(event) => updatePaymentMachine(machine.id, { name: event.target.value })}/><small>{machine.primary ? "Maquininha principal" : `Recebimento em D+${machine.settlementDays}`}</small></div><button className={`config-status ${machine.active ? "active" : ""}`} onClick={() => updatePaymentMachine(machine.id, { active: !machine.active })}>{machine.active ? "Ativa" : "Inativa"}</button></div><div className="machine-rate-grid"><label><span>Débito</span><div><input type="number" step="0.01" value={machine.debitFee} onChange={(event) => updatePaymentMachine(machine.id, { debitFee: Number(event.target.value) || 0 })}/><b>%</b></div></label><label><span>Crédito 1x</span><div><input type="number" step="0.01" value={machine.credit1xFee} onChange={(event) => updatePaymentMachine(machine.id, { credit1xFee: Number(event.target.value) || 0 })}/><b>%</b></div></label><label><span>Crédito 2–6x</span><div><input type="number" step="0.01" value={machine.credit2to6Fee} onChange={(event) => updatePaymentMachine(machine.id, { credit2to6Fee: Number(event.target.value) || 0 })}/><b>%</b></div></label><label><span>Crédito 7–12x</span><div><input type="number" step="0.01" value={machine.credit7to12Fee} onChange={(event) => updatePaymentMachine(machine.id, { credit7to12Fee: Number(event.target.value) || 0 })}/><b>%</b></div></label><label><span>Receber em</span><select value={machine.settlementDays} onChange={(event) => updatePaymentMachine(machine.id, { settlementDays: Number(event.target.value) })}><option value="0">Na hora</option><option value="1">D+1</option><option value="2">D+2</option><option value="30">D+30</option></select></label></div><button className="machine-primary-action" onClick={() => setPrimaryMachine(machine.id)}>{machine.primary ? "✓ Máquina principal" : "Usar como principal"}</button></article>)}</div>
-            <div className="info-strip"><Icon name="alert" size={18}/><span>As taxas exibidas são valores de exemplo. Ajuste cada percentual conforme o contrato real de cada maquininha.</span></div>
-          </div> : null}
-
-          {section === "Impressão e WhatsApp" ? <div className="settings-editor-body">
-            <div className="form-grid"><label className="field field-full"><span>Impressora térmica</span><select><option>Elgin i9 · USB · 80mm</option><option>Outra impressora</option></select></label><label className="field"><span>Formato padrão</span><select><option>Cupom 80mm</option><option>A4</option><option>Cupom 58mm</option></select></label><label className="field"><span>Número de vias</span><input type="number" value="3" readOnly/><small className="field-help">Padrão obrigatório no fechamento da OS</small></label><label className="field field-full"><span>Mensagem padrão do WhatsApp</span><textarea defaultValue="Olá! Aqui é da Pica Pau Motos. Segue a atualização da sua ordem de serviço."/></label></div>
-            <div className="print-copy-grid"><article><span>1</span><div><strong>Via do mecânico</strong><small>Moto, reclamação, peças, serviços e equipe responsável.</small></div></article><article><span>2</span><div><strong>Via do caixa</strong><small>Itens, total, recebimento, taxas e saldo financeiro.</small></div></article><article><span>3</span><div><strong>Via do cliente</strong><small>Itens cobrados, valores, pagamento e garantia.</small></div></article></div>
-            <div className="settings-toggles"><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Imprimir 3 vias ao finalizar a OS</strong><small>As vias do mecânico, caixa e cliente ficam identificadas no cabeçalho.</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Anexar link da OS no WhatsApp</strong><small>O cliente acompanha orçamento e andamento</small></div></label></div>
-          </div> : null}
-        </section>
-      </div>
-    </>
-  );
-}
-
-function TeamWorkspace({ users, setUsers, openDialog }: { users: UserConfig[]; setUsers: React.Dispatch<React.SetStateAction<UserConfig[]>>; openDialog: OpenDialog }) {
+function TeamWorkspace({ users, setUsers, openDialog, notify }: { users: UserConfig[]; setUsers: React.Dispatch<React.SetStateAction<UserConfig[]>>; openDialog: OpenDialog; notify: (message: string) => void }) {
   const [teamFilter, setTeamFilter] = useState("Todos");
   const [teamSearch, setTeamSearch] = useState("");
-  const activeUsers = users.filter((user) => user.active);
-  const activeMechanicsCount = activeUsers.filter((user) => user.canReceiveServiceOrders).length;
-  const monthlyPayroll = activeUsers.filter((user) => user.employmentType === "Fixo").reduce((sum, user) => sum + user.baseSalary, 0);
+  const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+  const [selectedEmployeeForEdit, setSelectedEmployeeForEdit] = useState<UserConfig | null>(null);
+
+  const activeUsers = users.filter((user) => user.active !== false);
+  const activeMechanicsCount = activeUsers.filter((user) => isMechanicUser(user)).length;
+  const monthlyPayroll = activeUsers.filter((user) => user.employmentType === "Fixo").reduce((sum, user) => sum + (user.baseSalary || 0), 0);
   const filteredUsers = users.filter((user) => {
-    const matchesFilter = teamFilter === "Todos" || (teamFilter === "Mecânicos" && user.canReceiveServiceOrders) || (teamFilter === "Gestão" && user.canManageAllOrders) || (teamFilter === "Avulsos" && user.employmentType === "Avulso");
+    const isMech = isMechanicUser(user);
+    const matchesFilter = teamFilter === "Todos"
+      || (teamFilter === "Mecânicos" && isMech)
+      || (teamFilter === "Gestão" && user.canManageAllOrders)
+      || (teamFilter === "Avulsos" && user.employmentType === "Avulso");
     const haystack = `${user.name} ${user.role} ${user.position} ${user.phone}`.toLowerCase();
     return matchesFilter && haystack.includes(teamSearch.toLowerCase());
   });
-  const updateSalary = (id: string, value: number) => setUsers((current) => current.map((user) => user.id === id ? { ...user, baseSalary: value } : user));
+
+  const handleEditEmployee = (emp: UserConfig) => {
+    setSelectedEmployeeForEdit(emp);
+    setIsEmployeeModalOpen(true);
+  };
+
+  const handleAddEmployee = () => {
+    setSelectedEmployeeForEdit(null);
+    setIsEmployeeModalOpen(true);
+  };
+
+  const handleEmployeeSaved = (saved: UserConfig) => {
+    setUsers((current) => {
+      const idx = current.findIndex((u) => u.id === saved.id);
+      if (idx >= 0) {
+        const next = [...current];
+        next[idx] = saved;
+        return next;
+      }
+      return [...current, saved];
+    });
+  };
+
   return (
     <>
       <div className="module-heading">
         <div><p>Equipe da oficina</p><h1>Funcionários e pagamentos</h1><span>Controle quem é fixo ou avulso, o salário padrão e a carga de OS.</span></div>
-        <div className="heading-actions"><button className="outline-button large" onClick={() => openDialog("expense")}><Icon name="wallet" size={16}/>Registrar pagamento</button><button className="primary-button" onClick={() => openDialog("employee")}><Icon name="plus" size={18}/>Adicionar funcionário</button></div>
+        <div className="heading-actions">
+          <button className="outline-button large" onClick={() => openDialog("expense")}><Icon name="wallet" size={16}/>Registrar pagamento</button>
+          <button className="primary-button" onClick={handleAddEmployee}><Icon name="plus" size={18}/>Adicionar funcionário</button>
+        </div>
       </div>
       <div className="module-summary">
-        <article><span>Equipe ativa</span><strong>{activeUsers.length}</strong><small>{activeMechanicsCount} podem receber e atualizar OS</small></article>
-        <article><span>Folha mensal padrão</span><strong>{formatBRL(monthlyPayroll)}</strong><small>{users.filter((user) => user.employmentType === "Fixo" && user.baseSalary === 0).length} salários ainda precisam ser definidos</small></article>
-        <article><span>Tipo de vínculo</span><strong>{users.filter((user) => user.employmentType === "Fixo").length} + {users.filter((user) => user.employmentType === "Avulso").length}</strong><small>Fixos + mecânicos avulsos</small></article>
+        <article><span>Equipe ativa</span><strong>{activeUsers.length}</strong><small>{activeMechanicsCount} mecânico(s) apto(s) para OS</small></article>
+        <article><span>Folha mensal padrão</span><strong>{formatBRL(monthlyPayroll)}</strong><small>{users.filter((user) => user.employmentType === "Fixo" && (!user.baseSalary || user.baseSalary === 0)).length} salários ainda precisam ser definidos</small></article>
+        <article><span>Tipo de vínculo</span><strong>{users.filter((user) => user.employmentType === "Fixo").length} + {users.filter((user) => user.employmentType === "Avulso").length}</strong><small>Fixos + avulsos</small></article>
       </div>
       <section className="panel module-panel">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={teamSearch} onChange={(event) => setTeamSearch(event.target.value)} placeholder="Buscar funcionário, telefone ou função"/></label><div className="filter-pills">{["Todos", "Mecânicos", "Gestão", "Avulsos"].map((filter) => <button className={teamFilter === filter ? "selected" : ""} key={filter} onClick={() => setTeamFilter(filter)}>{filter}</button>)}</div></div>
-        <div className="team-list">{filteredUsers.map((user) => {
-          const status = user.active ? (user.currentOrders ? "Trabalhando" : "Disponível") : "Inativo";
+        <div className="team-list">{filteredUsers.length ? filteredUsers.map((user) => {
+          const isMech = isMechanicUser(user);
+          const status = user.active !== false ? (user.currentOrders ? "Trabalhando" : "Disponível") : "Inativo";
           return <article className="team-row" key={user.id}>
-            <span className="team-avatar">{user.name.split(" ").slice(0, 2).map((part) => part[0]).join("")}<i/></span>
-            <span><strong>{user.name}</strong><small>{user.position} · {user.employmentType}</small></span>
-            <span><b>Atividade</b><small>{user.canReceiveServiceOrders ? `${user.currentOrders} OS em andamento` : user.canManageAllOrders ? "Acesso a toda operação" : "Atendimento"}</small></span>
-            <label className="team-salary"><b>Salário padrão</b><input type="number" min="0" value={user.baseSalary} onChange={(event) => updateSalary(user.id, Number(event.target.value) || 0)} aria-label={`Salário padrão de ${user.name}`}/><small>Dia {String(user.paymentDay).padStart(2, "0")}</small></label>
+            <span className="team-avatar">{user.name.split(" ").slice(0, 2).map((part) => part[0]).join("") || "FN"}<i/></span>
+            <span>
+              <strong>{user.name}</strong>
+              <small>{user.position} {user.isResponsibleMechanic ? "• Responsável" : isMech ? "• Mecânico" : ""} · {user.employmentType}</small>
+            </span>
+            <span>
+              <b>Atividade</b>
+              <small>{isMech ? `${user.currentOrders || 0} OS em andamento` : user.canManageAllOrders ? "Acesso a toda operação" : "Atendimento"}</small>
+            </span>
+            <label className="team-salary">
+              <b>Salário padrão</b>
+              <span className="salary-val">{formatBRL(user.baseSalary || 0)}</span>
+              <small>Dia {String(user.paymentDay || 5).padStart(2, "0")}</small>
+            </label>
             <span className={`status ${status === "Disponível" ? "green" : status === "Inativo" ? "red" : "blue"}`}><i/>{status}</span>
-            <button className="row-button" onClick={() => openDialog("employee")} aria-label={`Editar ${user.name}`}><Icon name="arrow" size={17}/></button>
+            <button className="row-button" onClick={() => handleEditEmployee(user)} aria-label={`Editar ${user.name}`}><Icon name="arrow" size={17}/></button>
           </article>;
-        })}</div>
+        }) : <div className="no-results" style={{ padding: "32px 16px", textAlign: "center" }}>Nenhum funcionário encontrado.</div>}</div>
       </section>
+
+      <EmployeeFormModal
+        isOpen={isEmployeeModalOpen}
+        onClose={() => { setIsEmployeeModalOpen(false); setSelectedEmployeeForEdit(null); }}
+        onSaved={handleEmployeeSaved}
+        editingEmployee={selectedEmployeeForEdit}
+        notify={notify}
+        allEmployees={users}
+      />
     </>
   );
 }
@@ -1392,6 +1251,7 @@ function ModuleWorkspace({
   orders,
   products,
   clients,
+  motorcycles,
 }: {
   active: string;
   canOperate: boolean;
@@ -1420,6 +1280,7 @@ function ModuleWorkspace({
   orders: OrderRecord[];
   products: ProductRecord[];
   clients: ClientRecord[];
+  motorcycles: MotorcycleRecord[];
 }) {
   const [query, setQuery] = useState("");
   const [listFilter, setListFilter] = useState("Todos");
@@ -1429,13 +1290,26 @@ function ModuleWorkspace({
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} paymentMachines={paymentMachines}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses}/>;
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses}/>;
-  if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} />;
+  if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} />;
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
-  if (active === "Configurações") return <SettingsWorkspace users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} notify={notify}/>;
+  if (active === "Configurações") return <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify}/>;
   if (active === "Administração") return <AdminWorkspace navigate={navigate} />;
 
   if (active === "Ordens de serviço" || active === "Orçamentos") {
     const isBudget = active === "Orçamentos";
+    const filteredOrders = orders.filter((order) => {
+      const text = `${order.id} ${order.customer} ${order.bike} ${order.plate}`.toLowerCase();
+      const byText = text.includes(query.toLowerCase());
+      const byStatus = listFilter === "Todos" || (listFilter === "Abertas" && ["Recepção", "Avaliação", "Aprovação"].includes(order.status)) || (listFilter === "Em andamento" && order.status === "Em serviço") || (listFilter === "Concluídas" && order.status === "Entrega");
+      return byText && byStatus;
+    });
+    const openCount = orders.filter((order) => ["Recepção", "Avaliação", "Aprovação"].includes(order.status)).length;
+    const inServiceCount = orders.filter((order) => order.status === "Em serviço").length;
+    const readyCount = orders.filter((order) => order.status === "Entrega").length;
+    const budgetDraftCount = orders.filter((order) => order.status === "Recepção" || order.status === "Avaliação").length;
+    const budgetPendingCount = orders.filter((order) => order.status === "Aprovação").length;
+    const budgetApprovedCount = orders.filter((order) => order.status === "Em serviço" || order.status === "Entrega").length;
+
     return (
       <>
         <div className="module-heading">
@@ -1443,9 +1317,9 @@ function ModuleWorkspace({
           {canCreateOrders ? <button className="primary-button" onClick={() => openDialog(isBudget ? "os" : "osChoice")}><Icon name="plus" size={18} />{isBudget ? "Novo orçamento" : "Abrir nova OS"}</button> : <span className="system-healthy"><i/><b>Consulta da oficina</b></span>}
         </div>
         <div className="module-summary">
-          <article><span>{isBudget ? "Em elaboração" : "Em aberto"}</span><strong>{isBudget ? "3" : "8"}</strong><small>Precisam de ação</small></article>
-          <article><span>{isBudget ? "Aguardando cliente" : "Em serviço"}</span><strong>{isBudget ? "4" : "6"}</strong><small>{isBudget ? "R$ 2.840,00" : "4 mecânicos ativos"}</small></article>
-          <article><span>{isBudget ? "Aprovados no mês" : "Prontas"}</span><strong>{isBudget ? "21" : "3"}</strong><small>{isBudget ? "76% de conversão" : "2 clientes avisados"}</small></article>
+          <article><span>{isBudget ? "Em elaboração" : "Em aberto"}</span><strong>{isBudget ? budgetDraftCount : openCount}</strong><small>{(isBudget ? budgetDraftCount : openCount) > 0 ? "Precisam de ação" : "Nenhum pendente"}</small></article>
+          <article><span>{isBudget ? "Aguardando cliente" : "Em serviço"}</span><strong>{isBudget ? budgetPendingCount : inServiceCount}</strong><small>{(isBudget ? budgetPendingCount : inServiceCount) > 0 ? (isBudget ? "Aguardando aprovação" : "Mecânicos trabalhando") : "Nenhum em andamento"}</small></article>
+          <article><span>{isBudget ? "Aprovados no mês" : "Prontas"}</span><strong>{isBudget ? budgetApprovedCount : readyCount}</strong><small>{(isBudget ? budgetApprovedCount : readyCount) > 0 ? (isBudget ? "Propostas aceitas" : "Aguardando retirada") : "Nenhum registro"}</small></article>
         </div>
         <section className="panel module-panel">
           <div className="list-toolbar">
@@ -1455,21 +1329,22 @@ function ModuleWorkspace({
           <div className="table-scroll">
             <table>
               <thead><tr><th>OS / Cliente</th><th>Motocicleta</th><th>Responsável</th><th>Entrada</th><th>Status</th><th>Ação</th></tr></thead>
-              <tbody>{orders.filter((order) => {
-                const text = `${order.id} ${order.customer} ${order.bike} ${order.plate}`.toLowerCase();
-                const byText = text.includes(query.toLowerCase());
-                const byStatus = listFilter === "Todos" || (listFilter === "Abertas" && ["Recepção", "Avaliação", "Aprovação"].includes(order.status)) || (listFilter === "Em andamento" && order.status === "Em serviço") || (listFilter === "Concluídas" && order.status === "Entrega");
-                return byText && byStatus;
-              }).map((order) => (
+              <tbody>{filteredOrders.length > 0 ? filteredOrders.map((order) => (
                 <tr key={order.id}>
                   <td><strong className="order-id">{order.id}</strong><span>{order.customer}</span></td>
                   <td><strong>{order.bike}</strong><span className="plate">{order.plate}</span></td>
-                  <td><span className="mechanic-avatar">{order.mechanic[0]}</span>{order.mechanic}</td>
-                  <td>24/08 às {order.time}</td>
+                  <td><span className="mechanic-avatar">{order.mechanic ? order.mechanic[0] : "M"}</span>{order.mechanic || "Não definido"}</td>
+                  <td>{order.time ? `Entrada: ${order.time}` : "Hoje"}</td>
                   <td><span className={`status ${order.tone}`}><i />{isBudget && order.status === "Em serviço" ? "Aprovado" : order.status}</span></td>
                   <td><button className="outline-button" onClick={() => openDialog("order")}>Abrir</button></td>
                 </tr>
-              ))}</tbody>
+              )) : (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>
+                    Nenhuma ordem de serviço cadastrada. Clique em "Abrir nova OS" para começar.
+                  </td>
+                </tr>
+              )}</tbody>
             </table>
           </div>
         </section>
@@ -1478,6 +1353,14 @@ function ModuleWorkspace({
   }
 
   if (active === "Produtos e estoque") {
+    const filteredProducts = products.filter((product) => {
+      const byText = `${product.name} ${product.code} ${product.category}`.toLowerCase().includes(query.toLowerCase());
+      const byStatus = listFilter === "Todos" || product.status === listFilter;
+      return byText && byStatus;
+    });
+    const criticalCount = products.filter((p) => p.stock > 0 && p.stock <= p.minimum).length;
+    const zeroStockCount = products.filter((p) => p.stock === 0).length;
+
     return (
       <>
         <div className="module-heading">
@@ -1489,9 +1372,9 @@ function ModuleWorkspace({
           </div> : <span className="system-healthy"><i/><b>Estoque em consulta</b></span>}
         </div>
         <div className="module-summary">
-          <article><span>Produtos cadastrados</span><strong>286</strong><small>R$ 38.420,00 em estoque</small></article>
-          <article className="summary-danger"><span>Estoque crítico</span><strong>12</strong><small>3 produtos zerados</small></article>
-          <article><span>Entradas no mês</span><strong>74</strong><small>R$ 8.760,00 em compras</small></article>
+          <article><span>Produtos cadastrados</span><strong>{products.length}</strong><small>{products.length > 0 ? "Itens ativos no catálogo" : "Nenhum produto cadastrado"}</small></article>
+          <article className={criticalCount + zeroStockCount > 0 ? "summary-danger" : ""}><span>Estoque crítico</span><strong>{criticalCount + zeroStockCount}</strong><small>{zeroStockCount > 0 ? `${zeroStockCount} produto(s) zerado(s)` : criticalCount > 0 ? `${criticalCount} em nível mínimo` : "Estoque normalizado"}</small></article>
+          <article><span>Categorias ativas</span><strong>{categories.filter((c) => c.active).length}</strong><small>{suppliers.filter((s) => s.active).length} fornecedor(es) cadastrado(s)</small></article>
         </div>
         <section className="panel module-panel">
           <div className="list-toolbar">
@@ -1501,11 +1384,7 @@ function ModuleWorkspace({
           <div className="table-scroll">
             <table>
               <thead><tr><th>Produto</th><th>Categoria</th><th>Saldo</th><th>Custo</th><th>Venda</th><th>Situação</th><th></th></tr></thead>
-              <tbody>{products.filter((product) => {
-                const byText = `${product.name} ${product.code} ${product.category}`.toLowerCase().includes(query.toLowerCase());
-                const byStatus = listFilter === "Todos" || product.status === listFilter;
-                return byText && byStatus;
-              }).map((product) => (
+              <tbody>{filteredProducts.length > 0 ? filteredProducts.map((product) => (
                 <tr key={product.code}>
                   <td><strong>{product.name}</strong><span className="mono">{product.code}</span></td>
                   <td>{product.category}</td>
@@ -1514,7 +1393,13 @@ function ModuleWorkspace({
                   <td><span className={`status ${product.status === "Normal" ? "green" : product.status === "Crítico" ? "amber" : "red"}`}><i/>{product.status}</span></td>
                   <td><button className="row-button" aria-label={`Abrir ${product.name}`} onClick={() => canOperate ? openDialog("product") : notify("Seu perfil pode consultar o estoque, mas não alterar produtos.")}><Icon name="arrow" size={17}/></button></td>
                 </tr>
-              ))}</tbody>
+              )) : (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>
+                    Nenhum produto cadastrado no estoque.
+                  </td>
+                </tr>
+              )}</tbody>
             </table>
           </div>
         </section>
@@ -1523,53 +1408,34 @@ function ModuleWorkspace({
   }
 
   const configs: Record<string, { eyebrow: string; description: string; button: string; first: string; second: string; third: string }> = {
-    Clientes: { eyebrow: "Relacionamento", description: "Cadastros, contatos, veículos e histórico de atendimento.", button: "Adicionar cliente", first: "Clientes ativos", second: "Novos este mês", third: "Com saldo a prazo" },
-    Motocicletas: { eyebrow: "Veículos", description: "Motos vinculadas aos proprietários e histórico da oficina.", button: "Cadastrar moto", first: "Motos cadastradas", second: "Na oficina agora", third: "Sem revisão há 6 meses" },
+    Clientes: { eyebrow: "Relacionamento", description: "Cadastros, contatos, veículos e histórico de atendimento.", button: "Adicionar cliente", first: "Clientes ativos", second: "Com WhatsApp", third: "Com motos vinculadas" },
+    Motocicletas: { eyebrow: "Veículos", description: "Motos vinculadas aos proprietários e histórico da oficina.", button: "Cadastrar moto", first: "Motos cadastradas", second: "Marcas ativas", third: "Com placa Mercosul" },
     "Vendas do balcão": { eyebrow: "Histórico do PDV", description: "Consulte vendas, pagamentos e comprovantes do balcão.", button: "Abrir PDV", first: "Vendas hoje", second: "Recebido hoje", third: "Ticket médio" },
     "Compras e entradas": { eyebrow: "Reposição de estoque", description: "Registre compras e entradas de peças sem rotina fiscal.", button: "Nova entrada", first: "Entradas no mês", second: "Valor comprado", third: "Aguardando conferência" },
-    Fornecedores: { eyebrow: "Parceiros de fornecimento", description: "Contatos, prazos, condições e peças fornecidas.", button: "Adicionar fornecedor", first: "Fornecedores ativos", second: "Prazo médio", third: "Compras em aberto" },
+    Fornecedores: { eyebrow: "Parceiros de fornecimento", description: "Contatos, prazos, condições e peças fornecidas.", button: "Adicionar fornecedor", first: "Fornecedores ativos", second: "Prazo médio", third: "Com entrega rápida" },
     Financeiro: { eyebrow: "Caixa e recebimentos", description: "Acompanhe entradas, saídas e valores a receber.", button: "Nova movimentação", first: "Saldo do dia", second: "A receber", third: "Contas vencidas" },
     Relatórios: { eyebrow: "Indicadores", description: "Resultados da oficina organizados para decisões rápidas.", button: "Exportar relatório", first: "Faturamento do mês", second: "Ticket médio", third: "Serviços concluídos" },
   };
   const config = configs[active] ?? configs.Clientes;
-  const listData: Record<string, Array<{ name: string; sub: string; meta: string; initials: string }>> = {
-    "Vendas do balcão": [
-      { name: "Venda #0083", sub: "10:42 · PIX · 3 itens", meta: "R$ 108,00", initials: "83" },
-      { name: "Venda #0082", sub: "09:18 · Dinheiro · 1 item", meta: "R$ 30,00", initials: "82" },
-      { name: "Venda #0081", sub: "08:55 · Crédito 2x · 4 itens", meta: "R$ 286,90", initials: "81" },
-      { name: "Venda #0080", sub: "Ontem, 19:12 · Débito · 2 itens", meta: "R$ 94,00", initials: "80" },
-    ],
-    "Compras e entradas": [
-      { name: "Entrada #CMP-0042", sub: "Moto Peças Triângulo · 18 produtos", meta: "R$ 3.840,00", initials: "42" },
-      { name: "Entrada #CMP-0041", sub: "Distribuidora Minas · 7 produtos", meta: "R$ 1.290,00", initials: "41" },
-      { name: "Entrada #CMP-0040", sub: "Central dos Óleos · 24 produtos", meta: "R$ 2.760,00", initials: "40" },
-      { name: "Ajuste de inventário", sub: "Conferência da prateleira A", meta: "12 itens", initials: "AJ" },
-    ],
-    Fornecedores: [
-      { name: "Moto Peças Triângulo", sub: "(34) 3238-4430 · Entrega em 2 dias", meta: "Peças gerais", initials: "MT" },
-      { name: "Distribuidora Minas", sub: "(34) 99184-2240 · Entrega em 3 dias", meta: "Freios e relação", initials: "DM" },
-      { name: "Central dos Óleos", sub: "(34) 3224-0951 · Entrega no dia", meta: "Lubrificantes", initials: "CO" },
-      { name: "Elétrica Moto Center", sub: "(34) 99620-8134 · Entrega em 2 dias", meta: "Elétrica", initials: "EM" },
-    ],
-    Financeiro: [
-      { name: "Caixa diário", sub: "Entradas, saídas, sangrias e fechamento", meta: "R$ 4.280 hoje", initials: "CX" },
-      { name: "Contas a receber", sub: "Crediário, parceiros e pagamentos parciais", meta: "R$ 8.740", initials: "CR" },
-      { name: "Contas a pagar", sub: "Despesas e fornecedores", meta: "6 vencimentos", initials: "CP" },
-      { name: "Pagamentos de funcionários", sub: "Salários padrão, avulsos e histórico", meta: "Próximo dia 05", initials: "PF" },
-    ],
-    Relatórios: [
-      { name: "Faturamento e resultado", sub: "Receitas, custos e margem do período", meta: "R$ 38,4 mil", initials: "FR" },
-      { name: "Ordens de serviço", sub: "Volume, tempo e taxa de aprovação", meta: "134 concluídas", initials: "OS" },
-      { name: "Estoque e Curva ABC", sub: "Giro, valor parado e reposição", meta: "12 alertas", initials: "AB" },
-      { name: "Produtividade da equipe", sub: "Serviços e comissões por mecânico", meta: "4 mecânicos", initials: "PE" },
-    ],
-  };
-  const defaultRecords = clients.map((client) => ({ name: client.name, sub: client.phone, meta: client.meta, initials: client.name.split(" ").slice(0, 2).map((word) => word[0]).join("") }));
-  const supplierRecords = suppliers.map((supplier) => ({ name: supplier.name, sub: `${supplier.phone || "Sem telefone"} · ${supplier.deliveryDays === 0 ? "Entrega no dia" : `Entrega em ${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}`, meta: supplier.categories, initials: supplier.name.split(" ").slice(0, 2).map((word) => word[0]).join("") }));
-  const records = active === "Fornecedores" ? supplierRecords : listData[active] ?? defaultRecords;
-  const firstValue = active === "Financeiro" ? "R$ 4.280" : active === "Relatórios" ? "R$ 38,4 mil" : active === "Motocicletas" ? "412" : active === "Vendas do balcão" ? "14" : active === "Compras e entradas" ? "74" : active === "Fornecedores" ? String(suppliers.filter((supplier) => supplier.active).length) : "328";
-  const secondValue = active === "Financeiro" ? "R$ 8.740" : active === "Relatórios" ? "R$ 286" : active === "Vendas do balcão" ? "R$ 4.280" : active === "Compras e entradas" ? "R$ 8.760" : active === "Fornecedores" ? "2,4 dias" : "18";
-  const thirdValue = active === "Financeiro" ? "6" : active === "Relatórios" ? "134" : active === "Vendas do balcão" ? "R$ 305" : active === "Compras e entradas" ? "3" : active === "Fornecedores" ? "4" : "9";
+
+  const defaultRecords = clients.map((client) => ({ name: client.name, sub: client.phone || "Sem telefone", meta: client.detail || "Cliente cadastrado", initials: (client.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "CL").toUpperCase() }));
+  const motorcycleRecords = motorcycles.map((moto) => {
+    const owner = clients.find((c) => c.id === moto.ownerId);
+    return {
+      name: `${moto.brand} ${moto.model}`,
+      sub: `${owner ? owner.name : "Proprietário não vinculado"} · ${moto.plate}`,
+      meta: `${moto.year} · ${moto.color}`,
+      initials: (moto.model.slice(0, 2) || "MT").toUpperCase(),
+    };
+  });
+  const supplierRecords = suppliers.map((supplier) => ({ name: supplier.name, sub: `${supplier.phone || "Sem telefone"} · ${supplier.deliveryDays === 0 ? "Entrega no dia" : `Entrega em ${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}`, meta: supplier.categories, initials: (supplier.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "FN").toUpperCase() }));
+  
+  const records = active === "Fornecedores" ? supplierRecords : active === "Motocicletas" ? motorcycleRecords : active === "Clientes" ? defaultRecords : [];
+  
+  const firstValue = active === "Financeiro" ? "R$ 0,00" : active === "Relatórios" ? "R$ 0,00" : active === "Motocicletas" ? String(motorcycles.length) : active === "Vendas do balcão" ? "0" : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((supplier) => supplier.active).length) : String(clients.length);
+  const secondValue = active === "Financeiro" ? "R$ 0,00" : active === "Relatórios" ? "R$ 0,00" : active === "Motocicletas" ? String(new Set(motorcycles.map((m) => m.brand)).size) : active === "Vendas do balcão" ? "R$ 0,00" : active === "Compras e entradas" ? "R$ 0,00" : active === "Fornecedores" ? (suppliers.length > 0 ? `${Math.round(suppliers.reduce((sum, s) => sum + s.deliveryDays, 0) / suppliers.length)} dias` : "0 dias") : String(clients.filter((c) => Boolean(c.phone)).length);
+  const thirdValue = active === "Financeiro" ? "0" : active === "Relatórios" ? "0" : active === "Motocicletas" ? String(motorcycles.filter((m) => m.plate.length === 8).length) : active === "Vendas do balcão" ? "R$ 0,00" : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((s) => s.deliveryDays <= 1).length) : String(clients.filter((c) => c.motorcycleIds && c.motorcycleIds.length > 0).length);
+
   const primaryAction = () => {
     if (active === "Clientes") return openDialog("client");
     if (active === "Motocicletas") return openDialog("motorcycle");
@@ -1580,6 +1446,8 @@ function ModuleWorkspace({
     if (active === "Relatórios") return notify("Relatório exportado em formato PDF.");
     return openDialog("record");
   };
+  const filteredRecords = records.filter((record) => `${record.name} ${record.sub} ${record.meta}`.toLowerCase().includes(query.toLowerCase()));
+
   return (
     <>
       <div className="module-heading">
@@ -1589,17 +1457,23 @@ function ModuleWorkspace({
       <div className="module-summary">
         <article><span>{config.first}</span><strong>{firstValue}</strong><small>Atualizado agora</small></article>
         <article><span>{config.second}</span><strong>{secondValue}</strong><small>Período atual</small></article>
-        <article><span>{config.third}</span><strong>{thirdValue}</strong><small>Precisam de atenção</small></article>
+        <article><span>{config.third}</span><strong>{thirdValue}</strong><small>Registros no sistema</small></article>
       </div>
       <section className="panel module-panel registry-list">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Buscar em ${active.toLowerCase()}...`}/></label><button className="outline-button large" onClick={() => setListFilter(listFilter === "Todos" ? "Recentes" : "Todos")}>{listFilter === "Todos" ? "Mais recentes" : "Mostrar todos"}</button></div>
-        {records.filter((record) => `${record.name} ${record.sub} ${record.meta}`.toLowerCase().includes(query.toLowerCase())).map((record, index) => (
-          <button className="registry-row" key={record.name} onClick={() => canOperate ? openDialog(active === "Fornecedores" ? "supplier" : active === "Compras e entradas" ? "purchase" : active === "Financeiro" ? "finance" : active === "Motocicletas" ? "motorcycle" : active === "Clientes" ? "client" : "record") : notify("Seu perfil possui acesso de consulta a este cadastro.")}>
-            <span className="registry-avatar">{record.initials}</span>
-            <span><strong>{active === "Motocicletas" ? clients[index]?.detail ?? record.name : record.name}</strong><small>{active === "Motocicletas" ? `${record.name} · ${index % 2 ? "QOW-3J19" : "RTA-8B42"}` : record.sub}</small></span>
-            <span className="registry-meta">{record.meta}</span><Icon name="arrow" size={17}/>
-          </button>
-        ))}
+        {filteredRecords.length > 0 ? (
+          filteredRecords.map((record) => (
+            <button className="registry-row" key={`${record.name}-${record.sub}`} onClick={() => canOperate ? openDialog(active === "Fornecedores" ? "supplier" : active === "Compras e entradas" ? "purchase" : active === "Financeiro" ? "finance" : active === "Motocicletas" ? "motorcycle" : active === "Clientes" ? "client" : "record") : notify("Seu perfil possui acesso de consulta a este cadastro.")}>
+              <span className="registry-avatar">{record.initials}</span>
+              <span><strong>{record.name}</strong><small>{record.sub}</small></span>
+              <span className="registry-meta">{record.meta}</span><Icon name="arrow" size={17}/>
+            </button>
+          ))
+        ) : (
+          <div style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>
+            Nenhum registro encontrado em {active.toLowerCase()}.
+          </div>
+        )}
       </section>
     </>
   );
@@ -1617,12 +1491,16 @@ function AppDialog({
   users,
   partners,
   quickServices,
+  categories,
   suppliers,
   paymentMachines,
   paymentMethods,
   products,
   clients,
   motorcycles,
+  orders,
+  expenses,
+  notify,
 }: {
   dialog: DialogKind;
   canOperate: boolean;
@@ -1635,68 +1513,132 @@ function AppDialog({
   users: UserConfig[];
   partners: PartnerConfig[];
   quickServices: QuickServiceConfig[];
+  categories?: CategoryConfig[];
   suppliers: SupplierConfig[];
   paymentMachines: PaymentMachineConfig[];
   paymentMethods: PaymentMethodConfig[];
   products: ProductRecord[];
   clients: ClientRecord[];
   motorcycles: MotorcycleRecord[];
+  orders?: OrderRecord[];
+  expenses?: ExpenseRecord[];
+  notify?: (message: string) => void;
 }) {
+  if (dialog === "product") {
+    return (
+      <ProductFormModal
+        isOpen={true}
+        onClose={close}
+        onSaved={(prod) => finish(`Produto "${prod.name}" salvo com sucesso no Firestore!`)}
+        categories={categories}
+        suppliers={suppliers}
+        notify={notify || finish}
+        allProducts={products}
+      />
+    );
+  }
+
+  if (dialog === "supplier") {
+    return (
+      <SupplierFormModal
+        isOpen={true}
+        onClose={close}
+        onSaved={(sup) => finish(`Fornecedor "${sup.name}" salvo com sucesso no Firestore!`)}
+        notify={notify || finish}
+        allSuppliers={suppliers}
+      />
+    );
+  }
+
+  if (dialog === "motorcycle") {
+    return (
+      <MotorcycleFormModal
+        isOpen={true}
+        onClose={close}
+        onSaved={(moto) => finish(`Motocicleta placa ${moto.plate} salva com sucesso no Firestore!`)}
+        clients={clients}
+        notify={notify || finish}
+        allMotorcycles={motorcycles}
+      />
+    );
+  }
+
+  if (dialog === "client") {
+    return (
+      <ClientFormModal
+        isOpen={true}
+        onClose={close}
+        onSaved={(cli) => finish(`Cliente "${cli.name}" salvo com sucesso no Firestore!`)}
+        notify={notify || finish}
+        allClients={clients}
+      />
+    );
+  }
+
+  if (dialog === "employee") {
+    return (
+      <EmployeeFormModal
+        isOpen={true}
+        onClose={close}
+        onSaved={(emp) => finish(`Funcionário "${emp.name}" salvo com sucesso no Firestore!`)}
+        notify={notify || finish}
+        allEmployees={users}
+      />
+    );
+  }
+
   const [paymentMethod, setPaymentMethod] = useState("PIX");
   const [splitPayment, setSplitPayment] = useState(false);
-  const [catalogSelection, setCatalogSelection] = useState("PRD-0001");
+  const [catalogSelection, setCatalogSelection] = useState("");
   const [catalogCategory, setCatalogCategory] = useState("Todos");
   const [showQuickCustomer, setShowQuickCustomer] = useState(false);
   const [cashAction, setCashAction] = useState("Suprimento");
   const [settingsTab, setSettingsTab] = useState("Oficina");
   const [extraPurchaseItem, setExtraPurchaseItem] = useState(false);
   const [extraOrderItem, setExtraOrderItem] = useState(false);
-  const [quickService, setQuickService] = useState("Troca de óleo");
-  const [quickProduct, setQuickProduct] = useState("Óleo Motul 3000 20W50");
-  const [quickServiceValue, setQuickServiceValue] = useState("25");
-  const [quickPartValue, setQuickPartValue] = useState("45");
+  const [quickService, setQuickService] = useState(quickServices[0]?.name ?? "Serviço rápido");
+  const [quickProduct, setQuickProduct] = useState("Sem produto");
+  const [quickServiceValue, setQuickServiceValue] = useState(String(quickServices[0]?.laborPrice ?? 0));
+  const [quickPartValue, setQuickPartValue] = useState("0");
   const [quickQuantity, setQuickQuantity] = useState(1);
   const [quickPayment, setQuickPayment] = useState("PIX");
   const [expenseCategory, setExpenseCategory] = useState("Peça comprada fora do estoque");
   const [expensePaymentMode, setExpensePaymentMode] = useState("Caixa");
   const [expenseDescription, setExpenseDescription] = useState("");
-  const [expenseAmount, setExpenseAmount] = useState("85");
-  const [expenseSale, setExpenseSale] = useState("130");
-  const [expensePart, setExpensePart] = useState("Retificador CG 160");
-  const [expenseOrder, setExpenseOrder] = useState("OS-1047");
-  const [expenseDueDate, setExpenseDueDate] = useState("2026-08-28");
-  const [expenseEmployeeId, setExpenseEmployeeId] = useState("USR-001");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseSale, setExpenseSale] = useState("");
+  const [expensePart, setExpensePart] = useState("");
+  const [expenseOrder, setExpenseOrder] = useState("");
+  const [expenseDueDate, setExpenseDueDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [expenseEmployeeId, setExpenseEmployeeId] = useState(users[0]?.id ?? "");
   const [osOrigin, setOsOrigin] = useState<"direct" | "partner">("direct");
-  const [selectedPartnerId, setSelectedPartnerId] = useState("PAR-001");
-  const [selectedMechanicIds, setSelectedMechanicIds] = useState<string[]>(["USR-003"]);
-  const [selectedQuickMechanicId, setSelectedQuickMechanicId] = useState("USR-003");
+  const [selectedPartnerId, setSelectedPartnerId] = useState(partners[0]?.id ?? "");
+  const [selectedMechanicIds, setSelectedMechanicIds] = useState<string[]>(() => users.filter((u) => u.active !== false && isMechanicUser(u)).slice(0, 1).map((u) => u.id));
+  const [selectedQuickMechanicId, setSelectedQuickMechanicId] = useState(() => users.find((u) => u.active !== false && isMechanicUser(u))?.id ?? users[0]?.id ?? "");
   const [osItems, setOsItems] = useState<ServiceOrderItem[]>([]);
   const [pieceSearch, setPieceSearch] = useState("");
-  const [laborDescription, setLaborDescription] = useState("Mão de obra do serviço");
-  const [laborValue, setLaborValue] = useState("80");
-  const [customerLookup, setCustomerLookup] = useState("(34) 99142-8031");
-  const [selectedCustomerId, setSelectedCustomerId] = useState("CLI-001");
-  const [selectedMotorcycleId, setSelectedMotorcycleId] = useState("MOT-001");
-  const [osPlate, setOsPlate] = useState("RTA-8B42");
+  const [laborDescription, setLaborDescription] = useState("");
+  const [laborValue, setLaborValue] = useState("");
+  const [customerLookup, setCustomerLookup] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [selectedMotorcycleId, setSelectedMotorcycleId] = useState("");
+  const [osPlate, setOsPlate] = useState("");
   const [newVehicleMode, setNewVehicleMode] = useState(false);
   const [motorcyclePlate, setMotorcyclePlate] = useState("");
-  const [selectedMachineId, setSelectedMachineId] = useState("MAQ-001");
+  const [selectedMachineId, setSelectedMachineId] = useState(paymentMachines[0]?.id ?? "");
   const [paymentInstallments, setPaymentInstallments] = useState(1);
   const [orderStatus, setOrderStatus] = useState<(typeof serviceOrderStatuses)[number]>("Em serviço");
-  const [orderMechanicIds, setOrderMechanicIds] = useState<string[]>(["USR-003", "USR-004"]);
-  const [checkoutItems, setCheckoutItems] = useState<ServiceOrderItem[]>([
-    { id: "LAB-FINAL-001", type: "Mão de obra", name: "Troca de óleo", price: 35 },
-    { id: "PRD-0001", type: "Peça", name: "Óleo Motul 3000 20W50 · 2 unidades", price: 90 },
-  ]);
+  const [orderMechanicIds, setOrderMechanicIds] = useState<string[]>(() => users.filter((u) => u.active !== false && isMechanicUser(u)).slice(0, 1).map((u) => u.id));
+  const [checkoutItems, setCheckoutItems] = useState<ServiceOrderItem[]>([]);
   const [checkoutPieceSearch, setCheckoutPieceSearch] = useState("");
   const [checkoutLaborDescription, setCheckoutLaborDescription] = useState("");
   const [checkoutLaborValue, setCheckoutLaborValue] = useState("");
   const [clientPaymentCondition, setClientPaymentCondition] = useState("Pagamento normal");
-  const [tradeServiceDescription, setTradeServiceDescription] = useState("Desenvolvimento e manutenção do sistema");
-  const [tradeValue, setTradeValue] = useState("125");
+  const [tradeServiceDescription, setTradeServiceDescription] = useState("");
+  const [tradeValue, setTradeValue] = useState("");
   const [tradeNotes, setTradeNotes] = useState("");
   if (!dialog) return null;
-  const activeMechanics = users.filter((user) => user.active && user.canReceiveServiceOrders);
+  const activeMechanics = users.filter((user) => user.active !== false && isMechanicUser(user));
   const activePartners = partners.filter((partner) => partner.active);
   const activeSuppliers = suppliers.filter((supplier) => supplier.active);
   const enabledQuickServices = quickServices.filter((service) => service.active);
@@ -1785,8 +1727,8 @@ function AppDialog({
     supplier: "Cadastro de fornecedor",
     purchase: "Nova entrada de estoque",
     finance: "Nova movimentação financeira",
-    order: "OS-1048 · Honda CG 160 Fan",
-    orderCheckout: "Finalizar e receber OS-1048",
+    order: orders[0] ? `${orders[0].id} · ${orders[0].bike}` : "Ordem de serviço",
+    orderCheckout: orders[0] ? `Finalizar e receber ${orders[0].id}` : "Finalizar e receber OS",
     settings: "Configurações do sistema",
     cash: "Controle do caixa",
     expense: "Adicionar gasto manual",
@@ -1810,7 +1752,7 @@ function AppDialog({
     supplier: "Contato, condições e categorias fornecidas.",
     purchase: "Entrada simples de produtos, sem rotina fiscal.",
     finance: "Registre entrada, saída, sangria ou suprimento.",
-    order: "Cliente: Carlos Eduardo · Placa RTA-8B42",
+    order: orders[0] ? `Cliente: ${orders[0].customer} · Placa ${orders[0].plate}` : "Detalhes da ordem de serviço",
     orderCheckout: "Confira os itens executados, receba e encerre a ordem de serviço.",
     settings: "Tudo que pode ser alterado, concentrado em uma tela.",
     cash: "Abra, movimente ou feche o caixa do dia.",
@@ -1826,9 +1768,7 @@ function AppDialog({
     if (dialog === "os" && step < 5) return setStep(step + 1);
     if (dialog === "order" && orderStatus === "Entrega" && canOperate) {
       const items: ServiceOrderItem[] = [
-        { id: "LAB-FINAL-001", type: "Mão de obra", name: "Troca de óleo", price: 35 },
-        { id: "PRD-0001", type: "Peça", name: "Óleo Motul 3000 20W50 · 2 unidades", price: 90 },
-        ...(extraOrderItem ? [{ id: "LAB-FINAL-002", type: "Mão de obra" as const, name: "Ajuste e lubrificação da relação", price: 30 }] : []),
+        ...(extraOrderItem ? [{ id: `LAB-${Date.now()}`, type: "Mão de obra" as const, name: "Serviço adicional", price: 0 }] : []),
       ];
       setCheckoutItems(items);
       setTradeValue(String(items.reduce((sum, item) => sum + item.price, 0)));
@@ -1838,16 +1778,16 @@ function AppDialog({
     if (dialog === "orderCheckout") {
       return finish(paymentMethod === "Troca de serviços"
         ? `Troca registrada, saldo da OS compensado em ${formatBRL(tradeCompensated)} e 3 vias preparadas: mecânico, caixa e cliente.`
-        : `Pagamento de ${formatBRL(checkoutTotal)} registrado, OS-1048 encerrada e 3 vias preparadas: mecânico, caixa e cliente.`);
+        : `Pagamento de ${formatBRL(checkoutTotal)} registrado, ordem de serviço encerrada e 3 vias preparadas: mecânico, caixa e cliente.`);
     }
     if (dialog === "expense") {
       const isPartPurchase = expenseCategory === "Peça comprada fora do estoque";
       const isEmployeePayment = expenseCategory === "Pagamento de funcionário";
       onAddExpense({
-        description: isPartPurchase ? `${expensePart} comprado para a ${expenseOrder}` : isEmployeePayment ? `Pagamento de ${selectedEmployee?.name ?? "funcionário"}` : expenseDescription || expenseCategory,
+        description: isPartPurchase ? `${expensePart} comprado para a ${expenseOrder || "OS"}` : isEmployeePayment ? `Pagamento de ${selectedEmployee?.name ?? "funcionário"}` : expenseDescription || expenseCategory,
         category: expenseCategory,
         amount: expenseCost,
-        dueDate: expensePaymentMode === "Pagar depois" ? expenseDueDate.split("-").reverse().join("/") : "24/08/2026",
+        dueDate: expensePaymentMode === "Pagar depois" ? expenseDueDate.split("-").reverse().join("/") : new Date().toLocaleDateString("pt-BR"),
         status: expensePaymentMode === "Pagar depois" ? "Agendado" : "Pago",
         method: expensePaymentMode === "Caixa" ? "Dinheiro" : expensePaymentMode === "Banco" ? "Banco Inter" : "A definir",
         order: isPartPurchase ? expenseOrder : undefined,
@@ -1858,11 +1798,11 @@ function AppDialog({
     }
     const messages: Record<Exclude<DialogKind, null>, string> = {
       osChoice: "Atendimento selecionado.",
-      os: "OS-1049 aberta com sucesso.",
+      os: "Nova ordem de serviço aberta com sucesso.",
       quick: "Serviço rápido lançado e pronto para recebimento.",
       product: "Produto adicionado ao estoque.",
-      import: "Planilha recebida. 18 produtos estão prontos para conferência.",
-      payment: "Pagamento de R$ 108,00 recebido e comprovante gerado.",
+      import: "Planilha recebida e pronta para importação.",
+      payment: "Pagamento recebido e comprovante gerado.",
       catalog: "Produto selecionado e adicionado à venda.",
       client: "Cliente selecionado para o atendimento.",
       motorcycle: "Motocicleta cadastrada e vinculada ao proprietário.",
@@ -1870,8 +1810,8 @@ function AppDialog({
       supplier: "Fornecedor salvo com sucesso.",
       purchase: "Entrada registrada e estoque atualizado.",
       finance: "Movimentação registrada no caixa.",
-      order: "Alterações da OS-1048 salvas.",
-      orderCheckout: "OS-1048 finalizada e recebimento confirmado.",
+      order: "Alterações da ordem de serviço salvas.",
+      orderCheckout: "Ordem de serviço finalizada e recebimento confirmado.",
       settings: "Configurações salvas para a oficina.",
       cash: "Movimentação do caixa concluída.",
       expense: "Gasto registrado com sucesso.",
@@ -1917,7 +1857,7 @@ function AppDialog({
         {dialog === "osChoice" ? (
           <div className="dialog-body attendance-choice">
             <button onClick={() => changeDialog("quick")}><span className="attendance-icon fast"><Icon name="clock"/></span><div><b>É um serviço rápido</b><strong>Atendimento expresso</strong><small>Troca de óleo, lâmpada, regulagem ou ajuste concluído na hora. Cliente e moto são opcionais.</small><em>Ir para Serviço Rápido <Icon name="arrow" size={16}/></em></div></button>
-            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription("Mão de obra do serviço"); setLaborValue("80"); setSelectedMechanicIds(["USR-003"]); setCustomerLookup("(34) 99142-8031"); setSelectedCustomerId("CLI-001"); setSelectedMotorcycleId("MOT-001"); setOsPlate("RTA-8B42"); setNewVehicleMode(false); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
+            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
           </div>
         ) : null}
 
@@ -1936,7 +1876,7 @@ function AppDialog({
                     <section className="lookup-panel"><label className="field"><span>WhatsApp ou nome do cliente</span><div className="input-with-icon"><Icon name="search" size={17}/><input value={customerLookup} onChange={(event) => handleCustomerLookup(event.target.value)} placeholder="(34) 99999-9999 ou nome"/></div></label>{customerLookupMatch ? <div className="lookup-found"><span className="registry-avatar">{customerLookupMatch.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{customerLookupMatch.name}</strong><small>{customerLookupMatch.phone} · {customerLookupMatch.motorcycleIds.length} moto{customerLookupMatch.motorcycleIds.length === 1 ? "" : "s"} cadastrada{customerLookupMatch.motorcycleIds.length === 1 ? "" : "s"}</small></div><i>Encontrado</i></div> : <div className="lookup-empty"><Icon name="users" size={18}/><span>Nenhum cliente localizado. Você poderá cadastrá-lo sem sair da OS.</span></div>}</section>
                     <section className="lookup-panel"><label className="field"><span>Placa</span><input value={osPlate} onChange={(event) => handleOsPlate(event.target.value)} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(osPlate)} · formatação automática</small></label>{selectedMotorcycle && normalizePlate(selectedMotorcycle.plate) === normalizePlate(osPlate) && !newVehicleMode ? <div className="lookup-found vehicle"><span className="registry-avatar">MT</span><div><strong>{selectedMotorcycle.model}</strong><small>{selectedMotorcycle.plate} · {selectedMotorcycle.year} · {selectedMotorcycle.color}</small></div><i>Cadastro encontrado</i></div> : <div className="lookup-empty"><Icon name="bike" size={18}/><span>Placa não cadastrada. Preencha os dados da nova moto abaixo.</span></div>}</section>
                   </div>
-                  {customerLookupMatch && customerMotorcycles.length > 1 && !newVehicleMode ? <div className="vehicle-choice-block"><div><strong>Qual moto está entrando?</strong><small>Este cliente possui mais de um veículo.</small></div><div className="vehicle-choice-list">{customerMotorcycles.map((motorcycle) => <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}><span className="catalog-code">{motorcycle.model.includes("Biz") ? "BZ" : "CG"}</span><div><strong>{motorcycle.model}</strong><small>{motorcycle.plate} · {motorcycle.year}</small></div>{selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}</button>)}<button className="new-vehicle-choice" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}><span className="catalog-code">+</span><div><strong>Nenhuma dessas</strong><small>Cadastrar uma nova moto para {selectedCustomer.name}</small></div></button></div></div> : null}
+                  {customerLookupMatch && customerMotorcycles.length > 1 && !newVehicleMode ? <div className="vehicle-choice-block"><div><strong>Qual moto está entrando?</strong><small>Este cliente possui mais de um veículo.</small></div><div className="vehicle-choice-list">{customerMotorcycles.map((motorcycle) => <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}><span className="catalog-code">{motorcycle.model.includes("Biz") ? "BZ" : "CG"}</span><div><strong>{motorcycle.model}</strong><small>{motorcycle.plate} · {motorcycle.year}</small></div>{selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}</button>)}<button className="new-vehicle-choice" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}><span className="catalog-code">+</span><div><strong>Nenhuma dessas</strong><small>Cadastrar uma nova moto para {selectedCustomer?.name || "cliente"}</small></div></button></div></div> : null}
                   {newVehicleMode || !customerLookupMatch ? <div className="inline-create new-vehicle-form"><label className="field"><span>Nome completo do cliente</span><input defaultValue={customerLookupMatch?.name ?? ""} placeholder="Nome do cliente"/></label><label className="field"><span>WhatsApp</span><input value={onlyDigits(customerLookup) ? customerLookup : ""} onChange={(event) => setCustomerLookup(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label><label className="field"><span>Marca e modelo</span><input placeholder="Ex.: Honda CG 160 Fan"/></label><label className="field"><span>Ano / modelo</span><input placeholder="2024 / 2025"/></label><label className="field"><span>Cor</span><input placeholder="Ex.: Vermelha"/></label></div> : null}
                   {!newVehicleMode && customerLookupMatch ? <button className="soft-action" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}><Icon name="plus" size={17}/>Cadastrar outro veículo para este cliente</button> : null}
                 </div>
@@ -1960,14 +1900,32 @@ function AppDialog({
                 <div className="form-section">
                   <div className="form-intro"><span className="form-icon"><Icon name="wrench"/></span><div><h3>Dados da recepção</h3><p>Registre a reclamação e escolha um ou mais mecânicos responsáveis.</p></div></div>
                   <div className="form-grid">
-                    <label className="field"><span>Quilometragem</span><input defaultValue="38.420 km"/></label>
+                    <label className="field"><span>Quilometragem</span><input placeholder="Ex.: 38.420 km"/></label>
                     <label className="field"><span>Nível de combustível</span><select defaultValue="1/2"><option>Reserva</option><option>1/4</option><option value="1/2">1/2 tanque</option><option>Cheio</option></select></label>
-                    <label className="field field-full"><span>Problema relatado pelo cliente</span><textarea defaultValue="Moto falhando em baixa rotação e barulho na relação."/></label>
+                    <label className="field field-full"><span>Problema relatado pelo cliente</span><textarea placeholder="Descreva o problema relatado ou serviço solicitado"/></label>
                     <label className="field"><span>Prioridade</span><select><option>Normal</option><option>Urgente</option><option>Baixa</option></select></label>
-                    <label className="field"><span>Previsão de entrega</span><input type="date" defaultValue="2026-08-26"/></label>
+                    <label className="field"><span>Previsão de entrega</span><input type="date"/></label>
                     <label className="field"><span>Odômetro conferido?</span><select><option>Sim</option><option>Não</option></select></label>
                   </div>
-                  <div className="mechanic-assignment"><div><strong>Mecânicos responsáveis</strong><small>Todos os selecionados poderão atualizar a situação desta OS.</small></div><div className="mechanic-picker">{activeMechanics.map((mechanic) => <button className={selectedMechanicIds.includes(mechanic.id) ? "selected" : ""} key={mechanic.id} onClick={() => toggleMechanic(mechanic.id, "new")}><span className="mechanic-avatar">{mechanic.name[0]}</span><div><strong>{mechanic.name}</strong><small>{mechanic.position} · {mechanic.currentOrders} OS</small></div><i>{selectedMechanicIds.includes(mechanic.id) ? "✓" : "+"}</i></button>)}</div></div>
+                  <div className="mechanic-assignment">
+                    <div><strong>Mecânicos responsáveis</strong><small>Todos os selecionados poderão atualizar a situação desta OS.</small></div>
+                    {activeMechanics.length > 0 ? (
+                      <div className="mechanic-picker">
+                        {activeMechanics.map((mechanic) => (
+                          <button className={selectedMechanicIds.includes(mechanic.id) ? "selected" : ""} key={mechanic.id} onClick={() => toggleMechanic(mechanic.id, "new")}>
+                            <span className="mechanic-avatar">{mechanic.name[0]}</span>
+                            <div><strong>{mechanic.name}</strong><small>{mechanic.position} · {mechanic.currentOrders || 0} OS</small></div>
+                            <i>{selectedMechanicIds.includes(mechanic.id) ? "✓" : "+"}</i>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="lookup-empty" style={{ padding: "12px" }}>
+                        <Icon name="wrench" size={18}/>
+                        <span>Nenhum funcionário com função Mecânico ativo. Cadastre um mecânico na aba "Funcionários".</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : null}
               {step === 4 ? (
@@ -1989,7 +1947,7 @@ function AppDialog({
                     <div><span>Origem / Pagador</span><strong>{osOrigin === "partner" ? selectedPartner?.name : "Cliente direto"}</strong><small>{osOrigin === "partner" ? `${selectedPartner?.billingCycle} · ${selectedPartner?.laborDiscount}% na mão de obra` : "Proprietário da moto"}</small></div>
                     <div><span>Mecânicos responsáveis</span><strong>{selectedMechanics.length ? selectedMechanics.map((mechanic) => mechanic.name).join(" + ") : "Não definido"}</strong><small>{selectedMechanics.length === 1 ? "1 mecânico poderá atualizar a OS" : `${selectedMechanics.length} mecânicos poderão atualizar a OS`}</small></div>
                   </div>
-                  <div className="review-problem"><span>Problema relatado</span><p>Moto falhando em baixa rotação e barulho na relação.</p></div>
+                  <div className="review-problem"><span>Problema relatado</span><p>{customerLookupMatch ? "Conforme informado na recepção da motocicleta." : "Aguardando preenchimento na recepção."}</p></div>
                   <div className="review-items-summary"><div><span>Peças com preço fixo</span><strong>{formatBRL(partsTotal)}</strong></div><div><span>Mão de obra manual</span><strong>{formatBRL(laborTotal)}</strong></div>{partnerDiscount > 0 ? <div><span>Desconto do parceiro</span><strong>− {formatBRL(partnerDiscount)}</strong></div> : null}<div className="review-grand-total"><span>Total inicial</span><strong>{formatBRL(osTotal)}</strong></div></div>
                 </div>
               ) : null}
@@ -2006,10 +1964,10 @@ function AppDialog({
             <div className="form-grid">
               <label className="field"><span>Valor do serviço</span><input type="number" value={quickServiceValue} onChange={(event) => setQuickServiceValue(event.target.value)}/></label>
               <label className="field"><span>Mecânico</span><select value={activeMechanics.some((mechanic) => mechanic.id === selectedQuickMechanicId) ? selectedQuickMechanicId : activeMechanics[0]?.id ?? ""} onChange={(event) => setSelectedQuickMechanicId(event.target.value)}>{activeMechanics.map((mechanic) => <option value={mechanic.id} key={mechanic.id}>{mechanic.name} · {mechanic.currentOrders} OS</option>)}</select></label>
-              <label className="field field-full"><span>Produto ou peça utilizada</span><select value={quickProduct} onChange={(event) => setQuickProduct(event.target.value)}><option>Óleo Motul 3000 20W50</option><option>Óleo Mobil Super Moto 20W50</option><option>Lâmpada Philips H4</option><option>Lubrificante de corrente</option><option>Sem produto</option></select></label>
+              <label className="field field-full"><span>Produto ou peça utilizada</span><select value={quickProduct} onChange={(event) => setQuickProduct(event.target.value)}><option value="Sem produto">Sem produto</option>{products.map((p) => <option value={p.name} key={p.id}>{p.name}</option>)}</select></label>
               {quickProduct !== "Sem produto" ? <><label className="field"><span>Quantidade</span><input type="number" min="1" value={quickQuantity} onChange={(event) => setQuickQuantity(Math.max(1, Number(event.target.value)))}/></label><label className="field"><span>Preço cobrado da peça</span><input type="number" value={quickPartValue} onChange={(event) => setQuickPartValue(event.target.value)}/></label></> : null}
               <label className="field"><span>Cliente (opcional)</span><input placeholder="Nome ou telefone"/></label>
-              <label className="field"><span>Moto / placa (opcional)</span><input placeholder="Ex.: CG 160 · RTA-8B42"/></label>
+              <label className="field"><span>Moto / placa (opcional)</span><input placeholder="Ex.: CG 160 · ABC-1234"/></label>
               <label className="field"><span>Pagamento</span><select value={quickPayment} onChange={(event) => setQuickPayment(event.target.value)}>{activePaymentMethods.filter((method) => method.name !== "Faturamento parceiro").map((method) => <option key={method.id}>{method.name}</option>)}</select></label>
               <label className="field"><span>Conta de entrada</span><select><option>Caixa balcão</option><option>Banco Inter</option>{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label>
             </div>
@@ -2065,26 +2023,26 @@ function AppDialog({
 
         {dialog === "payment" ? (
           <div className="dialog-body payment-body">
-            <div className="payment-total-card"><span>Total da venda #0084</span><strong>R$ 108,00</strong><small>3 itens · Consumidor final</small></div>
+            <div className="payment-total-card"><span>Total da venda</span><strong>{formatBRL(paymentGross)}</strong><small>Pagamento no PDV</small></div>
             <div className="form-label">Escolha a forma de pagamento</div>
             <div className="payment-methods">{activePaymentMethods.map((methodConfig) => { const method = methodConfig.name; return (
               <button className={paymentMethod === method ? "selected" : ""} key={method} onClick={() => setPaymentMethod(method)}><span>{method === "PIX" ? "PX" : method.slice(0, 2).toUpperCase()}</span><strong>{method}</strong>{paymentMethod === method ? <i>✓</i> : null}</button>
             ); })}</div>
             <label className="toggle-row"><input type="checkbox" checked={splitPayment} onChange={(event) => setSplitPayment(event.target.checked)}/><span/><div><strong>Dividir pagamento</strong><small>Use duas ou mais formas na mesma venda</small></div></label>
-            {splitPayment ? <div className="split-payment-grid"><label className="field"><span>Primeira forma</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option></select></label><label className="field"><span>Valor</span><input defaultValue="R$ 50,00"/></label><label className="field"><span>Segunda forma</span><select><option>Crédito</option><option>PIX</option><option>Dinheiro</option></select></label><label className="field"><span>Restante</span><input defaultValue="R$ 58,00"/></label></div> : null}
+            {splitPayment ? <div className="split-payment-grid"><label className="field"><span>Primeira forma</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option></select></label><label className="field"><span>Valor</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Segunda forma</span><select><option>Crédito</option><option>PIX</option><option>Dinheiro</option></select></label><label className="field"><span>Restante</span><input placeholder="R$ 0,00"/></label></div> : null}
             {["Débito", "Crédito"].includes(paymentMethod) ? <><div className="form-grid payment-extra"><label className="field"><span>Maquininha utilizada</span><select value={selectedMachine?.id ?? ""} onChange={(event) => setSelectedMachineId(event.target.value)}>{activePaymentMachines.map((machine) => <option value={machine.id} key={machine.id}>{machine.name}{machine.primary ? " · principal" : ""}</option>)}</select></label>{paymentMethod === "Crédito" ? <label className="field"><span>Parcelas</span><select value={paymentInstallments} onChange={(event) => setPaymentInstallments(Number(event.target.value))}>{Array.from({ length: 12 }, (_, index) => index + 1).map((installment) => <option value={installment} key={installment}>{installment}x</option>)}</select></label> : <label className="field"><span>Recebimento</span><input value={selectedMachine?.settlementDays === 0 ? "Na hora" : `D+${selectedMachine?.settlementDays ?? 1}`} readOnly/></label>}</div><div className="machine-fee-summary"><div><span>Valor bruto</span><strong>{formatBRL(paymentGross)}</strong></div><div><span>Taxa da {selectedMachine?.name ?? "máquina"}</span><strong>− {formatBRL(paymentFeeAmount)}</strong><small>{paymentFeeRate.toFixed(2).replace(".", ",")}%</small></div><div><span>Valor líquido</span><strong>{formatBRL(paymentGross - paymentFeeAmount)}</strong></div></div></> : null}
-            {paymentMethod === "Dinheiro" ? <div className="form-grid payment-extra"><label className="field"><span>Valor recebido</span><input defaultValue="R$ 120,00"/></label><div className="change-box"><span>Troco</span><strong>R$ 12,00</strong></div></div> : null}
-            {paymentMethod === "Nota a prazo" ? <div className="credit-warning"><Icon name="alert" size={18}/><div><strong>Limite disponível: R$ 650,00</strong><small>Cliente obrigatório. Vencimento em até 30 dias.</small></div></div> : null}
-            {paymentMethod === "Troca de serviços" ? <div className="trade-payment-card"><div className="trade-payment-head"><span><Icon name="users" size={18}/></span><div><strong>Compensar com trabalho ou serviço</strong><small>Quita o débito sem lançar entrada em dinheiro no caixa.</small></div></div><div className="form-grid"><label className="field field-full"><span>Serviço recebido do cliente</span><input value={tradeServiceDescription} onChange={(event) => setTradeServiceDescription(event.target.value)} placeholder="Ex.: Desenvolvimento do sistema da oficina"/></label><label className="field"><span>Valor acordado</span><input type="number" min="0" value={tradeValue} onChange={(event) => setTradeValue(event.target.value)}/></label><label className="field"><span>Valor compensado agora</span><input value={formatBRL(Math.min(Number(tradeValue) || 0, paymentGross))} readOnly/></label></div><div className="trade-cash-note"><Icon name="check" size={16}/><span>Entrada em caixa: <strong>R$ 0,00</strong>. A movimentação ficará no histórico financeiro como compensação.</span></div></div> : null}
+            {paymentMethod === "Dinheiro" ? <div className="form-grid payment-extra"><label className="field"><span>Valor recebido</span><input placeholder="R$ 0,00"/></label><div className="change-box"><span>Troco</span><strong>R$ 0,00</strong></div></div> : null}
+            {paymentMethod === "Nota a prazo" ? <div className="credit-warning"><Icon name="alert" size={18}/><div><strong>Venda a prazo</strong><small>Cliente obrigatório. Vencimento registrado no contas a receber.</small></div></div> : null}
+            {paymentMethod === "Troca de serviços" ? <div className="trade-payment-card"><div className="trade-payment-head"><span><Icon name="users" size={18}/></span><div><strong>Compensar com trabalho ou serviço</strong><small>Quita o débito sem lançar entrada em dinheiro no caixa.</small></div></div><div className="form-grid"><label className="field field-full"><span>Serviço recebido do cliente</span><input value={tradeServiceDescription} onChange={(event) => setTradeServiceDescription(event.target.value)} placeholder="Ex.: Serviço combinado com o cliente"/></label><label className="field"><span>Valor acordado</span><input type="number" min="0" value={tradeValue} onChange={(event) => setTradeValue(event.target.value)}/></label><label className="field"><span>Valor compensado agora</span><input value={formatBRL(Math.min(Number(tradeValue) || 0, paymentGross))} readOnly/></label></div><div className="trade-cash-note"><Icon name="check" size={16}/><span>Entrada em caixa: <strong>R$ 0,00</strong>. A movimentação ficará no histórico financeiro como compensação.</span></div></div> : null}
           </div>
         ) : null}
 
         {dialog === "client" ? (
           <div className="dialog-body form-section">
             <label className="pdv-search modal-search"><Icon name="search"/><input autoFocus placeholder="Nome, telefone, CPF ou CNPJ"/></label>
-            {!showQuickCustomer ? <div className="select-list">{clients.map((client, index) => (
+            {!showQuickCustomer ? <div className="select-list">{clients.length ? clients.map((client, index) => (
               <button key={client.name} onClick={() => finish(`${client.name} selecionado para o atendimento.`)}><span className="registry-avatar">{client.name.split(" ").slice(0, 2).map((word) => word[0]).join("")}</span><div><strong>{client.name}</strong><small>{client.phone} · {client.detail}</small></div><b className={client.condition === "Troca de serviços" ? "trade-client-badge" : ""}>{client.condition === "Pagamento normal" && index === 0 ? "Mais recente" : client.condition}</b><Icon name="arrow" size={17}/></button>
-            ))}</div> : <div className="client-create-form form-top-gap"><div className="form-grid"><label className="field field-full"><span>Nome ou razão social</span><input placeholder="Nome completo"/></label><label className="field"><span>Tipo</span><select><option>Pessoa física</option><option>Empresa</option></select></label><label className="field"><span>WhatsApp</span><input placeholder="(34) 99999-9999"/></label><label className="field"><span>CPF/CNPJ</span><input placeholder="Opcional"/></label><label className="field"><span>Condição de pagamento / relacionamento</span><select value={clientPaymentCondition} onChange={(event) => setClientPaymentCondition(event.target.value)}><option>Pagamento normal</option><option>Cliente a prazo</option><option>Troca de serviços</option></select></label><label className="field"><span>Limite a prazo</span><input defaultValue="R$ 0,00"/></label></div>{clientPaymentCondition === "Troca de serviços" ? <div className="client-trade-fields"><div className="trade-payment-head"><span><Icon name="users" size={18}/></span><div><strong>Conta de troca de serviços</strong><small>Registre o combinado para compensar futuras peças e serviços da moto.</small></div></div><div className="form-grid"><label className="field field-full"><span>Trabalho ou serviço combinado</span><input value={tradeServiceDescription} onChange={(event) => setTradeServiceDescription(event.target.value)} placeholder="Ex.: Criação do sistema da oficina"/></label><label className="field"><span>Valor acordado / crédito inicial</span><input type="number" min="0" value={tradeValue} onChange={(event) => setTradeValue(event.target.value)}/></label><label className="field"><span>Saldo inicial</span><input value={formatBRL(Number(tradeValue) || 0)} readOnly/></label><label className="field field-full"><span>Observações da troca</span><textarea value={tradeNotes} onChange={(event) => setTradeNotes(event.target.value)} placeholder="Ex.: O crédito será usado para quitar peças da motocicleta do cliente."/></label></div><div className="trade-cash-note"><Icon name="check" size={16}/><span>A compensação reduz o saldo da dívida, mas não aumenta o dinheiro recebido nem o caixa da oficina.</span></div></div> : null}</div>}
+            )) : <div className="empty-panel"><Icon name="users" size={24}/><span>Nenhum cliente cadastrado ainda.</span></div>}</div> : <div className="client-create-form form-top-gap"><div className="form-grid"><label className="field field-full"><span>Nome ou razão social</span><input placeholder="Nome completo"/></label><label className="field"><span>Tipo</span><select><option>Pessoa física</option><option>Empresa</option></select></label><label className="field"><span>WhatsApp</span><input placeholder="(34) 99999-9999"/></label><label className="field"><span>CPF/CNPJ</span><input placeholder="Opcional"/></label><label className="field"><span>Condição de pagamento / relacionamento</span><select value={clientPaymentCondition} onChange={(event) => setClientPaymentCondition(event.target.value)}><option>Pagamento normal</option><option>Cliente a prazo</option><option>Troca de serviços</option></select></label><label className="field"><span>Limite a prazo</span><input defaultValue="R$ 0,00"/></label></div>{clientPaymentCondition === "Troca de serviços" ? <div className="client-trade-fields"><div className="trade-payment-head"><span><Icon name="users" size={18}/></span><div><strong>Conta de troca de serviços</strong><small>Registre o combinado para compensar futuras peças e serviços da moto.</small></div></div><div className="form-grid"><label className="field field-full"><span>Trabalho ou serviço combinado</span><input value={tradeServiceDescription} onChange={(event) => setTradeServiceDescription(event.target.value)} placeholder="Ex.: Criação do sistema da oficina"/></label><label className="field"><span>Valor acordado / crédito inicial</span><input type="number" min="0" value={tradeValue} onChange={(event) => setTradeValue(event.target.value)}/></label><label className="field"><span>Saldo inicial</span><input value={formatBRL(Number(tradeValue) || 0)} readOnly/></label><label className="field field-full"><span>Observações da troca</span><textarea value={tradeNotes} onChange={(event) => setTradeNotes(event.target.value)} placeholder="Ex.: O crédito será usado para quitar peças da motocicleta do cliente."/></label></div><div className="trade-cash-note"><Icon name="check" size={16}/><span>A compensação reduz o saldo da dívida, mas não aumenta o dinheiro recebido nem o caixa da oficina.</span></div></div> : null}</div>}
             <button className="soft-action" onClick={() => setShowQuickCustomer(!showQuickCustomer)}><Icon name="plus" size={17}/>{showQuickCustomer ? "Voltar para a busca" : "Cadastrar um novo cliente"}</button>
           </div>
         ) : null}
@@ -2092,10 +2050,10 @@ function AppDialog({
         {dialog === "motorcycle" ? (
           <div className="dialog-body form-section">
             <div className="form-grid">
-              <label className="field field-full"><span>Proprietário real</span><div className="input-with-icon"><Icon name="search" size={17}/><input defaultValue="Carlos Eduardo"/></div></label>
+              <label className="field field-full"><span>Proprietário real</span><div className="input-with-icon"><Icon name="search" size={17}/><input placeholder="Nome ou telefone do proprietário"/></div></label>
               <label className="field"><span>Placa</span><input value={motorcyclePlate} onChange={(event) => setMotorcyclePlate(formatPlate(event.target.value))} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(motorcyclePlate)} · formatação automática</small></label><label className="field"><span>Marca</span><select><option>Honda</option><option>Yamaha</option><option>Suzuki</option><option>Outra</option></select></label>
               <label className="field field-full"><span>Modelo e versão</span><input placeholder="Ex.: CG 160 Fan"/></label>
-              <label className="field"><span>Ano / modelo</span><input placeholder="2024 / 2025"/></label><label className="field"><span>Cor</span><input placeholder="Vermelha"/></label>
+              <label className="field"><span>Ano / modelo</span><input placeholder="2024 / 2025"/></label><label className="field"><span>Cor</span><input placeholder="Ex.: Vermelha"/></label>
               <label className="field"><span>Chassi</span><input placeholder="Opcional"/></label><label className="field"><span>RENAVAM</span><input placeholder="Opcional"/></label>
               <label className="field"><span>Quilometragem</span><input placeholder="0 km"/></label><label className="field"><span>Cilindrada</span><input placeholder="160 cc"/></label>
             </div>
@@ -2119,10 +2077,10 @@ function AppDialog({
         {dialog === "supplier" ? (
           <div className="dialog-body form-section">
             <div className="form-grid">
-              <label className="field field-full"><span>Nome ou razão social</span><input defaultValue="Moto Peças Triângulo"/></label>
-              <label className="field"><span>CNPJ/CPF</span><input placeholder="Opcional"/></label><label className="field"><span>WhatsApp</span><input defaultValue="(34) 3238-4430"/></label>
-              <label className="field"><span>Representante</span><input placeholder="Nome do contato"/></label><label className="field"><span>Prazo médio</span><input defaultValue="2 dias"/></label>
-              <label className="field field-full"><span>Categorias fornecidas</span><input defaultValue="Peças gerais, freios e transmissão"/></label>
+              <label className="field field-full"><span>Nome ou razão social</span><input placeholder="Nome do fornecedor"/></label>
+              <label className="field"><span>CNPJ/CPF</span><input placeholder="Opcional"/></label><label className="field"><span>WhatsApp</span><input placeholder="(34) 99999-9999"/></label>
+              <label className="field"><span>Representante</span><input placeholder="Nome do contato"/></label><label className="field"><span>Prazo médio</span><input placeholder="Ex.: 2 dias"/></label>
+              <label className="field field-full"><span>Categorias fornecidas</span><input placeholder="Ex.: Peças gerais, freios e transmissão"/></label>
               <label className="field field-full"><span>Observações e condições</span><textarea placeholder="Prazo de pagamento, pedido mínimo e outras condições."/></label>
             </div>
           </div>
@@ -2131,11 +2089,11 @@ function AppDialog({
         {dialog === "purchase" ? (
           <div className="dialog-body form-section">
             <div className="form-grid">
-              <label className="field field-full"><span>Fornecedor</span><select>{activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name} · {supplier.deliveryDays === 0 ? "entrega no dia" : `${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}</option>)}</select></label>
-              <label className="field"><span>Data da entrada</span><input type="date" defaultValue="2026-08-24"/></label><label className="field"><span>Pagamento</span><select><option>À vista</option><option>A prazo</option><option>Parcial</option></select></label>
+              <label className="field field-full"><span>Fornecedor</span><select>{activeSuppliers.length ? activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name} · {supplier.deliveryDays === 0 ? "entrega no dia" : `${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}</option>) : <option value="">Nenhum fornecedor cadastrado</option>}</select></label>
+              <label className="field"><span>Data da entrada</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label><label className="field"><span>Pagamento</span><select><option>À vista</option><option>A prazo</option><option>Parcial</option></select></label>
             </div>
-            <div className="purchase-items"><div className="purchase-head"><strong>Produtos da entrada</strong><button onClick={() => setExtraPurchaseItem(true)}><Icon name="plus" size={16}/>Adicionar produto</button></div><div className="purchase-row"><select><option>Óleo Motul 3000 20W50</option><option>Filtro de óleo CG 160</option></select><input type="number" defaultValue="12"/><input defaultValue="R$ 29,90"/><strong>R$ 358,80</strong></div>{extraPurchaseItem ? <div className="purchase-row"><select><option>Filtro de óleo CG 160</option><option>Pastilha de freio Bros 160</option></select><input type="number" defaultValue="4"/><input defaultValue="R$ 8,70"/><strong>R$ 34,80</strong></div> : null}</div>
-            <div className="purchase-total"><span>Total da entrada</span><strong>{extraPurchaseItem ? "R$ 393,60" : "R$ 358,80"}</strong></div>
+            <div className="purchase-items"><div className="purchase-head"><strong>Produtos da entrada</strong><button onClick={() => setExtraPurchaseItem(true)}><Icon name="plus" size={16}/>Adicionar produto</button></div><div className="purchase-row"><select>{products.length ? products.map((p) => <option key={p.id} value={p.name}>{p.name}</option>) : <option>Selecione um produto</option>}</select><input type="number" defaultValue="1" placeholder="Qtd"/><input placeholder="R$ Custo"/><strong>R$ 0,00</strong></div>{extraPurchaseItem ? <div className="purchase-row"><select>{products.length ? products.map((p) => <option key={p.id} value={p.name}>{p.name}</option>) : <option>Selecione um produto</option>}</select><input type="number" defaultValue="1" placeholder="Qtd"/><input placeholder="R$ Custo"/><strong>R$ 0,00</strong></div> : null}</div>
+            <div className="purchase-total"><span>Total da entrada</span><strong>R$ 0,00</strong></div>
             <div className="info-strip"><Icon name="check" size={18}/><span>Ao salvar, a quantidade entra no estoque e o custo médio será recalculado. Nenhuma nota fiscal será emitida.</span></div>
           </div>
         ) : null}
@@ -2148,7 +2106,7 @@ function AppDialog({
             </div>
             <div className="form-grid">
               <label className="field"><span>Valor</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Categoria</span><select><option>Venda balcão</option><option>Serviço</option><option>Compra de peças</option><option>Sangria</option><option>Suprimento</option></select></label>
-              <label className="field"><span>Forma</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Crédito</option><option>Transferência</option></select></label><label className="field"><span>Data</span><input type="date" defaultValue="2026-08-24"/></label>
+              <label className="field"><span>Forma</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Crédito</option><option>Transferência</option></select></label><label className="field"><span>Data</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label>
               <label className="field field-full"><span>Descrição</span><textarea placeholder="Motivo ou observação da movimentação"/></label>
             </div>
           </div>
@@ -2164,20 +2122,20 @@ function AppDialog({
                 <label className="field field-full"><span>Categoria do gasto</span><select value={expenseCategory} onChange={(event) => { const category = event.target.value; setExpenseCategory(category); if (category === "Pagamento de funcionário") setExpenseAmount(String(selectedEmployee?.baseSalary || 0)); }}><option>Peça comprada fora do estoque</option><option>Pagamento de funcionário</option><option>Comissões</option><option>Compra para o estoque</option><option>Fornecedor de peças</option><option>Frete e motoboy</option><option>Ferramentas e equipamentos</option><option>Despesas fixas</option><option>Taxas de cartão</option><option>Outros gastos</option></select></label>
                 {expenseCategory === "Peça comprada fora do estoque" ? <>
                   <label className="field field-full"><span>Nome da peça comprada</span><input value={expensePart} onChange={(event) => setExpensePart(event.target.value)} placeholder="Ex.: Retificador CG 160"/></label>
-                  <label className="field"><span>Ordem de serviço</span><select value={expenseOrder} onChange={(event) => setExpenseOrder(event.target.value)}><option value="OS-1047">OS-1047 · Marcos Vinícius</option><option value="OS-1048">OS-1048 · Carlos Eduardo</option><option value="OS-1046">OS-1046 · Gonzaga Motos</option><option value="Sem vínculo">Sem vínculo com OS</option></select></label>
+                  <label className="field"><span>Ordem de serviço</span><select value={expenseOrder} onChange={(event) => setExpenseOrder(event.target.value)}>{orders?.length ? orders.map((o) => <option key={o.id} value={o.id}>{o.id} · {o.customer}</option>) : null}<option value="Sem vínculo">Sem vínculo com OS</option></select></label>
                   <label className="field"><span>Fornecedor / onde comprou</span><select>{activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name}</option>)}<option>Outro fornecedor</option></select></label>
-                  <label className="field"><span>Preço de custo</span><input type="number" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)}/></label>
-                  <label className="field"><span>Preço cobrado do cliente</span><input type="number" value={expenseSale} onChange={(event) => setExpenseSale(event.target.value)}/></label>
+                  <label className="field"><span>Preço de custo</span><input type="number" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="0,00"/></label>
+                  <label className="field"><span>Preço cobrado do cliente</span><input type="number" value={expenseSale} onChange={(event) => setExpenseSale(event.target.value)} placeholder="0,00"/></label>
                 </> : expenseCategory === "Pagamento de funcionário" ? <>
                   <label className="field field-full"><span>Funcionário que receberá</span><select value={expenseEmployeeId} onChange={(event) => { const employeeId = event.target.value; setExpenseEmployeeId(employeeId); const employee = users.find((user) => user.id === employeeId); setExpenseAmount(String(employee?.baseSalary || 0)); }}>{users.filter((user) => user.active).map((user) => <option value={user.id} key={user.id}>{user.name} · {user.position}</option>)}</select></label>
                   <label className="field"><span>Vínculo</span><input value={selectedEmployee?.employmentType ?? ""} readOnly/></label><label className="field"><span>Salário padrão cadastrado</span><input value={formatBRL(selectedEmployee?.baseSalary ?? 0)} readOnly/></label>
-                  <label className="field"><span>Valor deste pagamento</span><input type="number" min="0" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)}/></label><label className="field"><span>Referência</span><input defaultValue="Agosto de 2026"/></label>
+                  <label className="field"><span>Valor deste pagamento</span><input type="number" min="0" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)}/></label><label className="field"><span>Referência</span><input defaultValue={new Date().toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}/></label>
                 </> : <>
                   <label className="field field-full"><span>Descrição do gasto</span><input value={expenseDescription} onChange={(event) => setExpenseDescription(event.target.value)} placeholder="Ex.: Frete urgente de motopeças"/></label>
-                  <label className="field"><span>Valor do gasto</span><input type="number" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)}/></label>
+                  <label className="field"><span>Valor do gasto</span><input type="number" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="0,00"/></label>
                   <label className="field"><span>Fornecedor ou favorecido</span><input placeholder="Opcional"/></label>
                 </>}
-                {expensePaymentMode === "Pagar depois" ? <><label className="field"><span>Data de vencimento</span><input type="date" value={expenseDueDate} onChange={(event) => setExpenseDueDate(event.target.value)}/></label><label className="field"><span>Forma prevista</span><select><option>PIX</option><option>Boleto</option><option>Transferência</option><option>A definir</option></select></label></> : <><label className="field"><span>{expensePaymentMode === "Caixa" ? "Caixa de saída" : "Conta bancária"}</span><select><option>{expensePaymentMode === "Caixa" ? "Caixa balcão" : "Banco Inter PJ"}</option><option>Banco Bradesco PJ</option></select></label><label className="field"><span>Data do pagamento</span><input type="date" defaultValue="2026-08-24"/></label></>}
+                {expensePaymentMode === "Pagar depois" ? <><label className="field"><span>Data de vencimento</span><input type="date" value={expenseDueDate} onChange={(event) => setExpenseDueDate(event.target.value)}/></label><label className="field"><span>Forma prevista</span><select><option>PIX</option><option>Boleto</option><option>Transferência</option><option>A definir</option></select></label></> : <><label className="field"><span>{expensePaymentMode === "Caixa" ? "Caixa de saída" : "Conta bancária"}</span><select><option>{expensePaymentMode === "Caixa" ? "Caixa balcão" : "Banco Inter PJ"}</option><option>Banco Bradesco PJ</option></select></label><label className="field"><span>Data do pagamento</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label></>}
               </div>
             </div>
             {expenseCategory === "Peça comprada fora do estoque" ? <div className="emergency-part-summary"><div><span>Custo da peça</span><strong>{formatBRL(expenseCost)}</strong></div><div><span>Cobrado do cliente</span><strong>{formatBRL(expenseCharged)}</strong></div><div className={expenseMargin >= 0 ? "positive" : "negative"}><span>Margem bruta</span><strong>{formatBRL(expenseMargin)}</strong><small>{expenseCost > 0 ? `${((expenseMargin / expenseCost) * 100).toFixed(1).replace(".", ",")}% sobre o custo` : "Informe o custo"}</small></div></div> : null}
@@ -2189,9 +2147,9 @@ function AppDialog({
         {dialog === "receivable" || dialog === "payable" ? (
           <div className="dialog-body form-section">
             <div className="form-grid">
-              <label className="field field-full"><span>{dialog === "receivable" ? "Cliente ou pagador" : "Fornecedor ou favorecido"}</span><select>{dialog === "receivable" ? <><option>Carlos Eduardo</option><option>Gonzaga Motos</option></> : activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name}</option>)}<option>Cadastro avulso</option></select></label>
-              <label className="field field-full"><span>Descrição</span><input placeholder={dialog === "receivable" ? "Ex.: OS-1048 · parcela de peças e serviço" : "Ex.: Compra urgente de peças · parcela 1/2"}/></label>
-              <label className="field"><span>Valor total</span><input defaultValue={dialog === "receivable" ? "R$ 650,00" : "R$ 850,00"}/></label><label className="field"><span>Vencimento</span><input type="date" defaultValue="2026-08-30"/></label>
+              <label className="field field-full"><span>{dialog === "receivable" ? "Cliente ou pagador" : "Fornecedor ou favorecido"}</span><select>{dialog === "receivable" ? clients.map((c) => <option key={c.id} value={c.name}>{c.name}</option>) : activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name}</option>)}<option>Cadastro avulso</option></select></label>
+              <label className="field field-full"><span>Descrição</span><input placeholder={dialog === "receivable" ? "Ex.: Parcela de peças e serviço" : "Ex.: Compra de peças · parcela 1/2"}/></label>
+              <label className="field"><span>Valor total</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Vencimento</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label>
               <label className="field"><span>Categoria</span><select><option>{dialog === "receivable" ? "Serviços de oficina" : "Fornecedor de peças"}</option><option>{dialog === "receivable" ? "Venda de peças" : "Despesa operacional"}</option><option>Outros</option></select></label><label className="field"><span>Parcelas</span><select><option>Parcela única</option><option>2 parcelas</option><option>3 parcelas</option></select></label>
               <label className="field field-full"><span>Observações</span><textarea placeholder="Informações opcionais sobre cobrança ou pagamento"/></label>
             </div>
@@ -2200,15 +2158,15 @@ function AppDialog({
 
         {dialog === "settleReceivable" || dialog === "settlePayable" ? (
           <div className="dialog-body form-section">
-            <div className={`settlement-card ${dialog === "settleReceivable" ? "receive" : "pay"}`}><span>{dialog === "settleReceivable" ? "Saldo a receber" : "Saldo a pagar"}</span><strong>{dialog === "settleReceivable" ? "R$ 1.850,00" : "R$ 1.844,00"}</strong><small>{dialog === "settleReceivable" ? "Carlos Eduardo · REC-0317" : "Moto Peças Triângulo · PAG-0211"}</small></div>
-            <div className="form-grid form-top-gap"><label className="field"><span>Valor desta baixa</span><input defaultValue={dialog === "settleReceivable" ? "R$ 1.850,00" : "R$ 1.844,00"}/></label><label className="field"><span>Data</span><input type="date" defaultValue="2026-08-24"/></label><label className="field"><span>Forma de pagamento</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Crédito</option><option>Transferência</option></select></label><label className="field"><span>{dialog === "settleReceivable" ? "Conta de entrada" : "Conta de saída"}</span><select><option>Banco Inter PJ</option><option>Caixa balcão</option><option>Stone</option><option>Infinity Pay</option></select></label></div>
+            <div className={`settlement-card ${dialog === "settleReceivable" ? "receive" : "pay"}`}><span>{dialog === "settleReceivable" ? "Saldo a receber" : "Saldo a pagar"}</span><strong>R$ 0,00</strong><small>{dialog === "settleReceivable" ? "Conta a receber" : "Conta a pagar"}</small></div>
+            <div className="form-grid form-top-gap"><label className="field"><span>Valor desta baixa</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Data</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label><label className="field"><span>Forma de pagamento</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Crédito</option><option>Transferência</option></select></label><label className="field"><span>{dialog === "settleReceivable" ? "Conta de entrada" : "Conta de saída"}</span><select><option>Banco Inter PJ</option><option>Caixa balcão</option><option>Stone</option><option>Infinity Pay</option></select></label></div>
             <label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Quitar este lançamento</strong><small>Desative para registrar apenas um pagamento parcial</small></div></label>
           </div>
         ) : null}
 
         {dialog === "cash" ? (
           <div className="dialog-body form-section">
-            <div className="cash-balance"><span>Saldo atual do caixa</span><strong>R$ 4.480,00</strong><small>R$ 200,00 de saldo inicial</small></div>
+            <div className="cash-balance"><span>Saldo atual do caixa</span><strong>R$ 0,00</strong><small>Caixa operacional</small></div>
             <div className="cash-actions">{[{name:"Suprimento", detail:"Adicionar dinheiro", icon:"plus" as IconName},{name:"Sangria", detail:"Retirar dinheiro", icon:"arrow" as IconName},{name:"Fechar caixa", detail:"Conferir o dia", icon:"check" as IconName}].map((action) => <button className={cashAction === action.name ? "selected" : ""} key={action.name} onClick={() => setCashAction(action.name)}><Icon name={action.icon}/><strong>{action.name}</strong><small>{action.detail}</small></button>)}</div>
             <div className="form-grid form-top-gap"><label className="field"><span>Valor</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Motivo</span><input placeholder="Ex.: Troco para o caixa"/></label></div>
           </div>
@@ -2216,22 +2174,47 @@ function AppDialog({
 
         {dialog === "order" ? (
           <div className="dialog-body order-detail">
-            <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><button onClick={() => finish("3 vias da OS-1048 preparadas: mecânico, caixa e cliente.")}><Icon name="file" size={16}/>Imprimir 3 vias</button><button onClick={() => finish("Link da OS-1048 preparado para envio no WhatsApp.")}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
-            <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as (typeof serviceOrderStatuses)[number])}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
-            <div className="order-info-grid"><div><span>Cliente / pagador</span><strong>Carlos Eduardo</strong><small>Cliente direto</small></div><div><span>Motocicleta</span><strong>Honda CG 160 Fan</strong><small>RTA-8B42 · 38.420 km</small></div><div><span>Mecânicos</span><strong>{orderMechanics.map((mechanic) => mechanic.name).join(" + ") || "Não atribuídos"}</strong><small>{orderMechanics.length} {orderMechanics.length === 1 ? "responsável" : "responsáveis"}</small></div><div><span>Previsão</span><strong>26/08/2026</strong><small>Prioridade normal</small></div></div>
-            {canOperate ? <div className="mechanic-assignment compact"><div><strong>Equipe responsável</strong><small>Selecione mais de um mecânico quando o serviço for compartilhado.</small></div><div className="mechanic-picker">{activeMechanics.map((mechanic) => <button className={orderMechanicIds.includes(mechanic.id) ? "selected" : ""} key={mechanic.id} onClick={() => toggleMechanic(mechanic.id, "existing")}><span className="mechanic-avatar">{mechanic.name[0]}</span><div><strong>{mechanic.name}</strong><small>{mechanic.currentOrders} OS agora</small></div><i>{orderMechanicIds.includes(mechanic.id) ? "✓" : "+"}</i></button>)}</div></div> : null}
-            <div className="order-section"><div className="order-section-title"><div><strong>Peças e serviços aprovados</strong><small>A baixa ocorre somente quando a peça for usada</small></div>{canOperate ? <button onClick={() => setExtraOrderItem(true)}><Icon name="plus" size={15}/>Adicionar item</button> : <span className="status blue"><i/>Somente leitura</span>}</div><div className="order-item"><span className="catalog-code">01</span><div><strong>Troca de óleo</strong><small>Mão de obra · Ronaldo</small></div><b>R$ 35,00</b></div><div className="order-item"><span className="catalog-code">02</span><div><strong>Óleo Motul 3000 20W50</strong><small>2 unidades · PRD-0001</small></div><b>R$ 90,00</b></div>{extraOrderItem ? <div className="order-item"><span className="catalog-code">03</span><div><strong>Ajuste e lubrificação da relação</strong><small>Serviço adicional · Matheus</small></div><b>R$ 30,00</b></div> : null}<div className="order-total"><span>Total aprovado</span><strong>{extraOrderItem ? "R$ 155,00" : "R$ 125,00"}</strong></div></div>
-            <div className="order-progress interactive">{serviceOrderStatuses.map((item, index) => { const currentIndex = serviceOrderStatuses.indexOf(orderStatus); return <button className={index <= currentIndex ? "done" : ""} key={item} onClick={() => setOrderStatus(item)}><i>{index < currentIndex ? "✓" : index + 1}</i><span>{item}</span></button>; })}</div>
+            {orders && orders.length > 0 ? (
+              <>
+                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><button onClick={() => finish(`3 vias da ${orders[0].id} preparadas: mecânico, caixa e cliente.`)}><Icon name="file" size={16}/>Imprimir 3 vias</button><button onClick={() => finish(`Link da ${orders[0].id} preparado para envio no WhatsApp.`)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
+                <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as (typeof serviceOrderStatuses)[number])}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
+                <div className="order-info-grid"><div><span>Cliente / pagador</span><strong>{orders[0].customer}</strong><small>{orders[0].origin}</small></div><div><span>Motocicleta</span><strong>{orders[0].bike}</strong><small>{orders[0].plate}</small></div><div><span>Mecânicos</span><strong>{orderMechanics.map((mechanic) => mechanic.name).join(" + ") || orders[0].mechanic}</strong><small>{orderMechanics.length || 1} responsável(is)</small></div><div><span>Previsão</span><strong>{orders[0].delivery}</strong><small>Prioridade {orders[0].priority}</small></div></div>
+                {canOperate ? (
+                  <div className="mechanic-assignment compact">
+                    <div><strong>Equipe responsável</strong><small>Selecione mais de um mecânico quando o serviço for compartilhado.</small></div>
+                    {activeMechanics.length > 0 ? (
+                      <div className="mechanic-picker">
+                        {activeMechanics.map((mechanic) => (
+                          <button className={orderMechanicIds.includes(mechanic.id) ? "selected" : ""} key={mechanic.id} onClick={() => toggleMechanic(mechanic.id, "existing")}>
+                            <span className="mechanic-avatar">{mechanic.name[0]}</span>
+                            <div><strong>{mechanic.name}</strong><small>{mechanic.currentOrders || 0} OS agora</small></div>
+                            <i>{orderMechanicIds.includes(mechanic.id) ? "✓" : "+"}</i>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="lookup-empty" style={{ padding: "10px" }}>
+                        <span>Nenhum mecânico ativo cadastrado.</span>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+                <div className="order-section"><div className="order-section-title"><div><strong>Peças e serviços aprovados</strong><small>A baixa ocorre somente quando a peça for usada</small></div>{canOperate ? <button onClick={() => setExtraOrderItem(true)}><Icon name="plus" size={15}/>Adicionar item</button> : <span className="status blue"><i/>Somente leitura</span>}</div><div className="order-item"><span className="catalog-code">01</span><div><strong>{orders[0].service}</strong><small>Mão de obra · {orders[0].mechanic}</small></div><b>{orders[0].total}</b></div>{extraOrderItem ? <div className="order-item"><span className="catalog-code">02</span><div><strong>Ajuste complementar</strong><small>Serviço adicional</small></div><b>R$ 0,00</b></div> : null}<div className="order-total"><span>Total aprovado</span><strong>{orders[0].total}</strong></div></div>
+                <div className="order-progress interactive">{serviceOrderStatuses.map((item, index) => { const currentIndex = serviceOrderStatuses.indexOf(orderStatus); return <button className={index <= currentIndex ? "done" : ""} key={item} onClick={() => setOrderStatus(item)}><i>{index < currentIndex ? "✓" : index + 1}</i><span>{item}</span></button>; })}</div>
+              </>
+            ) : (
+              <div className="empty-panel"><Icon name="wrench" size={24}/><span>Nenhuma ordem de serviço ativa.</span></div>
+            )}
           </div>
         ) : null}
 
         {dialog === "orderCheckout" ? (
           <div className="dialog-body order-checkout">
-            <div className="checkout-ready-banner"><span><Icon name="check" size={20}/></span><div><strong>Moto pronta para entrega</strong><small>Revise somente o que foi executado ou utilizado. Depois do recebimento, a OS será encerrada.</small></div><b>OS-1048</b></div>
+            <div className="checkout-ready-banner"><span><Icon name="check" size={20}/></span><div><strong>Moto pronta para entrega</strong><small>Revise somente o que foi executado ou utilizado. Depois do recebimento, a OS será encerrada.</small></div><b>{orders && orders[0] ? orders[0].id : "OS"}</b></div>
             <div className="order-checkout-layout">
               <section className="checkout-items-panel">
                 <div className="checkout-panel-title"><div><strong>Peças e mão de obra finais</strong><small>Você ainda pode corrigir os itens antes de cobrar.</small></div><span>{checkoutItems.length} itens</span></div>
-                <div className="checkout-item-list">{checkoutItems.map((item, index) => <div className="checkout-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do produto" : "Valor informado nesta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setCheckoutItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}</div>
+                <div className="checkout-item-list">{checkoutItems.length ? checkoutItems.map((item, index) => <div className="checkout-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do produto" : "Valor informado nesta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setCheckoutItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>) : <div className="empty-panel"><Icon name="box" size={20}/><span>Nenhum item adicionado ao fechamento.</span></div>}</div>
                 <div className="checkout-totals"><span>Peças <b>{formatBRL(checkoutPartsTotal)}</b></span><span>Mão de obra <b>{formatBRL(checkoutLaborTotal)}</b></span><strong>Total da OS <b>{formatBRL(checkoutTotal)}</b></strong></div>
 
                 <div className="checkout-add-block"><div className="checkout-add-title"><Icon name="box" size={17}/><div><strong>Adicionar outra peça</strong><small>O valor de venda vem bloqueado do cadastro.</small></div></div><label className="mini-search"><Icon name="search" size={16}/><input value={checkoutPieceSearch} onChange={(event) => setCheckoutPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="checkout-product-results">{products.filter((product) => product.stock > 0 && `${product.name} ${product.code}`.toLowerCase().includes(checkoutPieceSearch.toLowerCase())).slice(0, 3).map((product) => { const added = checkoutItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={added} onClick={() => setCheckoutItems((current) => [...current, { id: product.code, type: "Peça", name: product.name, price: parseBRL(product.price) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.stock} em estoque · preço fixo</small></div><b>{product.price}</b><i>{added ? "✓" : "+"}</i></button>; })}</div></div>
@@ -2241,7 +2224,7 @@ function AppDialog({
               </section>
 
               <section className="checkout-payment-panel">
-                <div className="payment-total-card checkout-total-card"><span>Total a receber · OS-1048</span><strong>{formatBRL(checkoutTotal)}</strong><small>{checkoutItems.length} itens · Carlos Eduardo</small></div>
+                <div className="payment-total-card checkout-total-card"><span>Total a receber</span><strong>{formatBRL(checkoutTotal)}</strong><small>{checkoutItems.length} itens · {orders && orders[0] ? orders[0].customer : "Cliente"}</small></div>
                 <div className="form-label">Como o cliente vai acertar?</div>
                 <div className="payment-methods checkout-methods">{activePaymentMethods.map((methodConfig) => { const method = methodConfig.name; return <button className={paymentMethod === method ? "selected" : ""} key={method} onClick={() => setPaymentMethod(method)}><span>{method === "PIX" ? "PX" : method === "Troca de serviços" ? "TS" : method.slice(0, 2).toUpperCase()}</span><strong>{method}</strong>{paymentMethod === method ? <i>✓</i> : null}</button>; })}</div>
                 <label className="toggle-row checkout-split"><input type="checkbox" checked={splitPayment} onChange={(event) => setSplitPayment(event.target.checked)}/><span/><div><strong>Dividir ou receber parcialmente</strong><small>O saldo restante pode virar uma conta a receber.</small></div></label>
@@ -2259,19 +2242,19 @@ function AppDialog({
         {dialog === "settings" ? (
           <div className="dialog-body settings-body">
             <div className="settings-tabs">{["Oficina", "OS e serviços", "Pagamentos", "Impressão", "Usuários"].map((tab) => <button className={settingsTab === tab ? "selected" : ""} key={tab} onClick={() => setSettingsTab(tab)}>{tab}</button>)}</div>
-            {settingsTab === "Oficina" ? <div className="form-section form-top-gap"><div className="form-grid"><label className="field field-full"><span>Nome da oficina</span><input defaultValue="Pica Pau Motos"/></label><label className="field"><span>WhatsApp</span><input defaultValue="(34) 99999-9999"/></label><label className="field"><span>Cidade</span><input defaultValue="Uberlândia - MG"/></label><label className="field"><span>Horário de atendimento</span><input defaultValue="08:00 às 18:00"/></label><label className="field"><span>Parceiro principal</span><input defaultValue="Gonzaga Motos"/></label></div></div> : null}
-            {settingsTab === "OS e serviços" ? <div className="form-section form-top-gap"><div className="form-grid"><label className="field"><span>Prefixo das ordens</span><input defaultValue="OS"/></label><label className="field"><span>Próximo número</span><input defaultValue="1049"/></label><label className="field"><span>Desconto parceiro na mão de obra</span><input defaultValue="15%"/></label><label className="field"><span>Previsão padrão</span><input defaultValue="2 dias"/></label></div><div className="settings-toggles"><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Vários mecânicos por OS</strong><small>Todos os responsáveis podem atualizar a situação e marcar como pronta.</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Mostrar carga de trabalho</strong><small>Ajuda a distribuir as OS entre a equipe.</small></div></label></div></div> : null}
+            {settingsTab === "Oficina" ? <div className="form-section form-top-gap"><div className="form-grid"><label className="field field-full"><span>Nome da oficina</span><input defaultValue="Pica Pau Motos"/></label><label className="field"><span>WhatsApp</span><input defaultValue="(34) 99999-9999"/></label><label className="field"><span>Cidade</span><input defaultValue="Uberlândia - MG"/></label><label className="field"><span>Horário de atendimento</span><input defaultValue="08:00 às 18:00"/></label><label className="field"><span>Parceiro principal</span><input placeholder="Parceiro principal"/></label></div></div> : null}
+            {settingsTab === "OS e serviços" ? <div className="form-section form-top-gap"><div className="form-grid"><label className="field"><span>Prefixo das ordens</span><input defaultValue="OS"/></label><label className="field"><span>Próximo número</span><input defaultValue="1"/></label><label className="field"><span>Desconto parceiro na mão de obra</span><input defaultValue="15%"/></label><label className="field"><span>Previsão padrão</span><input defaultValue="2 dias"/></label></div><div className="settings-toggles"><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Vários mecânicos por OS</strong><small>Todos os responsáveis podem atualizar a situação e marcar como pronta.</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Mostrar carga de trabalho</strong><small>Ajuda a distribuir as OS entre a equipe.</small></div></label></div></div> : null}
             {settingsTab === "Pagamentos" ? <div className="form-section form-top-gap"><div className="payment-config-list">{["PIX", "Dinheiro", "Débito", "Crédito", "Boleto", "Transferência", "Nota a prazo", "Troca de serviços"].map((method) => <label className="toggle-row" key={method}><input type="checkbox" defaultChecked/><span/><div><strong>{method}</strong><small>{method === "Crédito" ? "Infinity Pay e Stone · parcelas configuráveis" : method === "Nota a prazo" ? "Respeita o limite de crédito do cliente" : method === "Troca de serviços" ? "Compensa a dívida sem lançar dinheiro no caixa" : "Disponível no PDV e no fechamento da OS"}</small></div></label>)}</div></div> : null}
             {settingsTab === "Impressão" ? <div className="form-section form-top-gap"><div className="form-grid"><label className="field field-full"><span>Impressora térmica</span><select><option>Elgin i9 · USB · 80mm</option><option>Outra impressora</option></select></label><label className="field"><span>Formato padrão</span><select><option>Cupom 80mm</option><option>A4</option></select></label><label className="field"><span>Cópias automáticas</span><input type="number" value="3" readOnly/></label></div><div className="print-copy-grid compact"><article><span>1</span><div><strong>Mecânico</strong><small>Execução e itens</small></div></article><article><span>2</span><div><strong>Caixa</strong><small>Valores e baixa</small></div></article><article><span>3</span><div><strong>Cliente</strong><small>Cobrança e garantia</small></div></article></div><div className="settings-toggles"><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Imprimir 3 vias ao finalizar</strong><small>Cada via sai identificada para o destinatário correto.</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Imprimir comprovante ao receber</strong><small>Inclui pagamentos divididos, compensações e troco</small></div></label></div></div> : null}
-            {settingsTab === "Usuários" ? <div className="form-section form-top-gap"><div className="role-grid"><article><span className="setting-icon"><Icon name="shield"/></span><div><strong>Super Admin</strong><small>Erasmo e Rayane · acesso completo</small></div><b>2 usuários</b></article><article><span className="setting-icon"><Icon name="wrench"/></span><div><strong>Mecânicos fixos</strong><small>Ronaldo e Matheus · próprias OS</small></div><b>2 usuários</b></article><article><span className="setting-icon"><Icon name="users"/></span><div><strong>Mecânicos avulsos</strong><small>Nomes podem ser alterados quando forem confirmados</small></div><b>2 usuários</b></article></div></div> : null}
+            {settingsTab === "Usuários" ? <div className="form-section form-top-gap"><div className="role-grid"><article><span className="setting-icon"><Icon name="shield"/></span><div><strong>Super Admin</strong><small>Acesso completo ao sistema</small></div><b>{users.filter((u) => u.role === "Super Admin").length} usuário(s)</b></article><article><span className="setting-icon"><Icon name="wrench"/></span><div><strong>Mecânicos</strong><small>Acesso e atualização das OS</small></div><b>{users.filter((u) => u.canReceiveServiceOrders).length} usuário(s)</b></article><article><span className="setting-icon"><Icon name="users"/></span><div><strong>Equipe ativa</strong><small>Usuários ativos no sistema</small></div><b>{users.filter((u) => u.active).length} usuário(s)</b></article></div></div> : null}
           </div>
         ) : null}
 
         {dialog === "record" ? (
           <div className="dialog-body record-detail">
-            <div className="record-header"><span className="registry-avatar">FR</span><div><strong>Faturamento e resultado</strong><small>Relatório consolidado de agosto de 2026</small></div><span className="status green"><i/>Atualizado</span></div>
-            <div className="record-metrics"><article><span>Faturamento</span><strong>R$ 38.420</strong></article><article><span>Custos e gastos</span><strong>R$ 15.651</strong></article><article><span>Lucro líquido</span><strong>R$ 22.769</strong></article></div><div className="net-profit-note"><Icon name="check" size={17}/><span>O resultado desconta peças, despesas, pagamentos de funcionários e taxas de cartão configuradas.</span></div>
-            <div className="history-list"><strong>Últimas atualizações</strong><div><i/><span><b>Hoje, 14:32</b>Pagamento da OS-1045 confirmado</span></div><div><i/><span><b>Hoje, 11:08</b>Venda #0083 concluída no PIX</span></div><div><i/><span><b>Ontem, 18:40</b>Fechamento do caixa realizado</span></div></div>
+            <div className="record-header"><span className="registry-avatar">FR</span><div><strong>Faturamento e resultado</strong><small>Relatório consolidado</small></div><span className="status green"><i/>Atualizado</span></div>
+            <div className="record-metrics"><article><span>Faturamento</span><strong>{formatBRL(orders ? orders.reduce((sum, o) => sum + parseBRL(o.total), 0) : 0)}</strong></article><article><span>Custos e gastos</span><strong>{formatBRL(expenses ? expenses.reduce((sum, e) => sum + e.amount, 0) : 0)}</strong></article><article><span>Lucro líquido</span><strong>{formatBRL((orders ? orders.reduce((sum, o) => sum + parseBRL(o.total), 0) : 0) - (expenses ? expenses.reduce((sum, e) => sum + e.amount, 0) : 0))}</strong></article></div><div className="net-profit-note"><Icon name="check" size={17}/><span>O resultado desconta peças, despesas, pagamentos de funcionários e taxas de cartão configuradas.</span></div>
+            <div className="history-list"><strong>Últimas atualizações</strong><div><i/><span><b>Hoje</b>Nenhuma movimentação anterior registrada.</span></div></div>
           </div>
         ) : null}
 
@@ -2279,7 +2262,7 @@ function AppDialog({
           <button className="ghost-button" onClick={close}>Cancelar</button>
           <div>
             {dialog === "os" && step > 1 ? <button className="outline-button large" onClick={() => setStep(step - 1)}>Voltar</button> : null}
-            <button className="primary-button" onClick={submit}>{dialog === "os" ? (step < 5 ? "Continuar" : "Abrir OS-1049") : dialog === "order" && !canOperate ? "Salvar situação" : dialog === "order" && orderStatus === "Entrega" ? "Finalizar OS e receber" : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button>
+            <button className="primary-button" onClick={submit}>{dialog === "os" ? (step < 5 ? "Continuar" : "Abrir Ordem de Serviço") : dialog === "order" && !canOperate ? "Salvar situação" : dialog === "order" && orderStatus === "Entrega" ? "Finalizar OS e receber" : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button>
           </div>
         </footer> : <footer className="dialog-footer choice-footer"><button className="ghost-button" onClick={close}>Cancelar</button></footer>}
       </section>
@@ -2403,6 +2386,8 @@ function AuthGate({ session }: { session: ReturnType<typeof useFirebaseSession> 
 }
 
 function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof useFirebaseSession> }) {
+  const currentUserName = firebaseSession.profile?.name?.trim() || firebaseSession.user?.displayName?.trim() || "Usuário";
+  const currentUserInitials = currentUserName.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "US";
   const firebaseEnabled = firebaseSession.state === "connected" && Boolean(firebaseSession.profile);
   const firebaseAdmin = firebaseSession.profile?.role === "Super Admin";
   const firebasePermissions = firebaseSession.profile?.permissions ?? defaultFirebasePermissions(firebaseSession.profile?.role ?? "Mecânico", firebaseSession.profile?.employeeId);
@@ -2554,11 +2539,11 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
             <Icon name="arrow" size={16} />
           </button>
           <div className="user-card">
-            <div className="avatar">{firebaseSession.profile?.name.split(" ").slice(0, 2).map((part) => part[0]).join("") || "ER"}</div>
-            <div><strong>{firebaseSession.profile?.name || "Usuário"}</strong><span>{firebaseSession.profile?.role}</span></div>
+            <div className="avatar">{currentUserInitials}</div>
+            <div><strong>{currentUserName}</strong><span>{firebaseSession.profile?.role}</span></div>
             <button aria-label="Opções do perfil" onClick={() => setShowProfile(!showProfile)}>•••</button>
           </div>
-          {showProfile ? <div className="profile-menu"><div><strong>{firebaseSession.profile?.name || "Usuário"}</strong><span>{firebaseSession.profile?.role}</span></div>{canManageSettings ? <button onClick={() => { setActive("Configurações"); setShowProfile(false); }}>Configurações da oficina</button> : null}<button onClick={() => { setShowProfile(false); void firebaseSession.logout(); }}>Sair do sistema</button></div> : null}
+          {showProfile ? <div className="profile-menu"><div><strong>{currentUserName}</strong><span>{firebaseSession.profile?.role}</span></div>{canManageSettings ? <button onClick={() => { setActive("Configurações"); setShowProfile(false); }}>Configurações da oficina</button> : null}<button onClick={() => { setShowProfile(false); void firebaseSession.logout(); }}>Sair do sistema</button></div> : null}
         </div>
       </aside>
 
@@ -2575,7 +2560,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           </label>
           <div className="topbar-actions">
             <span className="system-online-badge"><i/><span>Sistema online</span></span>
-            <div className="notification-wrap"><button className="icon-button" aria-label="Notificações" onClick={() => setShowNotifications(!showNotifications)}><Icon name="bell" /><span className="notification-dot" /></button>{showNotifications ? <div className="notification-menu"><div className="notification-head"><strong>Notificações</strong><button onClick={() => notify("Todas as notificações foram marcadas como lidas.")}>Marcar como lidas</button></div>{canViewOrders ? <button onClick={() => goToSearchResult("Ordens de serviço")}><span className="notice-icon red"><Icon name="clock" size={17}/></span><div><strong>4 orçamentos aguardando</strong><small>Dois estão parados há mais de 24 horas</small></div></button> : null}{canViewInventory ? <button onClick={() => goToSearchResult("Produtos e estoque")}><span className="notice-icon amber"><Icon name="alert" size={17}/></span><div><strong>Estoque crítico</strong><small>3 produtos estão sem estoque</small></div></button> : null}{canSeeFinance ? <button onClick={() => goToSearchResult("Financeiro")}><span className="notice-icon green"><Icon name="wallet" size={17}/></span><div><strong>Fechamento do caixa</strong><small>Conferência disponível a partir das 18h</small></div></button> : null}{!canViewOrders && !canViewInventory && !canSeeFinance ? <div className="no-results">Nenhuma notificação para os módulos liberados.</div> : null}</div> : null}</div>
+            <div className="notification-wrap"><button className="icon-button" aria-label="Notificações" onClick={() => setShowNotifications(!showNotifications)}><Icon name="bell" /><span className="notification-dot" /></button>{showNotifications ? <div className="notification-menu"><div className="notification-head"><strong>Notificações</strong><button onClick={() => notify("Todas as notificações foram marcadas como lidas.")}>Marcar como lidas</button></div>{canViewOrders ? <button onClick={() => goToSearchResult("Ordens de serviço")}><span className="notice-icon red"><Icon name="clock" size={17}/></span><div><strong>{orders.filter((o) => o.status === "Aprovação").length > 0 ? `${orders.filter((o) => o.status === "Aprovação").length} orçamento(s) aguardando` : "Nenhum orçamento pendente"}</strong><small>{orders.filter((o) => o.status === "Aprovação").length > 0 ? "Aguardando aprovação de clientes" : "Tudo em dia na oficina"}</small></div></button> : null}{canViewInventory ? <button onClick={() => goToSearchResult("Produtos e estoque")}><span className="notice-icon amber"><Icon name="alert" size={17}/></span><div><strong>{products.filter((p) => p.stock <= p.minimum).length > 0 ? `${products.filter((p) => p.stock <= p.minimum).length} produto(s) com estoque baixo` : "Estoque em dia"}</strong><small>{products.filter((p) => p.stock <= p.minimum).length > 0 ? "Revisar compras de reposição" : "Nenhum item com estoque crítico"}</small></div></button> : null}{canSeeFinance ? <button onClick={() => goToSearchResult("Financeiro")}><span className="notice-icon green"><Icon name="wallet" size={17}/></span><div><strong>Controle do caixa</strong><small>Conferência e movimentações</small></div></button> : null}{!canViewOrders && !canViewInventory && !canSeeFinance ? <div className="no-results">Nenhuma notificação para os módulos liberados.</div> : null}</div> : null}</div>
             {canCreateOrders ? <button className="primary-button" onClick={() => openDialog("osChoice")}><Icon name="plus" size={18} />Abrir nova OS</button> : null}
           </div>
         </header>
@@ -2585,8 +2570,8 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           <>
           <div className="page-heading">
             <div>
-              <p>Segunda-feira, 24 de agosto</p>
-              <h1>Bom dia, {firebaseSession.profile?.name.split(" ")[0] || "Erasmo"}.</h1>
+              <p>{new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long" }).format(new Date()).replace(/^[a-z]/, (c) => c.toUpperCase())}</p>
+              <h1>Bem-vindo, {currentUserName}.</h1>
               <span>Veja o que precisa da sua atenção hoje.</span>
             </div>
             {canCreateOrders ? <button className="primary-button heading-button" onClick={() => openDialog("osChoice")}><Icon name="plus" size={18} />Abrir nova OS</button> : <span className="system-healthy"><i/><b>Acesso personalizado</b></span>}
@@ -2605,27 +2590,27 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
             {canViewOrders ? <>
             <button className="stat-card" onClick={() => setActive("Ordens de serviço")}>
               <div className="stat-icon red"><Icon name="wrench" /></div>
-              <div className="stat-info"><span>OS ativas</span><strong>18</strong><small><b>+3</b> desde ontem</small></div>
+              <div className="stat-info"><span>OS ativas</span><strong>{orders.filter((o) => o.status !== "Entrega").length}</strong><small>{orders.length} total registrada(s)</small></div>
             </button>
             <button className="stat-card" onClick={() => setActive("Orçamentos")}>
               <div className="stat-icon amber"><Icon name="clock" /></div>
-              <div className="stat-info"><span>Aguardando aprovação</span><strong>4</strong><small>R$ 2.840,00 em orçamentos</small></div>
+              <div className="stat-info"><span>Aguardando aprovação</span><strong>{orders.filter((o) => o.status === "Aprovação").length}</strong><small>Orçamentos pendentes</small></div>
             </button>
             <button className="stat-card" onClick={() => setActive("Ordens de serviço")}>
               <div className="stat-icon green"><Icon name="check" /></div>
-              <div className="stat-info"><span>Prontas para entrega</span><strong>3</strong><small>2 clientes já avisados</small></div>
+              <div className="stat-info"><span>Prontas para entrega</span><strong>{orders.filter((o) => o.status === "Entrega").length}</strong><small>Aguardando retirada</small></div>
             </button>
             </> : <div className="stat-card access-stat"><div className="stat-icon red"><Icon name="shield"/></div><div className="stat-info"><span>Seu perfil de acesso</span><strong>{firebaseSession.profile?.role ?? "Usuário"}</strong><small>{firebasePermissions.length} permissões liberadas pelo Super Admin</small></div></div>}
             {canSeeFinance ? <button className="stat-card" onClick={() => setActive("Financeiro")}>
               <div className="stat-icon blue"><Icon name="wallet" /></div>
-              <div className="stat-info"><span>Recebido hoje</span><strong className="money">R$ 4.280</strong><small><b>+12%</b> sobre ontem</small></div>
+              <div className="stat-info"><span>Recebido hoje</span><strong className="money">R$ 0,00</strong><small>Movimentações do dia</small></div>
             </button> : null}
           </section>
 
           {canSeeFinance ? <section className="dashboard-finance-grid" aria-label="Valores financeiros">
-            <button className="dashboard-money-card receive" onClick={() => setActive("Contas a receber")}><span className="money-card-icon"><Icon name="arrow"/></span><div><small>A receber</small><strong>R$ 8.740,00</strong><em>R$ 1.320 vencidos</em></div><Icon name="arrow" size={18}/></button>
-            <button className="dashboard-money-card pay" onClick={() => setActive("Contas a pagar")}><span className="money-card-icon"><Icon name="file"/></span><div><small>A pagar</small><strong>R$ 5.960,00</strong><em>R$ 860 vence hoje</em></div><Icon name="arrow" size={18}/></button>
-            <button className="dashboard-money-card cash" onClick={() => openDialog("cash")}><span className="money-card-icon"><Icon name="wallet"/></span><div><small>Saldo do caixa</small><strong>R$ 4.480,00</strong><em>Caixa aberto desde 08:02</em></div><Icon name="arrow" size={18}/></button>
+            <button className="dashboard-money-card receive" onClick={() => setActive("Contas a receber")}><span className="money-card-icon"><Icon name="arrow"/></span><div><small>A receber</small><strong>R$ 0,00</strong><em>Nenhum valor em aberto</em></div><Icon name="arrow" size={18}/></button>
+            <button className="dashboard-money-card pay" onClick={() => setActive("Contas a pagar")}><span className="money-card-icon"><Icon name="file"/></span><div><small>A pagar</small><strong>{formatBRL(expenses.filter((e) => e.status === "Agendado").reduce((sum, e) => sum + e.amount, 0))}</strong><em>{expenses.filter((e) => e.status === "Agendado").length} conta(s) agendada(s)</em></div><Icon name="arrow" size={18}/></button>
+            <button className="dashboard-money-card cash" onClick={() => openDialog("cash")}><span className="money-card-icon"><Icon name="wallet"/></span><div><small>Saldo do caixa</small><strong>R$ 0,00</strong><em>Caixa atual</em></div><Icon name="arrow" size={18}/></button>
           </section> : null}
 
           {canViewOrders ? <section className="flow-section">
@@ -2634,7 +2619,13 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
               <button className="text-button" onClick={() => setActive("Ordens de serviço")}>Ver todas as OS <Icon name="arrow" size={16} /></button>
             </div>
             <div className="flow-grid">
-              {flow.map((item) => (
+              {[
+                { label: "Recepção", value: String(orders.filter((o) => o.status === "Recepção").length), helper: "Entrada e triagem", tone: "blue" },
+                { label: "Avaliação", value: String(orders.filter((o) => o.status === "Avaliação").length), helper: "Orçamento e diagnóstico", tone: "violet" },
+                { label: "Aprovação", value: String(orders.filter((o) => o.status === "Aprovação").length), helper: "Aguardando cliente", tone: "red" },
+                { label: "Em serviço", value: String(orders.filter((o) => o.status === "Em serviço").length), helper: "Execução na oficina", tone: "amber" },
+                { label: "Prontas", value: String(orders.filter((o) => o.status === "Entrega").length), helper: "Aguardando retirada", tone: "green" },
+              ].map((item) => (
                 <button className="flow-card" key={item.label} onClick={() => setActive("Ordens de serviço")}>
                   <span className={`flow-dot ${item.tone}`} />
                   <div><strong>{item.value}</strong><span>{item.label}</span></div>
@@ -2655,16 +2646,18 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
                 <table>
                   <thead><tr><th>OS / Cliente</th><th>Motocicleta</th><th>Mecânico</th><th>Entrada</th><th>Status</th><th></th></tr></thead>
                   <tbody>
-                    {orders.map((order) => (
+                    {orders.length ? orders.map((order) => (
                       <tr key={order.id}>
                         <td><strong className="order-id">{order.id}</strong><span>{order.customer}</span></td>
                         <td><strong>{order.bike}</strong><span className="plate">{order.plate}</span></td>
-                        <td><span className="mechanic-avatar">{order.mechanic.slice(0, 1)}</span>{order.mechanic}</td>
+                        <td><span className="mechanic-avatar">{order.mechanic ? order.mechanic.slice(0, 1) : "M"}</span>{order.mechanic || "Não definido"}</td>
                         <td>{order.time}</td>
                         <td><span className={`status ${order.tone}`}><i />{order.status}</span></td>
                         <td><button className="row-button" aria-label={`Abrir ${order.id}`} onClick={() => openDialog("order")}><Icon name="arrow" size={17} /></button></td>
                       </tr>
-                    ))}
+                    )) : (
+                      <tr><td colSpan={6} style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>Nenhuma ordem de serviço cadastrada no momento.</td></tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2673,26 +2666,26 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
             <aside className="side-stack">
               {canViewInventory ? <section className="alert-card">
                 <div className="alert-top"><span><Icon name="alert" size={19} /></span><b>Atenção necessária</b></div>
-                <strong>12 itens com estoque crítico</strong>
-                <p>Três deles já estão zerados e podem atrasar serviços.</p>
+                <strong>{products.filter((p) => p.stock <= p.minimum).length > 0 ? `${products.filter((p) => p.stock <= p.minimum).length} item(ns) com estoque crítico` : "Estoque regularizado"}</strong>
+                <p>{products.filter((p) => p.stock <= p.minimum).length > 0 ? `${products.filter((p) => p.stock === 0).length} item(ns) totalmente zerados no momento.` : "Todos os produtos cadastrados estão dentro do nível seguro."}</p>
                 <button onClick={() => setActive("Produtos e estoque")}>Ver itens do estoque <Icon name="arrow" size={16} /></button>
               </section> : null}
 
               {canSeeFinance ? <section className="panel quick-panel">
                 <div className="panel-header"><div><h2>Financeiro rápido</h2><p>Sem sair do painel</p></div></div>
                 <button onClick={() => openDialog("expense")}><span className="quick-icon red"><Icon name="file" /></span><div><strong>Adicionar gasto</strong><small>Peça, frete ou despesa</small></div><Icon name="arrow" size={17} /></button>
-                <button onClick={() => setActive("Contas a receber")}><span className="quick-icon green"><Icon name="arrow" /></span><div><strong>Contas a receber</strong><small>R$ 8.740 em aberto</small></div><Icon name="arrow" size={17} /></button>
-                <button onClick={() => setActive("Contas a pagar")}><span className="quick-icon dark"><Icon name="wallet" /></span><div><strong>Contas a pagar</strong><small>R$ 5.960 em aberto</small></div><Icon name="arrow" size={17} /></button>
+                <button onClick={() => setActive("Contas a receber")}><span className="quick-icon green"><Icon name="arrow" /></span><div><strong>Contas a receber</strong><small>R$ 0,00 em aberto</small></div><Icon name="arrow" size={17} /></button>
+                <button onClick={() => setActive("Contas a pagar")}><span className="quick-icon dark"><Icon name="wallet" /></span><div><strong>Contas a pagar</strong><small>{formatBRL(expenses.filter((e) => e.status === "Agendado").reduce((sum, e) => sum + e.amount, 0))} em aberto</small></div><Icon name="arrow" size={17} /></button>
               </section> : null}
             </aside>
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients}/>
+            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles}/>
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify}/>
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );

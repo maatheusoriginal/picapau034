@@ -1,0 +1,279 @@
+export type IconName =
+  | "home"
+  | "wrench"
+  | "file"
+  | "box"
+  | "users"
+  | "bike"
+  | "wallet"
+  | "chart"
+  | "search"
+  | "bell"
+  | "plus"
+  | "arrow"
+  | "clock"
+  | "alert"
+  | "check"
+  | "menu"
+  | "settings"
+  | "shield"
+  | "trash"
+  | "edit"
+  | "lock"
+  | "printer"
+  | "refresh";
+
+export type DialogKind =
+  | "osChoice"
+  | "os"
+  | "quick"
+  | "product"
+  | "import"
+  | "payment"
+  | "catalog"
+  | "client"
+  | "motorcycle"
+  | "employee"
+  | "supplier"
+  | "purchase"
+  | "finance"
+  | "order"
+  | "orderCheckout"
+  | "settings"
+  | "cash"
+  | "expense"
+  | "receivable"
+  | "payable"
+  | "settleReceivable"
+  | "settlePayable"
+  | "record"
+  | "changePassword"
+  | null;
+
+export type OpenDialog = (dialog: Exclude<DialogKind, null>) => void;
+
+export type ExpenseRecord = {
+  id: string;
+  description: string;
+  category: string;
+  amount: number;
+  dueDate: string;
+  status: "Pago" | "Agendado";
+  method: string;
+  order?: string;
+  charged?: number;
+  employeeId?: string;
+};
+
+export type UserConfig = {
+  id: string;
+  name: string;
+  role: "Super Admin" | "Balcão" | "Mecânico";
+  position: string;
+  phone: string;
+  document?: string;
+  active: boolean;
+  isMechanic: boolean;
+  isResponsibleMechanic: boolean;
+  canReceiveServiceOrders: boolean;
+  canManageAllOrders: boolean;
+  employmentType: "Fixo" | "Avulso";
+  baseSalary: number;
+  paymentDay: number;
+  serviceCommission?: number;
+  productCommission?: number;
+  currentOrders: number;
+  userId?: string;
+  notes?: string;
+};
+
+export function isMechanicUser(user: Partial<UserConfig>): boolean {
+  if (user.isMechanic === true || user.isResponsibleMechanic === true || user.canReceiveServiceOrders === true) {
+    return true;
+  }
+  const pos = (user.position || "").toLowerCase();
+  const role = (user.role || "").toLowerCase();
+  const job = ((user as Record<string, unknown>).jobTitle ? String((user as Record<string, unknown>).jobTitle) : "").toLowerCase();
+  if (pos.includes("mecanic") || pos.includes("mecânic")) return true;
+  if (role.includes("mecanic") || role.includes("mecânic") || role === "mechanic") return true;
+  if (job.includes("mecanic") || job.includes("mecânic") || job === "mechanic") return true;
+  return false;
+}
+
+export type PaymentMachineConfig = {
+  id: string;
+  name: string;
+  active: boolean;
+  primary: boolean;
+  debitFee: number;
+  credit1xFee: number;
+  credit2to6Fee: number;
+  credit7to12Fee: number;
+  settlementDays: number;
+};
+
+export type PaymentMethodConfig = {
+  id: string;
+  name: string;
+  active: boolean;
+  usesMachine: boolean;
+};
+
+export type PartnerConfig = {
+  id: string;
+  name: string;
+  phone: string;
+  laborDiscount: number;
+  billingCycle: string;
+  active: boolean;
+};
+
+export type QuickServiceConfig = {
+  id: string;
+  name: string;
+  laborPrice: number;
+  duration: number;
+  productCategory: string;
+  productRequired: boolean;
+  active: boolean;
+};
+
+export type CategoryConfig = {
+  id: string;
+  name: string;
+  group: "Serviços" | "Produtos" | "Despesas";
+  active: boolean;
+};
+
+export type SupplierConfig = {
+  id: string;
+  name: string;
+  tradeName?: string;
+  document?: string;
+  phone: string;
+  phoneSecondary?: string;
+  email?: string;
+  representative?: string;
+  categories: string;
+  deliveryDays: number;
+  paymentTerms?: string;
+  minimumOrder?: number;
+  address?: string;
+  city?: string;
+  state?: string;
+  notes?: string;
+  active: boolean;
+};
+
+export type ServiceOrderItem = {
+  id: string;
+  type: "Peça" | "Mão de obra";
+  name: string;
+  price: number;
+  quantity?: number;
+  cost?: number;
+};
+
+export type OrderRecord = {
+  id: string;
+  customer: string;
+  bike: string;
+  plate: string;
+  mechanic: string;
+  mechanicIds: string[];
+  time: string;
+  status: string;
+  tone: string;
+  items?: ServiceOrderItem[];
+  problem?: string;
+  solution?: string;
+  notes?: string;
+  total?: number;
+};
+
+export type ProductRecord = {
+  id: string;
+  code: string;
+  barcode?: string;
+  partNumber?: string;
+  name: string;
+  category: string;
+  brand?: string;
+  unit?: string;
+  location?: string;
+  cost: string;
+  markup?: number;
+  price: string;
+  stock: number;
+  minimum: number;
+  maximum?: number;
+  alertLowStock?: boolean;
+  compatibility?: string;
+  supplierId?: string;
+  supplierName?: string;
+  notes?: string;
+  active?: boolean;
+  status: string;
+};
+
+export type ClientRecord = {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  document?: string;
+  type?: "Pessoa física" | "Empresa";
+  detail: string;
+  meta: string;
+  condition: string;
+  creditLimit?: number;
+  address?: string;
+  motorcycleIds: string[];
+  tradeCredit?: number;
+  tradeDetails?: string;
+  notes?: string;
+  active?: boolean;
+};
+
+export type MotorcycleRecord = {
+  id: string;
+  ownerId: string;
+  ownerName?: string;
+  plate: string;
+  brand?: string;
+  model: string;
+  year: string;
+  color: string;
+  mileage?: number;
+  engineSize?: string;
+  chassis?: string;
+  renavam?: string;
+  notes?: string;
+};
+
+export type SettingsConfig = {
+  workshopName: string;
+  tradeName?: string;
+  cnpj?: string;
+  phone: string;
+  secondaryPhone?: string;
+  address: string;
+  osPrefix: string;
+  nextOsNumber: number;
+  defaultWarrantyDays: number;
+  defaultDeliveryDays: string;
+  defaultOsNotes: string;
+  allowMultipleMechanics: boolean;
+  showWorkload: boolean;
+  defaultMinStock: number;
+  defaultUnit: string;
+  pricingMode?: "markup" | "fixed";
+  suggestedMarkup: number;
+  blockZeroStockSale: boolean;
+  deductStockOnlyWhenUsed: boolean;
+  useAverageCost: boolean;
+  thermalPrinter: string;
+  printFormat: string;
+  printThreeCopies: boolean;
+  defaultWhatsappMessage: string;
+};

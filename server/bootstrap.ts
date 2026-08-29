@@ -40,8 +40,10 @@ export async function bootstrapSuperAdmin(request: Request, response: Response) 
       return;
     }
 
+    const userDocSnap = await db.collection("users").doc(decoded.uid).get();
+    const userDocData = userDocSnap.exists ? userDocSnap.data() : null;
     const authUser = await auth.getUser(decoded.uid);
-    const name = authUser.displayName?.trim() || callerEmail.split("@")[0] || "Administrador";
+    const name = String(userDocData?.name ?? "").trim() || authUser.displayName?.trim() || "Administrador";
     const permissions = [
       "orders.view", "orders.create", "orders.update", "budgets.view",
       "pos.use", "quickService.use", "inventory.view", "inventory.manage",
@@ -52,7 +54,23 @@ export async function bootstrapSuperAdmin(request: Request, response: Response) 
       role: "Super Admin",
     });
 
-    await db.collection("userAccess").doc(decoded.uid).set({
+    if (!authUser.displayName && name) {
+      await auth.updateUser(decoded.uid, { displayName: name }).catch(() => undefined);
+    }
+
+    const batch = db.batch();
+    batch.set(db.collection("users").doc(decoded.uid), {
+      uid: decoded.uid,
+      name,
+      email: callerEmail,
+      phone: authUser.phoneNumber ?? "",
+      role: "Super Admin",
+      employeeId: "",
+      active: true,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    batch.set(db.collection("userAccess").doc(decoded.uid), {
       uid: decoded.uid,
       name,
       email: callerEmail,
@@ -66,6 +84,8 @@ export async function bootstrapSuperAdmin(request: Request, response: Response) 
       createdBy: decoded.uid,
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
+
+    await batch.commit();
 
     await db.collection("auditLogs").add({
       actorUid: decoded.uid,

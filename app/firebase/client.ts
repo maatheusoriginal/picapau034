@@ -11,23 +11,26 @@ import {
 } from "firebase/auth";
 import {
   collection,
+  deleteDoc,
   doc,
+  getDoc,
   getDocs,
   getFirestore,
   onSnapshot,
   serverTimestamp,
+  setDoc,
   writeBatch,
   type DocumentData,
   type Unsubscribe,
 } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyD29XX1forYBID5KFbD4PptOi4IZSPibY8",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "oficinapicapaumotos34.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "oficinapicapaumotos34",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "oficinapicapaumotos34.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "754527262085",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:754527262085:web:b9b94d26280639461e20ec",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCW677q7krjXUjdi1OyPfJ-_oGYC2d6Lu8",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "oficina-picapau.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "oficina-picapau",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "oficina-picapau.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "54216669706",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:54216669706:web:42eab6e934d5b5f45b7df3",
 };
 
 export type FirebaseUserSummary = {
@@ -146,7 +149,7 @@ export function firebaseErrorMessage(error: unknown) {
 
 function summarizeUser(user: User | null): FirebaseUserSummary | null {
   if (!user) return null;
-  return { uid: user.uid, email: user.email ?? "", displayName: user.displayName ?? user.email?.split("@")[0] ?? "Usuário" };
+  return { uid: user.uid, email: user.email ?? "", displayName: user.displayName?.trim() || "Usuário" };
 }
 
 export function observeFirebaseAuth(
@@ -196,22 +199,137 @@ export async function bootstrapCurrentUserAsSuperAdmin() {
   }
 }
 
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const { auth } = services();
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 export function observeAccessProfile(uid: string, callback: (profile: FirebaseAccessProfile | null) => void, onError: (error: unknown) => void): Unsubscribe {
-  const { db } = services();
-  return onSnapshot(doc(db, "userAccess", uid), (snapshot) => {
-    if (!snapshot.exists()) return callback(null);
-    const data = snapshot.data();
-    const role = (data.role ?? "Mecânico") as FirebaseAccessProfile["role"];
-    const employeeId = String(data.employeeId ?? "");
+  const { auth, db } = services();
+  let userDoc: DocumentData | null = null;
+  let accessDoc: DocumentData | null = null;
+  let userLoaded = false;
+  let accessLoaded = false;
+
+  const isBootstrapAdmin = (auth.currentUser?.email || "").toLowerCase() === "matheus2713.m@gmail.com";
+
+  const emit = () => {
+    if (!userLoaded || !accessLoaded) return;
+    if (!userDoc && !accessDoc) {
+      if (isBootstrapAdmin) {
+        callback({
+          uid,
+          employeeId: "",
+          name: auth.currentUser?.displayName?.trim() || "Matheus (Super Admin)",
+          role: "Super Admin",
+          active: true,
+          permissions: [...allFirebasePermissions],
+        });
+        return;
+      }
+      return callback(null);
+    }
+
+    // Priority: 1. users/{uid}.name, 2. userAccess/{uid}.name, 3. user.displayName, 4. "Usuário"
+    const resolvedName = (typeof userDoc?.name === "string" ? userDoc.name.trim() : "")
+      || (typeof accessDoc?.name === "string" ? accessDoc.name.trim() : "")
+      || auth.currentUser?.displayName?.trim()
+      || (isBootstrapAdmin ? "Matheus (Super Admin)" : "Usuário");
+
+    const role = (isBootstrapAdmin ? "Super Admin" : ((accessDoc?.role || userDoc?.role) ?? "Mecânico")) as FirebaseAccessProfile["role"];
+    const employeeId = String(accessDoc?.employeeId ?? userDoc?.employeeId ?? "");
+    const active = accessDoc ? accessDoc.active !== false : (userDoc ? userDoc.active !== false : true);
+    const rawPermissions = isBootstrapAdmin ? allFirebasePermissions : (accessDoc?.permissions ?? userDoc?.permissions);
+    const permissions = Array.isArray(rawPermissions)
+      ? rawPermissions.filter((item): item is FirebasePermission => allFirebasePermissions.includes(item))
+      : defaultFirebasePermissions(role, employeeId);
+
     callback({
       uid,
       employeeId,
-      name: String(data.name ?? "Usuário"),
+      name: resolvedName,
       role,
-      active: data.active !== false,
-      permissions: Array.isArray(data.permissions) ? data.permissions.filter((item): item is FirebasePermission => allFirebasePermissions.includes(item)) : defaultFirebasePermissions(role, employeeId),
+      active,
+      permissions,
     });
-  }, onError);
+  };
+
+  const stopUser = onSnapshot(doc(db, "users", uid), (snapshot) => {
+    userLoaded = true;
+    userDoc = snapshot.exists() ? snapshot.data() : null;
+    emit();
+  }, (err) => {
+    userLoaded = true;
+    userDoc = null;
+    console.warn("Could not load users doc", err);
+    emit();
+  });
+
+  const stopAccess = onSnapshot(doc(db, "userAccess", uid), (snapshot) => {
+    accessLoaded = true;
+    accessDoc = snapshot.exists() ? snapshot.data() : null;
+    emit();
+  }, (err) => {
+    accessLoaded = true;
+    accessDoc = null;
+    if (!userDoc && !isBootstrapAdmin) {
+      try {
+        handleFirestoreError(err, OperationType.GET, `userAccess/${uid}`);
+      } catch (formatted) {
+        onError(formatted);
+      }
+    } else {
+      emit();
+    }
+  });
+
+  return () => {
+    stopUser();
+    stopAccess();
+  };
 }
 
 function cleanDocument<T>(id: string, data: DocumentData): T {
@@ -226,21 +344,68 @@ export function observeCollection<T extends { id: string }>(name: string, callba
   return onSnapshot(collection(db, name), (snapshot) => {
     const records = snapshot.docs.map((item) => cleanDocument<T>(item.id, item.data()));
     callback(records.sort((a, b) => a.id.localeCompare(b.id, "pt-BR", { numeric: true })));
-  }, onError);
+  }, (error) => {
+    try {
+      handleFirestoreError(error, OperationType.LIST, name);
+    } catch (formatted) {
+      onError(formatted);
+    }
+  });
 }
 
 export async function replaceCollection<T extends { id: string }>(name: string, records: T[]) {
   const { db } = services();
   const reference = collection(db, name);
-  const current = await getDocs(reference);
-  const ids = new Set(records.map((record) => record.id));
-  const batch = writeBatch(db);
-  current.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
-  records.forEach((record) => {
-    const { id, ...data } = record;
-    batch.set(doc(reference, id), { ...data, updatedAt: serverTimestamp() }, { merge: true });
-  });
-  await batch.commit();
+  try {
+    const current = await getDocs(reference);
+    const ids = new Set(records.map((record) => record.id));
+    const batch = writeBatch(db);
+    current.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
+    records.forEach((record) => {
+      const { id, ...data } = record;
+      batch.set(doc(reference, id), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, name);
+  }
+}
+
+function normalizeEmployeeData<T extends EmployeeLike>(id: string, raw: DocumentData): T {
+  const data = cleanDocument<T>(id, raw) as unknown as Record<string, unknown>;
+  const isMech = data.isMechanic === true
+    || data.isResponsibleMechanic === true
+    || data.canReceiveServiceOrders === true
+    || (typeof data.position === "string" && (data.position.toLowerCase().includes("mecanic") || data.position.toLowerCase().includes("mecânic")))
+    || (typeof data.role === "string" && (data.role.toLowerCase().includes("mecanic") || data.role.toLowerCase().includes("mecânic") || data.role === "mechanic"))
+    || (typeof data.jobTitle === "string" && (data.jobTitle.toLowerCase().includes("mecanic") || data.jobTitle.toLowerCase().includes("mecânic") || data.jobTitle === "mechanic"));
+
+  const isResp = data.isResponsibleMechanic === true
+    || (typeof data.position === "string" && (data.position.toLowerCase().includes("responsável") || data.position.toLowerCase().includes("responsavel") || data.position.toLowerCase().includes("dono")));
+
+  const active = data.active !== false && data.status !== "Inativo" && data.status !== "inactive";
+
+  const rawPosition = data.position || data.jobTitle || (isMech ? "Mecânico" : "Atendente de Balcão");
+  const position = String(rawPosition);
+
+  return {
+    ...data,
+    id,
+    name: String(data.name || data.displayName || "Funcionário"),
+    position,
+    role: data.role || (isMech ? "Mecânico" : (position.includes("Balcão") ? "Balcão" : "Super Admin")),
+    phone: String(data.phone || data.whatsapp || ""),
+    document: String(data.document || data.cpf || ""),
+    active,
+    isMechanic: isMech,
+    isResponsibleMechanic: isResp,
+    canReceiveServiceOrders: isMech,
+    canManageAllOrders: Boolean(data.canManageAllOrders || data.canManageOrders || isResp),
+    employmentType: data.employmentType === "Avulso" ? "Avulso" : "Fixo",
+    currentOrders: Number(data.currentOrders || 0),
+    serviceCommission: Number(data.serviceCommission ?? (isMech ? 10 : 0)),
+    productCommission: Number(data.productCommission ?? 0),
+  } as unknown as T;
 }
 
 export function observeEmployees<T extends EmployeeLike>(includeCompensation: boolean, callback: (records: T[]) => void, onError: (error: unknown) => void): Unsubscribe {
@@ -253,16 +418,28 @@ export function observeEmployees<T extends EmployeeLike>(includeCompensation: bo
     paymentDay: compensation.get(employee.id)?.paymentDay ?? 5,
   }) as T).sort((a, b) => a.id.localeCompare(b.id, "pt-BR", { numeric: true })));
   const stopEmployees = onSnapshot(collection(db, "employees"), (snapshot) => {
-    employees = snapshot.docs.map((item) => cleanDocument(item.id, item.data()));
+    employees = snapshot.docs.map((item) => normalizeEmployeeData<T>(item.id, item.data()));
     emit();
-  }, onError);
+  }, (error) => {
+    try {
+      handleFirestoreError(error, OperationType.LIST, "employees");
+    } catch (formatted) {
+      onError(formatted);
+    }
+  });
   const stopCompensation = includeCompensation ? onSnapshot(collection(db, "employeeCompensation"), (snapshot) => {
     compensation = new Map(snapshot.docs.map((item) => [item.id, {
       baseSalary: Number(item.data().baseSalary ?? 0),
       paymentDay: Number(item.data().paymentDay ?? 5),
     }]));
     emit();
-  }, onError) : () => undefined;
+  }, (error) => {
+    try {
+      handleFirestoreError(error, OperationType.LIST, "employeeCompensation");
+    } catch (formatted) {
+      onError(formatted);
+    }
+  }) : () => undefined;
   return () => { stopEmployees(); stopCompensation(); };
 }
 
@@ -270,17 +447,60 @@ export async function replaceEmployees<T extends EmployeeLike>(records: T[]) {
   const { db } = services();
   const employeeReference = collection(db, "employees");
   const compensationReference = collection(db, "employeeCompensation");
-  const [currentEmployees, currentCompensation] = await Promise.all([getDocs(employeeReference), getDocs(compensationReference)]);
-  const ids = new Set(records.map((record) => record.id));
-  const batch = writeBatch(db);
-  currentEmployees.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
-  currentCompensation.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
-  records.forEach((record) => {
-    const { id, baseSalary, paymentDay, ...publicData } = record;
-    batch.set(doc(employeeReference, id), { ...publicData, updatedAt: serverTimestamp() }, { merge: true });
-    batch.set(doc(compensationReference, id), { baseSalary, paymentDay, updatedAt: serverTimestamp() }, { merge: true });
+  try {
+    const [currentEmployees, currentCompensation] = await Promise.all([getDocs(employeeReference), getDocs(compensationReference)]);
+    const ids = new Set(records.map((record) => record.id));
+    const batch = writeBatch(db);
+    currentEmployees.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
+    currentCompensation.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
+    records.forEach((record) => {
+      const { id, baseSalary, paymentDay, ...publicData } = record;
+      batch.set(doc(employeeReference, id), { ...publicData, updatedAt: serverTimestamp() }, { merge: true });
+      batch.set(doc(compensationReference, id), { baseSalary, paymentDay, updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, "employees");
+  }
+}
+
+export async function saveFirestoreDoc<T extends { id: string }>(collectionName: string, id: string, data: Partial<T>) {
+  const { db } = services();
+  const cleanData = { ...data };
+  delete (cleanData as Record<string, unknown>).id;
+  try {
+    await setDoc(doc(db, collectionName, id), { ...cleanData, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${id}`);
+  }
+}
+
+export async function deleteFirestoreDoc(collectionName: string, id: string) {
+  const { db } = services();
+  try {
+    await deleteDoc(doc(db, collectionName, id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${collectionName}/${id}`);
+  }
+}
+
+export function observeFirestoreDoc<T>(collectionName: string, id: string, callback: (doc: T | null) => void, onError?: (error: unknown) => void): Unsubscribe {
+  const { db } = services();
+  return onSnapshot(doc(db, collectionName, id), (snapshot) => {
+    if (!snapshot.exists()) {
+      callback(null);
+    } else {
+      callback(cleanDocument<T>(snapshot.id, snapshot.data()));
+    }
+  }, (error) => {
+    if (onError) {
+      try {
+        handleFirestoreError(error, OperationType.GET, `${collectionName}/${id}`);
+      } catch (formatted) {
+        onError(formatted);
+      }
+    }
   });
-  await batch.commit();
 }
 
 function managedUserFromData(uid: string, data: DocumentData): FirebaseManagedUser {
@@ -340,16 +560,53 @@ async function callAdmin<TOutput>(input?: object): Promise<TOutput> {
 
 async function listManagedUsersFromFirestore() {
   const { auth, db } = services();
-  const snapshot = await getDocs(collection(db, "userAccess"));
-  return snapshot.docs.map((item) => {
-    const user = managedUserFromData(item.id, item.data());
+  const [accessSnapshot, usersSnapshot] = await Promise.all([
+    getDocs(collection(db, "userAccess")).catch(() => ({ docs: [] as DocumentData[] })),
+    getDocs(collection(db, "users")).catch(() => ({ docs: [] as DocumentData[] })),
+  ]);
+  const usersMap = new Map<string, DocumentData>();
+  for (const docSnap of usersSnapshot.docs) {
+    usersMap.set(docSnap.id, docSnap.data());
+  }
+
+  const accessUids = new Set<string>();
+  const list: FirebaseManagedUser[] = [];
+
+  for (const item of accessSnapshot.docs) {
+    accessUids.add(item.id);
+    const userDocData = usersMap.get(item.id);
+    const resolvedName = (typeof userDocData?.name === "string" ? userDocData.name.trim() : "")
+      || (typeof item.data()?.name === "string" ? item.data().name.trim() : "")
+      || (item.id === auth.currentUser?.uid ? auth.currentUser.displayName?.trim() : "")
+      || "Usuário";
+    const mergedData = {
+      ...item.data(),
+      name: resolvedName,
+    };
+    const user = managedUserFromData(item.id, mergedData);
     if (item.id === auth.currentUser?.uid) {
       user.email ||= auth.currentUser.email ?? "";
-      user.name = user.name || auth.currentUser.displayName || "Usuário";
+      user.name = resolvedName;
       user.lastSignInAt ||= auth.currentUser.metadata.lastSignInTime ?? "";
     }
-    return user;
-  }).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    list.push(user);
+  }
+
+  for (const [uid, userDocData] of usersMap.entries()) {
+    if (accessUids.has(uid)) continue;
+    const resolvedName = (typeof userDocData?.name === "string" ? userDocData.name.trim() : "")
+      || (uid === auth.currentUser?.uid ? auth.currentUser?.displayName?.trim() : "")
+      || "Usuário";
+    const user = managedUserFromData(uid, { ...userDocData, name: resolvedName, hasAccessProfile: false });
+    if (uid === auth.currentUser?.uid) {
+      user.email ||= auth.currentUser.email ?? "";
+      user.name = resolvedName;
+      user.lastSignInAt ||= auth.currentUser.metadata.lastSignInTime ?? "";
+    }
+    list.push(user);
+  }
+
+  return list.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 }
 
 export async function listManagedUsers(): Promise<{ users: FirebaseManagedUser[]; mode: "cloud" | "fallback" }> {

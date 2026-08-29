@@ -101,7 +101,7 @@ function publicUser(uid: string, profile: Record<string, unknown>, authUser?: Us
   const employeeId = value(profile.employeeId);
   return {
     uid,
-    name: value(profile.name) || authUser?.displayName || "Usuário",
+    name: value(profile.name) || authUser?.displayName?.trim() || "Usuário",
     email: value(profile.email) || authUser?.email || "",
     phone: value(profile.phone),
     role,
@@ -152,13 +152,31 @@ export async function getAdminUsers(request: Request, response: Response) {
   try {
     await callerFrom(request);
     const { db } = firebaseAdmin();
-    const [authenticationUsers, profiles] = await Promise.all([
+    const [authenticationUsers, profiles, usersDocs] = await Promise.all([
       listAllAuthenticationUsers(),
       db.collection("userAccess").get(),
+      db.collection("users").get(),
     ]);
     const authByUid = new Map(authenticationUsers.map((item) => [item.uid, item]));
-    const users = profiles.docs.map((item) => publicUser(item.id, item.data(), authByUid.get(item.id), true));
+    const usersByUid = new Map(usersDocs.docs.map((item) => [item.id, item.data()]));
+
+    const users = profiles.docs.map((item) => {
+      const userDoc = usersByUid.get(item.id);
+      const mergedProfile = {
+        ...item.data(),
+        name: value(userDoc?.name) || value(item.data()?.name),
+      };
+      return publicUser(item.id, mergedProfile, authByUid.get(item.id), true);
+    });
+
     const profileUids = new Set(profiles.docs.map((item) => item.id));
+
+    for (const userDoc of usersDocs.docs) {
+      if (profileUids.has(userDoc.id)) continue;
+      profileUids.add(userDoc.id);
+      const authUser = authByUid.get(userDoc.id);
+      users.push(publicUser(userDoc.id, userDoc.data(), authUser, false));
+    }
 
     for (const authUser of authenticationUsers) {
       if (profileUids.has(authUser.uid)) continue;
@@ -201,11 +219,15 @@ export async function postAdminUsers(request: Request, response: Response) {
         created = await auth.createUser({ email, password, displayName: name, disabled: !active });
         await auth.setCustomUserClaims(created.uid, { role, employeeId });
         const batch = db.batch();
+        batch.set(db.collection("users").doc(created.uid), {
+          uid: created.uid, name, email, phone, role, employeeId, active,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
         batch.set(db.collection("userAccess").doc(created.uid), {
           uid: created.uid, name, email, phone, role, employeeId, active, permissions: userPermissions,
           mustChangePassword: true, createdAt: FieldValue.serverTimestamp(), createdBy: callerUid,
           updatedAt: FieldValue.serverTimestamp(),
-        });
+        }, { merge: true });
         if (employeeId) batch.set(db.collection("employees").doc(employeeId), {
           userUid: created.uid, userEmail: email, systemRole: role, hasSystemAccess: active,
           updatedAt: FieldValue.serverTimestamp(),
@@ -247,6 +269,10 @@ export async function postAdminUsers(request: Request, response: Response) {
       }
 
       const batch = db.batch();
+      batch.set(db.collection("users").doc(uid), {
+        uid, name, email, phone, role, employeeId, active,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
       batch.set(db.collection("userAccess").doc(uid), {
         uid, name, email, phone, role, employeeId, active, permissions: userPermissions,
         ...(!currentSnapshot.exists ? { createdAt: FieldValue.serverTimestamp(), createdBy: callerUid } : {}),
@@ -288,6 +314,7 @@ export async function postAdminUsers(request: Request, response: Response) {
         if (!code.includes("user-not-found")) throw error;
       }
       const batch = db.batch();
+      batch.delete(db.collection("users").doc(uid));
       batch.delete(db.collection("userAccess").doc(uid));
       if (profileData.employeeId) batch.set(db.collection("employees").doc(value(profileData.employeeId)), {
         hasSystemAccess: false, userUid: FieldValue.delete(), userEmail: FieldValue.delete(), systemRole: FieldValue.delete(),

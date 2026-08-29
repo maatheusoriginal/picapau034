@@ -1,0 +1,626 @@
+import React, { useState, useEffect } from "react";
+import type { CategoryConfig, ProductRecord, SupplierConfig } from "../types";
+import { saveFirestoreDoc } from "../../app/firebase/client";
+
+interface ProductFormModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSaved: (product: ProductRecord) => void;
+  editingProduct?: ProductRecord | null;
+  categories: CategoryConfig[];
+  suppliers: SupplierConfig[];
+  notify: (msg: string) => void;
+  allProducts: ProductRecord[];
+}
+
+export const ProductFormModal: React.FC<ProductFormModalProps> = ({
+  isOpen,
+  onClose,
+  onSaved,
+  editingProduct,
+  categories,
+  suppliers,
+  notify,
+  allProducts,
+}) => {
+  const [activeTab, setActiveTab] = useState<"ident" | "prices" | "stock" | "compat" | "extra">("ident");
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Form State
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [barcode, setBarcode] = useState("");
+  const [partNumber, setPartNumber] = useState("");
+  const [category, setCategory] = useState("");
+  const [brand, setBrand] = useState("");
+  const [unit, setUnit] = useState("UN");
+  const [location, setLocation] = useState("");
+
+  const [cost, setCost] = useState<number>(0);
+  const [markup, setMarkup] = useState<number>(45);
+  const [price, setPrice] = useState<number>(0);
+
+  const [stock, setStock] = useState<number>(0);
+  const [minimum, setMinimum] = useState<number>(2);
+  const [maximum, setMaximum] = useState<number>(20);
+  const [alertLowStock, setAlertLowStock] = useState(true);
+
+  const [compatibility, setCompatibility] = useState("");
+  const [supplierId, setSupplierId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [active, setActive] = useState(true);
+
+  // Available product categories from Firestore or fallback
+  const productCategories = categories
+    .filter((c) => c.group === "Produtos" && c.active !== false)
+    .map((c) => c.name);
+
+  const defaultCategories = productCategories.length > 0
+    ? productCategories
+    : ["Motor e Transmissão", "Freios e Rodas", "Elétrica e Ignição", "Suspensão e Direção", "Lubrificantes e Fluidos", "Pneus e Câmaras", "Acessórios e Carenagens", "Cabos e Relação", "Filtros"];
+
+  // Populate form on open / editingProduct change
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (editingProduct) {
+      setName(editingProduct.name || "");
+      setCode(editingProduct.code || "");
+      setBarcode(editingProduct.barcode || "");
+      setPartNumber(editingProduct.partNumber || "");
+      setCategory(editingProduct.category || defaultCategories[0] || "Peças");
+      setBrand(editingProduct.brand || "");
+      setUnit(editingProduct.unit || "UN");
+      setLocation(editingProduct.location || "");
+
+      const parsedCost = typeof editingProduct.cost === "number" ? editingProduct.cost : Number(String(editingProduct.cost).replace(/[^\d,.]/g, "").replace(",", ".")) || 0;
+      const parsedPrice = typeof editingProduct.price === "number" ? editingProduct.price : Number(String(editingProduct.price).replace(/[^\d,.]/g, "").replace(",", ".")) || 0;
+
+      setCost(parsedCost);
+      setPrice(parsedPrice);
+
+      if (parsedCost > 0 && parsedPrice > 0) {
+        const calculatedMarkup = Math.round(((parsedPrice - parsedCost) / parsedCost) * 100);
+        setMarkup(calculatedMarkup);
+      } else {
+        setMarkup(editingProduct.markup ?? 45);
+      }
+
+      setStock(editingProduct.stock ?? 0);
+      setMinimum(editingProduct.minimum ?? 2);
+      setMaximum(editingProduct.maximum ?? 20);
+      setAlertLowStock(editingProduct.alertLowStock !== false);
+      setCompatibility(editingProduct.compatibility || "");
+      setSupplierId(editingProduct.supplierId || "");
+      setNotes(editingProduct.notes || "");
+      setActive(editingProduct.active !== false);
+    } else {
+      // Auto generate next code
+      const nextNum = allProducts.length + 1;
+      const generatedCode = `PRD-${String(nextNum).padStart(3, "0")}`;
+      
+      setName("");
+      setCode(generatedCode);
+      setBarcode("");
+      setPartNumber("");
+      setCategory(defaultCategories[0] || "Peças");
+      setBrand("");
+      setUnit("UN");
+      setLocation("");
+      setCost(0);
+      setMarkup(45);
+      setPrice(0);
+      setStock(0);
+      setMinimum(2);
+      setMaximum(20);
+      setAlertLowStock(true);
+      setCompatibility("");
+      setSupplierId("");
+      setNotes("");
+      setActive(true);
+    }
+    setActiveTab("ident");
+  }, [isOpen, editingProduct, allProducts.length]);
+
+  // Recalculate price when cost or markup change
+  const handleCostChange = (newCost: number) => {
+    setCost(newCost);
+    if (newCost > 0) {
+      const calculatedPrice = Number((newCost * (1 + markup / 100)).toFixed(2));
+      setPrice(calculatedPrice);
+    }
+  };
+
+  const handleMarkupChange = (newMarkup: number) => {
+    setMarkup(newMarkup);
+    if (cost > 0) {
+      const calculatedPrice = Number((cost * (1 + newMarkup / 100)).toFixed(2));
+      setPrice(calculatedPrice);
+    }
+  };
+
+  const handlePriceChange = (newPrice: number) => {
+    setPrice(newPrice);
+    if (cost > 0 && newPrice >= cost) {
+      const calculatedMarkup = Math.round(((newPrice - cost) / cost) * 100);
+      setMarkup(calculatedMarkup);
+    }
+  };
+
+  const applyQuickMarkup = (quickMarkup: number) => {
+    handleMarkupChange(quickMarkup);
+  };
+
+  const grossProfit = price - cost;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!name.trim()) {
+      notify("Informe o nome do produto.");
+      setActiveTab("ident");
+      return;
+    }
+
+    if (price <= 0) {
+      notify("Informe um preço de venda maior que zero.");
+      setActiveTab("prices");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const productId = editingProduct?.id || code.trim() || `PRD-${Date.now()}`;
+      const supplierObj = suppliers.find((s) => s.id === supplierId);
+
+      const productData: ProductRecord = {
+        id: productId,
+        code: code.trim() || productId,
+        barcode: barcode.trim(),
+        partNumber: partNumber.trim(),
+        name: name.trim(),
+        category: category.trim() || defaultCategories[0] || "Peças",
+        brand: brand.trim(),
+        unit: unit.trim(),
+        location: location.trim(),
+        cost: cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+        markup,
+        price: price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+        stock: Number(stock) || 0,
+        minimum: Number(minimum) || 0,
+        maximum: Number(maximum) || 0,
+        alertLowStock,
+        compatibility: compatibility.trim(),
+        supplierId,
+        supplierName: supplierObj ? supplierObj.name : "",
+        notes: notes.trim(),
+        active,
+        status: Number(stock) <= Number(minimum) ? (Number(stock) === 0 ? "Esgotado" : "Estoque baixo") : "Em estoque",
+      };
+
+      // Save directly in Firestore collection "products"
+      await saveFirestoreDoc("products", productId, {
+        code: productData.code,
+        barcode: productData.barcode,
+        partNumber: productData.partNumber,
+        name: productData.name,
+        category: productData.category,
+        brand: productData.brand,
+        unit: productData.unit,
+        location: productData.location,
+        cost: cost,
+        markup: productData.markup,
+        price: price,
+        stock: productData.stock,
+        minimum: productData.minimum,
+        maximum: productData.maximum,
+        alertLowStock: productData.alertLowStock,
+        compatibility: productData.compatibility,
+        supplierId: productData.supplierId,
+        supplierName: productData.supplierName,
+        notes: productData.notes,
+        active: productData.active,
+        status: productData.status,
+      });
+
+      onSaved(productData);
+      notify(editingProduct ? "Produto atualizado com sucesso!" : "Produto cadastrado com sucesso!");
+      onClose();
+    } catch (err: unknown) {
+      console.error("Erro ao salvar produto:", err);
+      notify(err instanceof Error ? err.message : "Não foi possível salvar o produto.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="dialog-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dialog-window large-dialog" style={{ maxWidth: "780px" }}>
+        <div className="dialog-head">
+          <div>
+            <strong>{editingProduct ? "Editar Produto" : "Novo Produto no Estoque"}</strong>
+            <span>{editingProduct ? `Código: ${editingProduct.code} · ${editingProduct.name}` : "Preencha os dados da peça ou produto para controle de estoque e venda"}</span>
+          </div>
+          <button className="icon-close" onClick={onClose} aria-label="Fechar modal">✕</button>
+        </div>
+
+        {/* Tab Navigation */}
+        <div className="dialog-tabs">
+          <button type="button" className={`dialog-tab ${activeTab === "ident" ? "active" : ""}`} onClick={() => setActiveTab("ident")}>
+            1. Identificação
+          </button>
+          <button type="button" className={`dialog-tab ${activeTab === "prices" ? "active" : ""}`} onClick={() => setActiveTab("prices")}>
+            2. Preços & Margem
+          </button>
+          <button type="button" className={`dialog-tab ${activeTab === "stock" ? "active" : ""}`} onClick={() => setActiveTab("stock")}>
+            3. Estoque & Mínimo
+          </button>
+          <button type="button" className={`dialog-tab ${activeTab === "compat" ? "active" : ""}`} onClick={() => setActiveTab("compat")}>
+            4. Compatibilidade
+          </button>
+          <button type="button" className={`dialog-tab ${activeTab === "extra" ? "active" : ""}`} onClick={() => setActiveTab("extra")}>
+            5. Fornecedor & Obs
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="dialog-body">
+          {/* TAB 1: IDENTIFICAÇÃO */}
+          {activeTab === "ident" && (
+            <div className="form-section-stack">
+              <div className="form-grid-2">
+                <label className="field-group">
+                  <span className="field-label">Nome do produto / peça <b className="req">*</b></span>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Ex: Óleo Yamalube 20W50 4T 1L"
+                    className="dialog-input"
+                    autoFocus
+                  />
+                </label>
+                <label className="field-group">
+                  <span className="field-label">Categoria do Produto <b className="req">*</b></span>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="dialog-select"
+                  >
+                    {defaultCategories.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="form-grid-3">
+                <label className="field-group">
+                  <span className="field-label">Código interno (SKU)</span>
+                  <input
+                    type="text"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="Ex: PRD-001"
+                    className="dialog-input"
+                  />
+                </label>
+                <label className="field-group">
+                  <span className="field-label">Código de barras (EAN)</span>
+                  <input
+                    type="text"
+                    value={barcode}
+                    onChange={(e) => setBarcode(e.target.value)}
+                    placeholder="789..."
+                    className="dialog-input"
+                  />
+                </label>
+                <label className="field-group">
+                  <span className="field-label">Cód. fabricante (Part Number)</span>
+                  <input
+                    type="text"
+                    value={partNumber}
+                    onChange={(e) => setPartNumber(e.target.value)}
+                    placeholder="Ex: 90793-AB401"
+                    className="dialog-input"
+                  />
+                </label>
+              </div>
+
+              <div className="form-grid-3">
+                <label className="field-group">
+                  <span className="field-label">Marca / Fabricante</span>
+                  <input
+                    type="text"
+                    value={brand}
+                    onChange={(e) => setBrand(e.target.value)}
+                    placeholder="Ex: Yamalube, Mobil, Cobreq"
+                    className="dialog-input"
+                  />
+                </label>
+                <label className="field-group">
+                  <span className="field-label">Unidade de Medida</span>
+                  <select
+                    value={unit}
+                    onChange={(e) => setUnit(e.target.value)}
+                    className="dialog-select"
+                  >
+                    <option value="UN">Unidade (UN)</option>
+                    <option value="LT">Litro (LT)</option>
+                    <option value="PC">Peça (PC)</option>
+                    <option value="PAR">Par (PAR)</option>
+                    <option value="JOGO">Jogo / Kit (JOGO)</option>
+                    <option value="KG">Quilo (KG)</option>
+                    <option value="M">Metro (M)</option>
+                  </select>
+                </label>
+                <label className="field-group">
+                  <span className="field-label">Localização no estoque</span>
+                  <input
+                    type="text"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    placeholder="Ex: Prateleira B - Gaveta 4"
+                    className="dialog-input"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: PREÇOS E MARGEM */}
+          {activeTab === "prices" && (
+            <div className="form-section-stack">
+              <div className="pricing-box">
+                <div className="form-grid-3">
+                  <label className="field-group">
+                    <span className="field-label">Preço de Custo (R$)</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={cost === 0 ? "" : cost}
+                      onChange={(e) => handleCostChange(parseFloat(e.target.value) || 0)}
+                      placeholder="0,00"
+                      className="dialog-input bold-number"
+                    />
+                  </label>
+
+                  <div className="field-group">
+                    <span className="field-label">Margem de Lucro (%)</span>
+                    <input
+                      type="number"
+                      step="1"
+                      value={markup}
+                      onChange={(e) => handleMarkupChange(parseFloat(e.target.value) || 0)}
+                      placeholder="45"
+                      className="dialog-input bold-number"
+                    />
+                    <div className="quick-badges-row">
+                      {[30, 45, 60, 100].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          className={`badge-btn ${markup === m ? "active" : ""}`}
+                          onClick={() => applyQuickMarkup(m)}
+                        >
+                          +{m}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="field-group">
+                    <span className="field-label">Preço de Venda (R$) <b className="req">*</b></span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={price === 0 ? "" : price}
+                      onChange={(e) => handlePriceChange(parseFloat(e.target.value) || 0)}
+                      placeholder="0,00"
+                      className="dialog-input bold-number highlight-price"
+                    />
+                  </label>
+                </div>
+
+                {/* Live Margin Calculation Card */}
+                <div className="profit-summary-card">
+                  <div className="profit-item">
+                    <span>Custo:</span>
+                    <strong>{cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong>
+                  </div>
+                  <div className="profit-item">
+                    <span>Margem:</span>
+                    <strong className="profit-percent">+{markup}%</strong>
+                  </div>
+                  <div className="profit-item">
+                    <span>Lucro Bruto Unitário:</span>
+                    <strong className={grossProfit >= 0 ? "profit-positive" : "profit-negative"}>
+                      {grossProfit.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </strong>
+                  </div>
+                  <div className="profit-item final-price">
+                    <span>Venda Balcão:</span>
+                    <strong>{price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: ESTOQUE E REPOSIÇÃO */}
+          {activeTab === "stock" && (
+            <div className="form-section-stack">
+              <div className="form-grid-3">
+                <label className="field-group">
+                  <span className="field-label">Saldo Atual em Estoque</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={stock}
+                    onChange={(e) => setStock(parseInt(e.target.value, 10) || 0)}
+                    className="dialog-input bold-number"
+                  />
+                </label>
+                <label className="field-group">
+                  <span className="field-label">Estoque Mínimo (Alerta)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={minimum}
+                    onChange={(e) => setMinimum(parseInt(e.target.value, 10) || 0)}
+                    className="dialog-input bold-number"
+                  />
+                </label>
+                <label className="field-group">
+                  <span className="field-label">Estoque Máximo sugerido</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={maximum}
+                    onChange={(e) => setMaximum(parseInt(e.target.value, 10) || 0)}
+                    className="dialog-input"
+                  />
+                </label>
+              </div>
+
+              <div className="toggle-row-card">
+                <div>
+                  <strong>Alerta de reposição ativo</strong>
+                  <span>Avisar na visão geral e na lista quando o saldo estiver igual ou abaixo do estoque mínimo</span>
+                </div>
+                <label className="switch-toggle">
+                  <input
+                    type="checkbox"
+                    checked={alertLowStock}
+                    onChange={(e) => setAlertLowStock(e.target.checked)}
+                  />
+                  <span className="slider round"></span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: COMPATIBILIDADE */}
+          {activeTab === "compat" && (
+            <div className="form-section-stack">
+              <label className="field-group">
+                <span className="field-label">Motos e Modelos Compatíveis</span>
+                <textarea
+                  rows={4}
+                  value={compatibility}
+                  onChange={(e) => setCompatibility(e.target.value)}
+                  placeholder="Ex: Honda CG 125 (1999-2008), CG 150 Titan (2004-2015), Fan 160 (2016 em diante), NXR 150 Bros"
+                  className="dialog-textarea"
+                />
+                <small className="field-hint">
+                  Digite os modelos de motos para que os atendentes possam pesquisar rapidamente pela moto do cliente no balcão.
+                </small>
+              </label>
+            </div>
+          )}
+
+          {/* TAB 5: FORNECEDOR E EXTRAS */}
+          {activeTab === "extra" && (
+            <div className="form-section-stack">
+              <label className="field-group">
+                <span className="field-label">Fornecedor Preferencial</span>
+                <select
+                  value={supplierId}
+                  onChange={(e) => setSupplierId(e.target.value)}
+                  className="dialog-select"
+                >
+                  <option value="">-- Selecione o fornecedor (opcional) --</option>
+                  {suppliers.map((sup) => (
+                    <option key={sup.id} value={sup.id}>
+                      {sup.name} {sup.phone ? `(${sup.phone})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field-group">
+                <span className="field-label">Observações internas</span>
+                <textarea
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Ex: Comprado em caixa com 12 unidades. Garantia de 90 dias com o fabricante."
+                  className="dialog-textarea"
+                />
+              </label>
+
+              <div className="toggle-row-card">
+                <div>
+                  <strong>Produto Ativo para Venda</strong>
+                  <span>Produtos inativos não aparecem na pesquisa rápida do PDV ou Ordens de Serviço</span>
+                </div>
+                <label className="switch-toggle">
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    onChange={(e) => setActive(e.target.checked)}
+                  />
+                  <span className="slider round"></span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {/* Dialog Footer Actions */}
+          <div className="dialog-actions-row">
+            <button
+              type="button"
+              className="outline-button"
+              onClick={onClose}
+              disabled={isSaving}
+            >
+              Cancelar
+            </button>
+            <div style={{ display: "flex", gap: "8px" }}>
+              {activeTab !== "ident" && (
+                <button
+                  type="button"
+                  className="outline-button"
+                  onClick={() => {
+                    const tabs: Array<"ident" | "prices" | "stock" | "compat" | "extra"> = ["ident", "prices", "stock", "compat", "extra"];
+                    const currIdx = tabs.indexOf(activeTab);
+                    if (currIdx > 0) setActiveTab(tabs[currIdx - 1]);
+                  }}
+                >
+                  Anterior
+                </button>
+              )}
+              {activeTab !== "extra" ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    const tabs: Array<"ident" | "prices" | "stock" | "compat" | "extra"> = ["ident", "prices", "stock", "compat", "extra"];
+                    const currIdx = tabs.indexOf(activeTab);
+                    if (currIdx < tabs.length - 1) setActiveTab(tabs[currIdx + 1]);
+                  }}
+                >
+                  Próxima etapa →
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  className="primary-button save-action-btn"
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Salvando no Firestore..." : (editingProduct ? "Salvar Alterações" : "Cadastrar Produto")}
+                </button>
+              )}
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};

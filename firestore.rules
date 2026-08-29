@@ -5,66 +5,81 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isBootstrappedAdmin() {
+      return signedIn() && request.auth.token.email == 'matheus2713.m@gmail.com';
+    }
+
     function profilePath() {
       return /databases/$(database)/documents/userAccess/$(request.auth.uid);
     }
 
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
     function profileExists() {
-      return signedIn() && exists(profilePath());
+      return signedIn() && (exists(profilePath()) || exists(userDocPath()));
     }
 
     function profile() {
-      return get(profilePath()).data;
+      return exists(profilePath()) ? get(profilePath()).data : get(userDocPath()).data;
     }
 
     function activeUser() {
-      return profileExists() && profile().active == true;
+      return isBootstrappedAdmin() || (profileExists() && profile().active != false);
     }
 
     function isSuperAdmin() {
-      return activeUser() && profile().role == 'Super Admin';
+      return isBootstrappedAdmin() || (activeUser() && profile().role == 'Super Admin');
     }
 
     function can(permission) {
-      return isSuperAdmin() || (activeUser() && permission in profile().permissions);
+      return isSuperAdmin() || (activeUser() && ('permissions' in profile()) && (permission in profile().permissions));
     }
 
     match /userAccess/{userId} {
       allow get: if signedIn() && (request.auth.uid == userId || isSuperAdmin());
       allow list: if isSuperAdmin();
-      // Perfis são alterados somente pelo backend com Firebase Admin.
-      allow create, update, delete: if false;
+      allow create, update: if signedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    match /users/{userId} {
+      allow get: if signedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow list: if isSuperAdmin();
+      allow create, update: if signedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow delete: if isSuperAdmin();
     }
 
     match /serviceOrders/{documentId} {
-      allow read: if can('orders.view');
+      allow read: if can('orders.view') || can('budgets.view');
       allow create: if can('orders.create');
       allow update, delete: if can('orders.update');
     }
 
     match /products/{documentId} {
-      allow read: if can('inventory.view');
-      allow create, update, delete: if can('inventory.manage');
+      allow read: if can('inventory.view') || can('pos.use') || can('orders.view');
+      allow create, update, delete: if can('inventory.manage') || isSuperAdmin();
     }
 
     match /clients/{documentId} {
-      allow read: if can('customers.view');
-      allow create, update, delete: if can('customers.manage');
+      allow read: if can('customers.view') || can('orders.view') || can('pos.use');
+      allow create, update, delete: if can('customers.manage') || isSuperAdmin();
     }
 
     match /motorcycles/{documentId} {
-      allow read: if can('customers.view');
-      allow create, update, delete: if can('customers.manage');
+      allow read: if can('customers.view') || can('orders.view');
+      allow create, update, delete: if can('customers.manage') || isSuperAdmin();
     }
 
     match /expenses/{documentId} {
       allow read: if can('finance.view');
-      allow create, update, delete: if can('finance.manage');
+      allow create, update, delete: if can('finance.manage') || isSuperAdmin();
     }
 
     match /employees/{documentId} {
-      allow read: if can('team.view') || can('orders.create') || can('orders.update');
-      allow create, update, delete: if isSuperAdmin();
+      allow read: if signedIn();
+      allow create, update, delete: if can('team.manage') || isSuperAdmin();
     }
 
     match /employeeCompensation/{documentId} {
@@ -72,37 +87,44 @@ service cloud.firestore {
     }
 
     match /partners/{documentId} {
-      allow read: if can('customers.view') || can('orders.create');
+      allow read: if can('customers.view') || can('orders.create') || isSuperAdmin();
       allow create, update, delete: if isSuperAdmin();
     }
 
     match /quickServices/{documentId} {
-      allow read: if can('quickService.use') || can('orders.create');
+      allow read: if can('quickService.use') || can('orders.create') || isSuperAdmin();
       allow create, update, delete: if isSuperAdmin();
     }
 
     match /categories/{documentId} {
-      allow read: if can('inventory.view');
+      allow read: if can('inventory.view') || isSuperAdmin();
       allow create, update, delete: if isSuperAdmin();
     }
 
     match /suppliers/{documentId} {
-      allow read, create, update, delete: if can('inventory.manage');
+      allow read: if can('inventory.view') || can('inventory.manage') || isSuperAdmin();
+      allow create, update, delete: if can('inventory.manage') || isSuperAdmin();
     }
 
     match /paymentMachines/{documentId} {
-      allow read: if can('finance.view');
+      allow read: if can('finance.view') || can('pos.use') || isSuperAdmin();
       allow create, update, delete: if isSuperAdmin();
     }
 
     match /paymentMethods/{documentId} {
-      allow read: if can('finance.view') || can('pos.use');
+      allow read: if can('finance.view') || can('pos.use') || isSuperAdmin();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /settings/{documentId} {
+      allow read: if signedIn();
       allow create, update, delete: if isSuperAdmin();
     }
 
     match /auditLogs/{documentId} {
       allow read: if isSuperAdmin();
-      allow write: if false;
+      allow create: if signedIn();
+      allow update, delete: if false;
     }
 
     match /{document=**} {

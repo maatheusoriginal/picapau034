@@ -4,7 +4,7 @@ Esta versão não possui modo demonstração. Sem login válido, o sistema não 
 
 ## 1. Firebase Authentication
 
-No Firebase Console do projeto `oficinapicapaumotos34`:
+No Firebase Console do projeto `oficina-picapau`:
 
 1. Abra **Authentication → Sign-in method**.
 2. Ative **E-mail/senha**.

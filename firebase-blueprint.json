@@ -1,0 +1,242 @@
+{
+  "entities": {
+    "users": {
+      "title": "users",
+      "description": "User profiles synchronized with Firebase Authentication",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["Super Admin", "Balcão", "Mecânico"] },
+        "phone": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "userAccess": {
+      "title": "userAccess",
+      "description": "Granular user access permissions and security profile",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["Super Admin", "Balcão", "Mecânico"] },
+        "active": { "type": "boolean" },
+        "permissions": { "type": "array", "items": { "type": "string" } },
+        "employeeId": { "type": "string" }
+      },
+      "required": ["role", "permissions", "active"]
+    },
+    "products": {
+      "title": "products",
+      "description": "Product and parts inventory records",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "barcode": { "type": "string" },
+        "partNumber": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "brand": { "type": "string" },
+        "unit": { "type": "string" },
+        "location": { "type": "string" },
+        "cost": { "type": "number" },
+        "markup": { "type": "number" },
+        "price": { "type": "number" },
+        "stock": { "type": "number" },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "alertLowStock": { "type": "boolean" },
+        "compatibility": { "type": "string" },
+        "supplierId": { "type": "string" },
+        "supplierName": { "type": "string" },
+        "notes": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["name", "category", "price", "stock"]
+    },
+    "clients": {
+      "title": "clients",
+      "description": "Customer records and relationship",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "document": { "type": "string" },
+        "type": { "type": "string", "enum": ["Pessoa física", "Empresa"] },
+        "condition": { "type": "string", "enum": ["Pagamento normal", "Cliente a prazo", "Troca de serviços"] },
+        "creditLimit": { "type": "number" },
+        "address": { "type": "string" },
+        "motorcycleIds": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["name", "phone"]
+    },
+    "motorcycles": {
+      "title": "motorcycles",
+      "description": "Motorcycle vehicles linked to customers",
+      "type": "object",
+      "properties": {
+        "plate": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "brand": { "type": "string" },
+        "model": { "type": "string" },
+        "year": { "type": "string" },
+        "color": { "type": "string" },
+        "mileage": { "type": "number" },
+        "engineSize": { "type": "string" },
+        "chassis": { "type": "string" },
+        "renavam": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["plate", "brand", "model"]
+    },
+    "suppliers": {
+      "title": "suppliers",
+      "description": "Parts and services suppliers",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "tradeName": { "type": "string" },
+        "document": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "representative": { "type": "string" },
+        "categories": { "type": "string" },
+        "deliveryDays": { "type": "number" },
+        "paymentTerms": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "notes": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["name", "phone"]
+    },
+    "employees": {
+      "title": "employees",
+      "description": "Workshop staff and technicians",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "position": { "type": "string" },
+        "phone": { "type": "string" },
+        "document": { "type": "string" },
+        "employmentType": { "type": "string", "enum": ["Fixo", "Avulso"] },
+        "serviceCommission": { "type": "number" },
+        "productCommission": { "type": "number" },
+        "canReceiveServiceOrders": { "type": "boolean" },
+        "canManageAllOrders": { "type": "boolean" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["name", "position"]
+    },
+    "employeeCompensation": {
+      "title": "employeeCompensation",
+      "description": "Confidential compensation details",
+      "type": "object",
+      "properties": {
+        "baseSalary": { "type": "number" },
+        "paymentDay": { "type": "number" }
+      }
+    },
+    "quickServices": {
+      "title": "quickServices",
+      "description": "Express counter services configuration",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "laborPrice": { "type": "number" },
+        "duration": { "type": "number" },
+        "productCategory": { "type": "string" },
+        "productRequired": { "type": "boolean" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["name", "laborPrice"]
+    },
+    "categories": {
+      "title": "categories",
+      "description": "Dynamic categories for services, products, and expenses",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "group": { "type": "string", "enum": ["Serviços", "Produtos", "Despesas"] },
+        "active": { "type": "boolean" }
+      },
+      "required": ["name", "group"]
+    },
+    "paymentMachines": {
+      "title": "paymentMachines",
+      "description": "Payment terminals and transaction fee rates",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "active": { "type": "boolean" },
+        "primary": { "type": "boolean" },
+        "debitFee": { "type": "number" },
+        "credit1xFee": { "type": "number" },
+        "credit2to6Fee": { "type": "number" },
+        "credit7to12Fee": { "type": "number" },
+        "settlementDays": { "type": "number" }
+      },
+      "required": ["name"]
+    },
+    "paymentMethods": {
+      "title": "paymentMethods",
+      "description": "Available payment methods in POS and checkout",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "active": { "type": "boolean" },
+        "usesMachine": { "type": "boolean" }
+      },
+      "required": ["name"]
+    },
+    "partners": {
+      "title": "partners",
+      "description": "Corporate delivery fleets and partner companies",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "laborDiscount": { "type": "number" },
+        "billingCycle": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["name"]
+    },
+    "settings": {
+      "title": "settings",
+      "description": "Global workshop settings and preferences",
+      "type": "object",
+      "properties": {
+        "workshopName": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "osPrefix": { "type": "string" },
+        "nextOsNumber": { "type": "number" },
+        "defaultWarrantyDays": { "type": "number" },
+        "defaultDeliveryDays": { "type": "string" },
+        "defaultOsNotes": { "type": "string" },
+        "allowMultipleMechanics": { "type": "boolean" },
+        "showWorkload": { "type": "boolean" },
+        "defaultMinStock": { "type": "number" },
+        "defaultUnit": { "type": "string" },
+        "pricingMode": { "type": "string" },
+        "suggestedMarkup": { "type": "number" },
+        "blockZeroStockSale": { "type": "boolean" },
+        "deductStockOnlyWhenUsed": { "type": "boolean" },
+        "useAverageCost": { "type": "boolean" },
+        "thermalPrinter": { "type": "string" },
+        "printFormat": { "type": "string" },
+        "printThreeCopies": { "type": "boolean" },
+        "defaultWhatsappMessage": { "type": "string" }
+      }
+    }
+  }
+}
