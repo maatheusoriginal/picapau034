@@ -4,6 +4,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { financeSummary, payableEntries, receivableEntries } from "../src/finance";
 import { mergeParts, shouldReserveStock, stockDeltas, type ReservedPart } from "../src/inventory";
+import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
+import { openWhatsapp, printDocument } from "./printing";
 import type { SettingsTab } from "../src/components/SettingsWorkspace";
 
 // Carregados sob demanda: cada um só é montado quando o diálogo/aba
@@ -2169,6 +2171,19 @@ function AppDialog({
     setPurchaseItems((current) => current.filter((_, position) => position !== index));
   };
 
+  const printOrder = (order: OrderRecord) => {
+    const names = activeMechanics.filter((mechanic) => (order.mechanicIds ?? []).includes(mechanic.id)).map((mechanic) => mechanic.name);
+    printDocument(buildOrderDocument({ order, settings, mechanics: names.join(" + ") || order.mechanic }));
+  };
+
+  const sendOrderWhatsapp = (order: OrderRecord) => {
+    // O telefone vem do cadastro do cliente; a OS guarda só o nome. Sem cliente
+    // vinculado, o WhatsApp abre para escolher o contato na hora.
+    const client = clients.find((item) => item.id === order.clientId)
+      ?? clients.find((item) => item.name.trim().toLowerCase() === order.customer.trim().toLowerCase());
+    openWhatsapp(whatsappUrl(client?.phone ?? "", buildOrderWhatsappMessage(order, settings)));
+  };
+
   const registerSale = async (input: {
     origin: "PDV" | "Serviço rápido";
     items: ServiceOrderItem[];
@@ -2206,6 +2221,17 @@ function AppDialog({
       date: new Date().toLocaleDateString("pt-BR"),
       soldAt: new Date().toISOString(),
     }, input.stockUpdates);
+    printDocument(buildSaleDocument({
+      id: saleId,
+      origin: input.origin,
+      items: input.items,
+      total: input.total,
+      paymentMethod: input.method,
+      ...(usesMachine ? { machineName: selectedMachine?.name ?? "" } : {}),
+      ...(input.mechanicName ? { mechanicName: input.mechanicName } : {}),
+      date: new Date().toLocaleDateString("pt-BR"),
+      soldAt: new Date().toISOString(),
+    }, settings));
     return saleId;
   };
 
@@ -2298,6 +2324,9 @@ function AppDialog({
             closedAt: new Date().toLocaleDateString("pt-BR"),
             deductedItems: target,
           }, stockDeltas(target, reserved));
+          // Imprime já com o que foi conferido no checkout, e não com os itens
+          // antigos que ainda estão no `currentOrder` desta renderização.
+          printOrder({ ...currentOrder, items: checkoutItems, total: checkoutTotal, status: "Entrega", paymentMethod });
         }
       } catch (error) {
         setSaving(false);
@@ -2548,7 +2577,7 @@ function AppDialog({
                     <label className="field"><span>Nível de combustível</span><select value={currentFuel} onChange={(event) => setOsFuel(event.target.value)}>{fuelLevels.map((level) => <option key={level}>{level}</option>)}</select></label>
                     <label className="field field-full"><span>Problema relatado pelo cliente</span><textarea value={osProblem} onChange={(event) => setOsProblem(event.target.value)} placeholder="Descreva o problema relatado ou serviço solicitado"/></label>
                     <label className="field"><span>Prioridade</span><select value={currentPriority} onChange={(event) => setOsPriority(event.target.value)}>{orderPriorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-                    <label className="field"><span>Previsão de entrega</span><input type="date" value={osDelivery} onChange={(event) => setOsDelivery(event.target.value)}/></label>
+                    <label className="field"><span>Previsão de entrega</span><input type="date" value={osDelivery} onChange={(event) => setOsDelivery(event.target.value)}/>{settings?.defaultDeliveryDays ? <small className="field-help">Prazo padrão da oficina: {settings.defaultDeliveryDays}</small> : null}</label>
                     <label className="field"><span>Odômetro conferido?</span><select><option>Sim</option><option>Não</option></select></label>
                   </div>
                   <div className="mechanic-assignment">
@@ -2775,7 +2804,7 @@ function AppDialog({
           <div className="dialog-body order-detail">
             {currentOrder ? (
               <>
-                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><button onClick={() => finish(`3 vias da ${currentOrder.id} preparadas: mecânico, caixa e cliente.`)}><Icon name="file" size={16}/>Imprimir 3 vias</button><button onClick={() => finish(`Link da ${currentOrder.id} preparado para envio no WhatsApp.`)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
+                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><button onClick={() => printOrder(currentOrder)}><Icon name="printer" size={16}/>{settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"}</button><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
                 <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as ServiceOrderStatus)}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
                 <div className="order-info-grid"><div><span>Cliente / pagador</span><strong>{currentOrder.customer}</strong><small>{currentOrder.origin}</small></div><div><span>Motocicleta</span><strong>{currentOrder.bike}</strong><small>{currentOrder.plate}</small></div><div><span>Mecânicos</span><strong>{orderMechanics.map((mechanic) => mechanic.name).join(" + ") || currentOrder.mechanic}</strong><small>{orderMechanics.length || 1} responsável(is)</small></div><div><span>Previsão</span><strong>{currentOrder.delivery}</strong><small>Prioridade {currentOrder.priority}</small></div></div>
                 {canOperate ? (
