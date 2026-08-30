@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
-import { financeSummary, payableEntries, receivableEntries } from "../src/finance";
+import { accountOpen, accountStatus, financeSummary, isCreditPayment, payableEntries, receivableAccountEntries, splitInstallments } from "../src/finance";
 import { mergeParts, shouldReserveStock, stockDeltas, type ReservedPart } from "../src/inventory";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
 import { openWhatsapp, printDocument } from "./printing";
@@ -29,6 +29,8 @@ import {
   createManagedUser,
   createServiceOrder,
   recordSale,
+  saveAccounts,
+  settleAccount,
   recordStockEntry,
   saveOrderWithStock,
   defaultFirebasePermissions,
@@ -63,6 +65,7 @@ import {
 // reclamar de campos que a interface de fato usa e escondia divergências entre
 // o que o formulário grava e o que a tela lê.
 import type {
+  AccountRecord,
   CartItem,
   CategoryConfig,
   ClientRecord,
@@ -151,6 +154,8 @@ const initialSuppliers: SupplierConfig[] = [];
 const initialSales: SaleRecord[] = [];
 
 const initialStockEntries: StockEntryRecord[] = [];
+
+const initialAccounts: AccountRecord[] = [];
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -665,6 +670,7 @@ function FinanceWorkspace({
   users,
   sales,
   orders,
+  accounts,
 }: {
   openDialog: OpenDialog;
   navigate: (destination: string) => void;
@@ -672,10 +678,11 @@ function FinanceWorkspace({
   users: UserConfig[];
   sales: SaleRecord[];
   orders: OrderRecord[];
+  accounts: AccountRecord[];
 }) {
   // grossRevenue, partsCost e cardRevenue eram constantes 0 escritas no código,
   // então o lucro líquido era sempre o negativo dos gastos.
-  const summary = useMemo(() => financeSummary(sales, orders, expenses), [sales, orders, expenses]);
+  const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
   const { grossTotal: grossRevenue, cardFees, paidExpenses, pendingExpenses, netProfit } = summary;
   const payrollPaid = expenses.filter((expense) => expense.status === "Pago" && expense.category === "Pagamento de funcionário").reduce((sum, expense) => sum + expense.amount, 0);
   return (
@@ -710,32 +717,22 @@ function AccountsWorkspace({
   kind,
   openDialog,
   expenses,
-  sales,
-  orders,
+  accounts,
 }: {
   kind: "receber" | "pagar";
   openDialog: OpenDialog;
   expenses: ExpenseRecord[];
-  sales: SaleRecord[];
-  orders: OrderRecord[];
+  accounts: AccountRecord[];
 }) {
   const [accountSearch, setAccountSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("Todos");
   const isReceivable = kind === "receber";
-  const records = useMemo(() => {
-    // A receber saía sempre vazio; a pagar marcava tudo como "A vencer", então
-    // uma conta vencida nunca aparecia como atrasada.
-    if (isReceivable) return receivableEntries(sales, orders).map((entry) => ({
-      id: entry.id,
-      person: entry.person,
-      description: `${entry.source} · ${entry.description}`,
-      dueDate: entry.date,
-      original: entry.total,
-      open: entry.total,
-      status: "A vencer",
-    }));
-    return payableEntries(expenses);
-  }, [isReceivable, expenses, sales, orders]);
+  // A receber saía sempre vazio e nunca quitava; a pagar marcava tudo como
+  // "A vencer", então uma conta vencida nunca aparecia como atrasada.
+  const records = useMemo(
+    () => (isReceivable ? receivableAccountEntries(accounts) : payableEntries(expenses, accounts)),
+    [isReceivable, expenses, accounts],
+  );
   const filteredRecords = useMemo(() => records.filter((record) => {
     const matchesSearch = `${record.id} ${record.person} ${record.description}`.toLowerCase().includes(accountSearch.toLowerCase());
     const matchesStatus = accountFilter === "Todos" || record.status === accountFilter;
@@ -758,7 +755,7 @@ function AccountsWorkspace({
       </div>
       <section className="panel module-panel">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder={`Buscar ${isReceivable ? "cliente" : "fornecedor"}, descrição ou código`}/></label><div className="filter-pills">{["Todos", "A vencer", "Vence hoje", "Atrasado"].map((filter) => <button className={accountFilter === filter ? "selected" : ""} key={filter} onClick={() => setAccountFilter(filter)}>{filter}</button>)}</div></div>
-        <div className="table-scroll"><table><thead><tr><th>{isReceivable ? "Cliente / Pagador" : "Fornecedor / Favorecido"}</th><th>Descrição</th><th>Vencimento</th><th>Valor original</th><th>Saldo</th><th>Status</th><th>Ação</th></tr></thead><tbody>{filteredRecords.length ? filteredRecords.map((record) => <tr key={record.id}><td><strong>{record.person}</strong><span className="mono">{record.id}</span></td><td><strong>{record.description}</strong><span>{isReceivable ? "Receita operacional" : "Despesa da oficina"}</span></td><td>{record.dueDate}</td><td className="mono">{formatBRL(record.original)}</td><td><strong className="mono">{formatBRL(record.open)}</strong></td><td><span className={`status ${record.status === "Atrasado" ? "red" : record.status === "Vence hoje" ? "amber" : "blue"}`}><i/>{record.status}</span></td><td><button className="account-action" onClick={() => openDialog(isReceivable ? "settleReceivable" : "settlePayable")}>{isReceivable ? "Receber" : "Pagar"}</button></td></tr>) : <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhuma conta {isReceivable ? "a receber" : "a pagar"} cadastrada no momento.</td></tr>}</tbody></table></div>
+        <div className="table-scroll"><table><thead><tr><th>{isReceivable ? "Cliente / Pagador" : "Fornecedor / Favorecido"}</th><th>Descrição</th><th>Vencimento</th><th>Valor original</th><th>Saldo</th><th>Status</th><th>Ação</th></tr></thead><tbody>{filteredRecords.length ? filteredRecords.map((record) => <tr key={record.id}><td><strong>{record.person}</strong><span className="mono">{record.id}</span></td><td><strong>{record.description}</strong><span>{isReceivable ? "Receita operacional" : "Despesa da oficina"}</span></td><td>{record.dueDate}</td><td className="mono">{formatBRL(record.original)}</td><td><strong className="mono">{formatBRL(record.open)}</strong></td><td><span className={`status ${record.status === "Atrasado" ? "red" : record.status === "Vence hoje" ? "amber" : record.status === "Parcial" ? "violet" : record.status === "Quitado" ? "green" : "blue"}`}><i/>{record.status}</span></td><td><button className="account-action" onClick={() => openDialog(isReceivable ? "settleReceivable" : "settlePayable", record.id)}>{isReceivable ? "Receber" : "Pagar"}</button></td></tr>) : <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhuma conta {isReceivable ? "a receber" : "a pagar"} cadastrada no momento.</td></tr>}</tbody></table></div>
       </section>
     </>
   );
@@ -1218,6 +1215,7 @@ function AdminWorkspace({
   motorcycles,
   sales,
   expenses,
+  accounts,
   categories,
   quickServices,
   partners,
@@ -1235,6 +1233,7 @@ function AdminWorkspace({
   motorcycles: MotorcycleRecord[];
   sales: SaleRecord[];
   expenses: ExpenseRecord[];
+  accounts: AccountRecord[];
   categories: CategoryConfig[];
   quickServices: QuickServiceConfig[];
   partners: PartnerConfig[];
@@ -1242,7 +1241,7 @@ function AdminWorkspace({
   paymentMethods: PaymentMethodConfig[];
   suppliers: SupplierConfig[];
 }) {
-  const summary = useMemo(() => financeSummary(sales, orders, expenses), [sales, orders, expenses]);
+  const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
   const activeUsers = users.filter((user) => user.active !== false);
   const lowStock = products.filter((product) => product.stock <= product.minimum);
   const openOrders = orders.filter((order) => !order.closed && order.status !== "Entrega");
@@ -1419,6 +1418,7 @@ function ModuleWorkspace({
   cart,
   setCart,
   sales,
+  accounts,
   openSettings,
   settingsTab,
   settings,
@@ -1454,6 +1454,7 @@ function ModuleWorkspace({
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   sales: SaleRecord[];
+  accounts: AccountRecord[];
   openSettings: (tab: SettingsTab) => void;
   settingsTab: SettingsTab;
   settings: Partial<SettingsConfig> | null;
@@ -1464,9 +1465,9 @@ function ModuleWorkspace({
 
   if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} products={products} clients={clients} blockZeroStockSale={settings?.blockZeroStockSale !== false} />;
   if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
-  if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders}/>;
-  if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} sales={sales} orders={orders}/>;
-  if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} sales={sales} orders={orders}/>;
+  if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts}/>;
+  if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
+  if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} />;
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
   if (active === "Configurações") return (
@@ -1474,7 +1475,7 @@ function ModuleWorkspace({
       <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify} initialTab={settingsTab}/>
     </Suspense>
   );
-  if (active === "Administração") return <AdminWorkspace navigate={navigate} openSettings={openSettings} settings={settings} users={users} products={products} orders={orders} clients={clients} motorcycles={motorcycles} sales={sales} expenses={expenses} categories={categories} quickServices={quickServices} partners={partners} paymentMachines={paymentMachines} paymentMethods={paymentMethods} suppliers={suppliers}/>;
+  if (active === "Administração") return <AdminWorkspace navigate={navigate} openSettings={openSettings} settings={settings} users={users} products={products} orders={orders} clients={clients} motorcycles={motorcycles} sales={sales} expenses={expenses} accounts={accounts} categories={categories} quickServices={quickServices} partners={partners} paymentMachines={paymentMachines} paymentMethods={paymentMethods} suppliers={suppliers}/>;
 
   if (active === "Ordens de serviço" || active === "Orçamentos") {
     const isBudget = active === "Orçamentos";
@@ -1615,7 +1616,7 @@ function ModuleWorkspace({
   
   // Os KPIs de Financeiro, Relatórios e Vendas do balcão eram "R$ 0,00" e "0"
   // escritos direto no ternário.
-  const moduleSummary = useMemo(() => financeSummary(sales, orders, expenses), [sales, orders, expenses]);
+  const moduleSummary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
   const salesToday = useMemo(() => sales.filter((sale) => sale.date === new Date().toLocaleDateString("pt-BR")), [sales]);
   const firstValue = active === "Financeiro" ? formatBRL(moduleSummary.dayBalance) : active === "Relatórios" ? formatBRL(moduleSummary.grossMonth) : active === "Motocicletas" ? String(motorcycles.length) : active === "Vendas do balcão" ? String(salesToday.length) : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((supplier) => supplier.active).length) : String(clients.length);
   const secondValue = active === "Financeiro" ? formatBRL(moduleSummary.receivableTotal) : active === "Relatórios" ? formatBRL(moduleSummary.averageTicket) : active === "Motocicletas" ? String(new Set(motorcycles.map((m) => m.brand)).size) : active === "Vendas do balcão" ? formatBRL(salesToday.reduce((total, sale) => total + sale.total, 0)) : active === "Compras e entradas" ? "R$ 0,00" : active === "Fornecedores" ? (suppliers.length > 0 ? `${Math.round(suppliers.reduce((sum, s) => sum + s.deliveryDays, 0) / suppliers.length)} dias` : "0 dias") : String(clients.filter((c) => Boolean(c.phone)).length);
@@ -1693,6 +1694,7 @@ function AppDialog({
   setCart,
   sales,
   stockEntries,
+  accounts,
   lists,
   settings,
   currentUser,
@@ -1725,6 +1727,7 @@ function AppDialog({
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   sales: SaleRecord[];
   stockEntries: StockEntryRecord[];
+  accounts: AccountRecord[];
   lists: Partial<SystemLists> | null;
   settings: Partial<SettingsConfig> | null;
   currentUser: FirebaseUserSummary | null;
@@ -1816,6 +1819,19 @@ function AppDialog({
   // Entrada de estoque: o diálogo já existia com os campos, mas nenhum deles
   // tinha estado e nada era gravado — o texto "o custo médio será recalculado"
   // era só uma promessa.
+  // Lançamento de conta a receber / a pagar.
+  const [accountPerson, setAccountPerson] = useState("");
+  const [accountDescriptionText, setAccountDescriptionText] = useState("");
+  const [accountAmount, setAccountAmount] = useState("");
+  const [accountDueDate, setAccountDueDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [accountCategory, setAccountCategory] = useState("");
+  const [accountInstallments, setAccountInstallments] = useState(1);
+  const [accountNotes, setAccountNotes] = useState("");
+  // Baixa de conta.
+  const [settleAmount, setSettleAmount] = useState("");
+  const [settleDate, setSettleDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [settleMethod, setSettleMethod] = useState("PIX");
+  const [settleFull, setSettleFull] = useState(true);
   const [purchaseSupplierId, setPurchaseSupplierId] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [purchasePayment, setPurchasePayment] = useState("À vista");
@@ -1878,6 +1894,9 @@ function AppDialog({
   const [dialogError, setDialogError] = useState("");
 
   const currentOrder = orders.find((order) => order.id === selectedOrderId) ?? orders[0];
+  // O botão de baixa passa o id da conta pelo mesmo caminho que o detalhe da OS.
+  const currentAccount = accounts.find((account) => account.id === selectedOrderId);
+  const currentAccountOpen = currentAccount ? accountOpen(currentAccount) : 0;
 
   // Ao abrir o detalhe, o diálogo assume a situação e a equipe da OS clicada.
   // O AppDialog fica montado o tempo todo, então sem isto ele mostraria o
@@ -1932,7 +1951,8 @@ function AppDialog({
   const pick = (list: string[], current: string) => (list.includes(current) ? current : list[0] ?? "");
   const currentPriority = pick(orderPriorities, osPriority);
   const currentFuel = pick(fuelLevels, osFuel);
-  const currentAccount = pick(cashAccounts, quickAccount);
+  const currentCashAccount = pick(cashAccounts, quickAccount);
+  const currentAccountTarget = currentCashAccount;
   // Os filtros do catálogo e as categorias de gasto vinham escritos no JSX e
   // ignoravam o cadastro de categorias da própria oficina.
   const productCategoryNames = categories.filter((item) => item.active !== false && item.group === "Produtos").map((item) => item.name);
@@ -1943,12 +1963,19 @@ function AppDialog({
   // a lista antiga como padrão enquanto nenhuma categoria de despesa existir.
   const behaviourExpenseCategories = ["Peça comprada fora do estoque", "Pagamento de funcionário"];
   const fallbackExpenseCategories = ["Comissões", "Compra para o estoque", "Fornecedor de peças", "Frete e motoboy", "Ferramentas e equipamentos", "Despesas fixas", "Taxas de cartão", "Outros gastos"];
+  const revenueCategoryNames = categories.filter((item) => item.active !== false && item.group === "Receitas").map((item) => item.name);
+  // O grupo "Receitas" é novo: enquanto a oficina não cadastrar o dela, ficam
+  // estas como padrão, para o campo não abrir vazio.
+  const fallbackRevenueCategories = ["Serviços de oficina", "Venda de peças", "Acerto com parceiro", "Outras receitas"];
+  const accountCategoryOptions = dialog === "receivable"
+    ? (revenueCategoryNames.length ? revenueCategoryNames : fallbackRevenueCategories)
+    : (expenseCategoryNames.length ? expenseCategoryNames : ["Fornecedor de peças", "Despesa operacional", "Outros"]);
   const expenseCategoryOptions = [
     ...behaviourExpenseCategories,
     ...(expenseCategoryNames.length ? expenseCategoryNames : fallbackExpenseCategories).filter((name) => !behaviourExpenseCategories.includes(name)),
   ];
   const cartTotal = cart.reduce((sum, item) => sum + item.unit * item.quantity, 0);
-  const dialogSummary = financeSummary(sales, orders, expenses);
+  const dialogSummary = financeSummary(sales, orders, expenses, accounts);
   const paymentGross = dialog === "orderCheckout" ? checkoutTotal : cartTotal;
   const paymentFeeRate = paymentMethod === "Débito" ? selectedMachine?.debitFee ?? 0 : paymentMethod === "Crédito" ? paymentInstallments === 1 ? selectedMachine?.credit1xFee ?? 0 : paymentInstallments <= 6 ? selectedMachine?.credit2to6Fee ?? 0 : selectedMachine?.credit7to12Fee ?? 0 : 0;
   const paymentFeeAmount = paymentGross * (paymentFeeRate / 100);
@@ -2184,6 +2211,39 @@ function AppDialog({
     openWhatsapp(whatsappUrl(client?.phone ?? "", buildOrderWhatsappMessage(order, settings)));
   };
 
+  /**
+   * "Nota a prazo" não põe dinheiro no caixa agora: vira conta a receber. Antes
+   * o valor era apenas deduzido das vendas na hora de mostrar o total, e por
+   * isso nunca saía da lista — não havia onde registrar que o cliente pagou.
+   */
+  const createReceivableFor = async (input: {
+    person: string;
+    personId?: string;
+    description: string;
+    amount: number;
+    origin: string;
+    sourceId: string;
+  }) => {
+    // Vence em 30 dias, o prazo usual de uma nota a prazo de oficina.
+    const due = new Date();
+    due.setDate(due.getDate() + 30);
+    const [id] = await saveAccounts("CR", highestSequence(accounts, "CR") + 1, [{
+      kind: "receber",
+      person: input.person || "Cliente",
+      ...(input.personId ? { personId: input.personId } : {}),
+      description: input.description,
+      category: revenueCategoryNames[0] ?? "Serviços de oficina",
+      amount: input.amount,
+      dueDate: due.toLocaleDateString("pt-BR"),
+      settlements: [],
+      origin: input.origin,
+      sourceId: input.sourceId,
+      installment: 1,
+      installments: 1,
+    }]) ?? [];
+    return id;
+  };
+
   const registerSale = async (input: {
     origin: "PDV" | "Serviço rápido";
     items: ServiceOrderItem[];
@@ -2221,6 +2281,23 @@ function AppDialog({
       date: new Date().toLocaleDateString("pt-BR"),
       soldAt: new Date().toISOString(),
     }, input.stockUpdates);
+    if (isCreditPayment(input.method)) {
+      // A venda já está gravada neste ponto. Se a conta a receber falhar — o
+      // operador do PDV pode não ter permissão no financeiro — a venda não pode
+      // ser desfeita, então o erro precisa aparecer nomeando o que faltou, em
+      // vez de derrubar o fluxo inteiro como se nada tivesse sido salvo.
+      try {
+        await createReceivableFor({
+          person: "Consumidor final",
+          description: `${input.origin} ${saleId}`,
+          amount: input.total,
+          origin: "Venda",
+          sourceId: saleId,
+        });
+      } catch (error) {
+        notify(`Venda ${saleId} registrada, mas a conta a receber não foi criada: ${error instanceof Error ? error.message : "erro desconhecido"}. Lance a cobrança em Contas a receber.`);
+      }
+    }
     printDocument(buildSaleDocument({
       id: saleId,
       origin: input.origin,
@@ -2326,6 +2403,22 @@ function AppDialog({
           }, stockDeltas(target, reserved));
           // Imprime já com o que foi conferido no checkout, e não com os itens
           // antigos que ainda estão no `currentOrder` desta renderização.
+          if (isCreditPayment(paymentMethod)) {
+            // Mesma situação da venda: a OS já foi encerrada e não dá para
+            // voltar atrás, então a falha é reportada em vez de engolida.
+            try {
+              await createReceivableFor({
+                person: currentOrder.customer,
+                personId: currentOrder.clientId,
+                description: `Ordem de serviço ${currentOrder.id} · ${currentOrder.bike}`,
+                amount: checkoutTotal,
+                origin: "Ordem de serviço",
+                sourceId: currentOrder.id,
+              });
+            } catch (error) {
+              notify(`${currentOrder.id} encerrada, mas a conta a receber não foi criada: ${error instanceof Error ? error.message : "erro desconhecido"}. Lance a cobrança em Contas a receber.`);
+            }
+          }
           printOrder({ ...currentOrder, items: checkoutItems, total: checkoutTotal, status: "Entrega", paymentMethod });
         }
       } catch (error) {
@@ -2337,6 +2430,73 @@ function AppDialog({
         ? `Troca registrada, saldo da OS compensado em ${formatBRL(tradeCompensated)} e 3 vias preparadas: mecânico, caixa e cliente.`
         : `Pagamento de ${formatBRL(checkoutTotal)} registrado, ordem de serviço encerrada e 3 vias preparadas: mecânico, caixa e cliente.`);
     }
+    if (dialog === "receivable" || dialog === "payable") {
+      const kind = dialog === "receivable" ? "receber" as const : "pagar" as const;
+      const total = Number(accountAmount) || 0;
+      if (!accountDescriptionText.trim()) return setDialogError("Informe a descrição do lançamento.");
+      if (total <= 0) return setDialogError("Informe um valor maior que zero.");
+      setSaving(true);
+      try {
+        const prefix = kind === "receber" ? "CR" : "CP";
+        const groupId = `${prefix}-G${Date.now()}`;
+        const parcelas = splitInstallments(total, accountInstallments, accountDueDate.split("-").reverse().join("/"));
+        await saveAccounts(prefix, highestSequence(accounts, prefix) + 1, parcelas.map((parcela) => ({
+          kind,
+          person: accountPerson || "Cadastro avulso",
+          description: accountDescriptionText.trim(),
+          category: accountCategory || accountCategoryOptions[0] || "",
+          amount: parcela.amount,
+          dueDate: parcela.dueDate,
+          settlements: [],
+          notes: accountNotes,
+          origin: "Manual",
+          installment: parcela.installment,
+          installments: parcelas.length,
+          ...(parcelas.length > 1 ? { groupId } : {}),
+        })));
+        setAccountDescriptionText("");
+        setAccountAmount("");
+        setAccountNotes("");
+        setAccountInstallments(1);
+        return finish(parcelas.length > 1
+          ? `${parcelas.length} parcelas lançadas em contas a ${kind}.`
+          : `Conta a ${kind} lançada com sucesso.`);
+      } catch (error) {
+        return setDialogError(error instanceof Error ? error.message : "Não foi possível lançar a conta.");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    if (dialog === "settleReceivable" || dialog === "settlePayable") {
+      if (!currentAccount) return setDialogError("Nenhuma conta selecionada.");
+      const amount = settleFull ? currentAccountOpen : Number(settleAmount) || 0;
+      if (amount <= 0) return setDialogError("Informe o valor da baixa.");
+      if (amount > currentAccountOpen + 0.005) return setDialogError(`O valor passa do saldo em aberto (${formatBRL(currentAccountOpen)}).`);
+      setSaving(true);
+      try {
+        await settleAccount(currentAccount.id, {
+          date: settleDate ? settleDate.split("-").reverse().join("/") : new Date().toLocaleDateString("pt-BR"),
+          settledAt: new Date().toISOString(),
+          amount,
+          method: settleMethod,
+          account: currentAccountTarget,
+          operatorUid: currentUser?.uid ?? "",
+          operatorName: currentUser?.displayName ?? "",
+        });
+        setSettleAmount("");
+        setSettleFull(true);
+        const restante = currentAccountOpen - amount;
+        return finish(restante > 0.005
+          ? `Baixa de ${formatBRL(amount)} registrada. Restam ${formatBRL(restante)}.`
+          : `${currentAccount.id} quitada com ${formatBRL(amount)}.`);
+      } catch (error) {
+        return setDialogError(error instanceof Error ? error.message : "Não foi possível registrar a baixa.");
+      } finally {
+        setSaving(false);
+      }
+    }
+
     if (dialog === "purchase") {
       if (!purchaseItems.length) return setDialogError("Adicione ao menos um produto à entrada.");
       const semQuantidade = purchaseItems.find((item) => item.quantity <= 0);
@@ -2427,7 +2587,7 @@ function AppDialog({
         const saleId = await registerSale({
           origin: "Serviço rápido",
           method: quickPayment,
-          account: currentAccount,
+          account: currentCashAccount,
           total: quickTotal,
           mechanicId: mechanic?.id,
           mechanicName: mechanic?.name,
@@ -2642,7 +2802,7 @@ function AppDialog({
               <label className="field"><span>Cliente (opcional)</span><input placeholder="Nome ou telefone"/></label>
               <label className="field"><span>Moto / placa (opcional)</span><input placeholder="Ex.: CG 160 · ABC-1234"/></label>
               <label className="field"><span>Pagamento</span><select value={quickPayment} onChange={(event) => setQuickPayment(event.target.value)}>{activePaymentMethods.filter((method) => method.name !== "Faturamento parceiro").map((method) => <option key={method.id}>{method.name}</option>)}</select></label>
-              <label className="field"><span>Conta de entrada</span><select value={currentAccount} onChange={(event) => setQuickAccount(event.target.value)}>{cashAccounts.map((account) => <option key={account}>{account}</option>)}{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label>
+              <label className="field"><span>Conta de entrada</span><select value={currentCashAccount} onChange={(event) => setQuickAccount(event.target.value)}>{cashAccounts.map((account) => <option key={account}>{account}</option>)}{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label>
             </div>
             <div className="quick-service-total"><div><span>{quickService}</span><small>{quickProduct === "Sem produto" ? "Somente mão de obra" : `${quickQuantity}x ${quickProduct} · ${quickPayment}`}</small></div><strong>{formatBRL(quickTotal)}</strong></div>
             <div className="info-strip"><Icon name="check" size={18}/><span>Ao finalizar, o produto será baixado do estoque, o recebimento entra no caixa e um cupom não fiscal fica pronto para impressão.</span></div>
@@ -2775,20 +2935,50 @@ function AppDialog({
         {dialog === "receivable" || dialog === "payable" ? (
           <div className="dialog-body form-section">
             <div className="form-grid">
-              <label className="field field-full"><span>{dialog === "receivable" ? "Cliente ou pagador" : "Fornecedor ou favorecido"}</span><select>{dialog === "receivable" ? clients.map((c) => <option key={c.id} value={c.name}>{c.name}</option>) : activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name}</option>)}<option>Cadastro avulso</option></select></label>
-              <label className="field field-full"><span>Descrição</span><input placeholder={dialog === "receivable" ? "Ex.: Parcela de peças e serviço" : "Ex.: Compra de peças · parcela 1/2"}/></label>
-              <label className="field"><span>Valor total</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Vencimento</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label>
-              <label className="field"><span>Categoria</span><select><option>{dialog === "receivable" ? "Serviços de oficina" : "Fornecedor de peças"}</option><option>{dialog === "receivable" ? "Venda de peças" : "Despesa operacional"}</option><option>Outros</option></select></label><label className="field"><span>Parcelas</span><select><option>Parcela única</option><option>2 parcelas</option><option>3 parcelas</option></select></label>
-              <label className="field field-full"><span>Observações</span><textarea placeholder="Informações opcionais sobre cobrança ou pagamento"/></label>
+              <label className="field field-full"><span>{dialog === "receivable" ? "Cliente ou pagador" : "Fornecedor ou favorecido"}</span><select value={accountPerson} onChange={(event) => setAccountPerson(event.target.value)}>{(dialog === "receivable" ? clients.map((client) => client.name) : activeSuppliers.map((supplier) => supplier.name)).map((name) => <option key={name}>{name}</option>)}<option>Cadastro avulso</option></select></label>
+              <label className="field field-full"><span>Descrição</span><input value={accountDescriptionText} onChange={(event) => setAccountDescriptionText(event.target.value)} placeholder={dialog === "receivable" ? "Ex.: Parcela de peças e serviço" : "Ex.: Compra de peças"}/></label>
+              <label className="field"><span>Valor total</span><input type="number" min="0" step="0.01" value={accountAmount} onChange={(event) => setAccountAmount(event.target.value)} placeholder="0,00"/></label><label className="field"><span>{accountInstallments > 1 ? "Primeiro vencimento" : "Vencimento"}</span><input type="date" value={accountDueDate} onChange={(event) => setAccountDueDate(event.target.value)}/></label>
+              <label className="field"><span>Categoria</span><select value={accountCategory} onChange={(event) => setAccountCategory(event.target.value)}>{accountCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="field"><span>Parcelas</span><select value={accountInstallments} onChange={(event) => setAccountInstallments(Number(event.target.value) || 1)}>{[1, 2, 3, 4, 5, 6, 10, 12].map((count) => <option value={count} key={count}>{count === 1 ? "Parcela única" : `${count} parcelas`}</option>)}</select></label>
+              <label className="field field-full"><span>Observações</span><textarea value={accountNotes} onChange={(event) => setAccountNotes(event.target.value)} placeholder="Informações opcionais sobre cobrança ou pagamento"/></label>
             </div>
+            {accountInstallments > 1 && Number(accountAmount) > 0 ? (
+              <div className="info-strip"><Icon name="check" size={18}/><span>
+                {accountInstallments} parcelas com vencimento mensal. A primeira sai {formatBRL(splitInstallments(Number(accountAmount) || 0, accountInstallments, accountDueDate.split("-").reverse().join("/"))[0]?.amount ?? 0)} e as demais {formatBRL(splitInstallments(Number(accountAmount) || 0, accountInstallments, accountDueDate.split("-").reverse().join("/"))[1]?.amount ?? 0)} — os centavos da divisão ficam na primeira, para a última fechar redonda.
+              </span></div>
+            ) : null}
           </div>
         ) : null}
 
         {dialog === "settleReceivable" || dialog === "settlePayable" ? (
           <div className="dialog-body form-section">
-            <div className={`settlement-card ${dialog === "settleReceivable" ? "receive" : "pay"}`}><span>{dialog === "settleReceivable" ? "Saldo a receber" : "Saldo a pagar"}</span><strong>R$ 0,00</strong><small>{dialog === "settleReceivable" ? "Conta a receber" : "Conta a pagar"}</small></div>
-            <div className="form-grid form-top-gap"><label className="field"><span>Valor desta baixa</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Data</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label><label className="field"><span>Forma de pagamento</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Crédito</option><option>Transferência</option></select></label><label className="field"><span>{dialog === "settleReceivable" ? "Conta de entrada" : "Conta de saída"}</span><select>{cashAccounts.map((account) => <option key={account}>{account}</option>)}{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label></div>
-            <label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Quitar este lançamento</strong><small>Desative para registrar apenas um pagamento parcial</small></div></label>
+            {currentAccount ? (
+              <>
+                <div className={`settlement-card ${dialog === "settleReceivable" ? "receive" : "pay"}`}>
+                  <span>{dialog === "settleReceivable" ? "Saldo a receber" : "Saldo a pagar"}</span>
+                  <strong>{formatBRL(currentAccountOpen)}</strong>
+                  <small>{currentAccount.person} · {accountStatus(currentAccount)}</small>
+                </div>
+                <div className="order-info-grid">
+                  <div><span>Lançamento</span><strong>{currentAccount.description}</strong><small>{currentAccount.installments > 1 ? `Parcela ${currentAccount.installment}/${currentAccount.installments}` : "Parcela única"}</small></div>
+                  <div><span>Valor original</span><strong>{formatBRL(currentAccount.amount)}</strong><small>Vence em {currentAccount.dueDate}</small></div>
+                  <div><span>Já {dialog === "settleReceivable" ? "recebido" : "pago"}</span><strong>{formatBRL(currentAccount.amount - currentAccountOpen)}</strong><small>{(currentAccount.settlements ?? []).length} baixa(s)</small></div>
+                </div>
+                <div className="form-grid form-top-gap">
+                  <label className="field"><span>Valor desta baixa</span><input type="number" min="0" step="0.01" value={settleFull ? String(currentAccountOpen) : settleAmount} onChange={(event) => setSettleAmount(event.target.value)} readOnly={settleFull} className={settleFull ? "is-derived" : ""}/></label>
+                  <label className="field"><span>Data</span><input type="date" value={settleDate} onChange={(event) => setSettleDate(event.target.value)}/></label>
+                  <label className="field"><span>Forma de pagamento</span><select value={settleMethod} onChange={(event) => setSettleMethod(event.target.value)}>{activePaymentMethods.map((method) => <option key={method.id}>{method.name}</option>)}</select></label>
+                  <label className="field"><span>{dialog === "settleReceivable" ? "Conta de entrada" : "Conta de saída"}</span><select value={currentAccountTarget} onChange={(event) => setQuickAccount(event.target.value)}>{cashAccounts.map((account) => <option key={account}>{account}</option>)}</select></label>
+                </div>
+                <label className="toggle-row"><input type="checkbox" checked={settleFull} onChange={(event) => setSettleFull(event.target.checked)}/><span/><div><strong>Quitar este lançamento</strong><small>Desative para registrar apenas um pagamento parcial</small></div></label>
+                {(currentAccount.settlements ?? []).length ? (
+                  <div className="history-list"><strong>Baixas já registradas</strong>{(currentAccount.settlements ?? []).map((settlement, index) => (
+                    <div key={index}><i/><span><b>{settlement.date}</b>{formatBRL(settlement.amount)} · {settlement.method}</span></div>
+                  ))}</div>
+                ) : null}
+              </>
+            ) : (
+              <div className="empty-panel"><Icon name="wallet" size={24}/><span>Nenhuma conta selecionada. Abra a baixa pela lista de contas.</span></div>
+            )}
           </div>
         ) : null}
 
@@ -3124,6 +3314,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [paymentMethods, setPaymentMethods] = useFirebaseSyncedCollection("paymentMethods", initialPaymentMethods, firebaseEnabled && (canSeeFinance || canUsePdv), firebaseAdmin, firebaseSession.reportSyncError);
   const [sales] = useFirebaseSyncedCollection<SaleRecord>("sales", initialSales, firebaseEnabled && (canSeeFinance || canUsePdv || canUseQuickService), false, firebaseSession.reportSyncError);
   const [stockEntries] = useFirebaseSyncedCollection<StockEntryRecord>("stockEntries", initialStockEntries, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
+  const [accounts] = useFirebaseSyncedCollection<AccountRecord>("accounts", initialAccounts, firebaseEnabled && canSeeFinance, false, firebaseSession.reportSyncError);
   const [workshopSettings, setWorkshopSettings] = useState<Partial<SettingsConfig> | null>(null);
   useEffect(() => {
     if (!firebaseEnabled) return setWorkshopSettings(null);
@@ -3157,7 +3348,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   }, [active, firebaseAdmin, firebaseEnabled, firebasePermissions]);
 
   // Os cartões de dinheiro da Visão geral eram "R$ 0,00" escritos no código.
-  const summary = useMemo(() => financeSummary(sales, orders, expenses), [sales, orders, expenses]);
+  const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
 
   // A barra de endereços acompanha a navegação: /admin no painel administrativo,
   // / no resto. Quem abre /admin sem ser Super Admin volta para a raiz, em vez
@@ -3408,11 +3599,11 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} sales={sales} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
+            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} sales={sales} accounts={accounts} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} stockEntries={stockEntries} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedOrderId={selectedOrderId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} stockEntries={stockEntries} accounts={accounts} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedOrderId={selectedOrderId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );

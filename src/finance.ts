@@ -1,4 +1,4 @@
-import type { ExpenseRecord, OrderRecord, SaleRecord, ServiceOrderItem } from "./types";
+import type { AccountRecord, AccountSettlement, ExpenseRecord, OrderRecord, SaleRecord, ServiceOrderItem } from "./types";
 
 /**
  * Cálculos do financeiro da oficina, em um lugar só.
@@ -130,6 +130,70 @@ export function receivableEntries(sales: SaleRecord[], orders: OrderRecord[]): F
   ].filter((entry) => isCreditPayment(entry.method));
 }
 
+// ---------------------------------------------------------------------------
+// Contas a receber e a pagar
+// ---------------------------------------------------------------------------
+
+/** Quanto já foi baixado nesta conta. */
+export function accountPaid(account: Pick<AccountRecord, "settlements">): number {
+  return (account.settlements ?? []).reduce((total, settlement) => total + (settlement.amount || 0), 0);
+}
+
+/** Quanto ainda falta. Nunca negativo: baixa a maior não vira crédito na conta. */
+export function accountOpen(account: Pick<AccountRecord, "amount" | "settlements">): number {
+  return Math.max(0, round2(account.amount - accountPaid(account)));
+}
+
+export function accountIsSettled(account: Pick<AccountRecord, "amount" | "settlements">): boolean {
+  return accountOpen(account) <= 0;
+}
+
+/**
+ * Situação da conta. "Parcial" tem prioridade sobre o vencimento porque é a
+ * informação que muda a conversa com o cliente: já pagou parte.
+ */
+export function accountStatus(account: Pick<AccountRecord, "amount" | "dueDate" | "settlements">): string {
+  if (accountIsSettled(account)) return "Quitado";
+  if (accountPaid(account) > 0) return "Parcial";
+  return payableStatus(account.dueDate);
+}
+
+/** Contas em aberto de um tipo, da mais vencida para a mais distante. */
+export function openAccounts(accounts: AccountRecord[], kind: AccountRecord["kind"]): AccountRecord[] {
+  return accounts
+    .filter((account) => account.kind === kind && !accountIsSettled(account))
+    .sort((a, b) => (parseBRDate(a.dueDate)?.getTime() ?? 0) - (parseBRDate(b.dueDate)?.getTime() ?? 0));
+}
+
+/** Todas as baixas de um tipo de conta, para somar o que entrou ou saiu de caixa. */
+export function settlementsOf(accounts: AccountRecord[], kind: AccountRecord["kind"]): AccountSettlement[] {
+  return accounts.filter((account) => account.kind === kind).flatMap((account) => account.settlements ?? []);
+}
+
+/**
+ * Divide um valor em parcelas com vencimento mensal.
+ *
+ * Os centavos da divisão vão para a PRIMEIRA parcela: R$ 100 em 3 vezes dá
+ * 33,34 + 33,33 + 33,33. Sobrar centavo na última faria a conta fechar com
+ * diferença justamente na parcela que o cliente confere no fim.
+ */
+export function splitInstallments(total: number, count: number, firstDueDate: string): Array<{ amount: number; dueDate: string; installment: number }> {
+  const parts = Math.max(1, Math.floor(count));
+  const cents = Math.round(total * 100);
+  const base = Math.floor(cents / parts);
+  const rest = cents - base * parts;
+  const start = parseBRDate(firstDueDate) ?? new Date();
+
+  return Array.from({ length: parts }, (_unused, index) => {
+    const due = new Date(start.getFullYear(), start.getMonth() + index, start.getDate());
+    return {
+      amount: (base + (index === 0 ? rest : 0)) / 100,
+      dueDate: due.toLocaleDateString("pt-BR"),
+      installment: index + 1,
+    };
+  });
+}
+
 export type PayableStatus = "Atrasado" | "Vence hoje" | "A vencer";
 
 export function payableStatus(dueDate: string | undefined): PayableStatus {
@@ -146,8 +210,8 @@ export function payableStatus(dueDate: string | undefined): PayableStatus {
  * Antes todos entravam como "A vencer" fixo, então uma conta vencida nunca
  * aparecia como atrasada e o total "Vencido" ficava sempre em R$ 0,00.
  */
-export function payableEntries(expenses: ExpenseRecord[]) {
-  return expenses
+export function payableEntries(expenses: ExpenseRecord[], accounts: AccountRecord[] = []) {
+  const fromExpenses = expenses
     .filter((expense) => expense.status === "Agendado")
     .map((expense) => ({
       id: expense.id,
@@ -158,6 +222,38 @@ export function payableEntries(expenses: ExpenseRecord[]) {
       open: expense.amount,
       status: payableStatus(expense.dueDate) as string,
     }));
+
+  const fromAccounts = openAccounts(accounts, "pagar").map((account) => ({
+    id: account.id,
+    person: account.person || account.category || "Favorecido",
+    description: accountDescription(account),
+    dueDate: account.dueDate,
+    original: account.amount,
+    open: accountOpen(account),
+    status: accountStatus(account),
+  }));
+
+  return [...fromAccounts, ...fromExpenses];
+}
+
+/** Descrição com a parcela, quando o lançamento foi parcelado. */
+export function accountDescription(account: Pick<AccountRecord, "description" | "installment" | "installments">): string {
+  return account.installments > 1
+    ? `${account.description} · parcela ${account.installment}/${account.installments}`
+    : account.description;
+}
+
+/** Contas a receber em aberto, no mesmo formato das contas a pagar. */
+export function receivableAccountEntries(accounts: AccountRecord[]) {
+  return openAccounts(accounts, "receber").map((account) => ({
+    id: account.id,
+    person: account.person || "Cliente",
+    description: accountDescription(account),
+    dueDate: account.dueDate,
+    original: account.amount,
+    open: accountOpen(account),
+    status: accountStatus(account),
+  }));
 }
 
 export type FinanceSummary = {
@@ -205,6 +301,7 @@ export function financeSummary(
   sales: SaleRecord[],
   orders: OrderRecord[],
   expenses: ExpenseRecord[],
+  accounts: AccountRecord[] = [],
 ): FinanceSummary {
   const today = todayBR();
   const revenue = revenueEntries(sales, orders);
@@ -222,30 +319,50 @@ export function financeSummary(
   const paidExpenses = paidExpenseRecords.reduce((total, expense) => total + expense.amount, 0);
   const paidExpensesToday = paidExpenseRecords.filter((expense) => expense.dueDate === today).reduce((total, expense) => total + expense.amount, 0);
 
-  const payables = payableEntries(expenses);
+  // Baixas de contas a receber são entrada de caixa; baixas de contas a pagar
+  // são saída. Sem isso, quitar uma nota a prazo não apareceria em lugar nenhum.
+  const receivedSettlements = settlementsOf(accounts, "receber");
+  const paidSettlements = settlementsOf(accounts, "pagar");
+  const settlementTotal = (list: AccountSettlement[], onlyToday: boolean) => list
+    .filter((settlement) => !onlyToday || settlement.date === today)
+    .reduce((total, settlement) => total + settlement.amount, 0);
+
+  const payables = payableEntries(expenses, accounts);
   const overdue = payables.filter((entry) => entry.status === "Atrasado");
 
-  const receivedToday = sum(revenueToday, "net");
+  const receivedToday = sum(revenueToday, "net") + settlementTotal(receivedSettlements, true);
+
+  const receivedFromAccounts = settlementTotal(receivedSettlements, false);
+  const paidFromAccounts = settlementTotal(paidSettlements, false);
+  const totalReceived = receivedTotal + receivedFromAccounts;
+  const totalPaid = paidExpenses + paidFromAccounts;
+  const totalPaidToday = paidExpensesToday + settlementTotal(paidSettlements, true);
 
   return {
     receivedToday,
-    grossToday: sum(revenueToday, "total"),
-    salesTodayCount: revenueToday.length,
-    receivedTotal,
+    grossToday: sum(revenueToday, "total") + settlementTotal(receivedSettlements, true),
+    salesTodayCount: revenueToday.length + receivedSettlements.filter((settlement) => settlement.date === today).length,
+    receivedTotal: totalReceived,
     grossTotal,
     grossMonth,
     cardFees,
     partsCost,
     averageTicket: revenue.length ? grossTotal / revenue.length : 0,
-    paidExpenses,
-    paidExpensesToday,
+    paidExpenses: totalPaid,
+    paidExpensesToday: totalPaidToday,
     pendingExpenses: payables.reduce((total, entry) => total + entry.open, 0),
     overdueExpenses: overdue.reduce((total, entry) => total + entry.open, 0),
     overdueCount: overdue.length,
-    receivableTotal: receivableEntries(sales, orders).reduce((total, entry) => total + entry.total, 0),
-    cashBalance: receivedTotal - paidExpenses,
-    dayBalance: receivedToday - paidExpensesToday,
-    netProfit: receivedTotal - paidExpenses - partsCost,
+    // Sai das contas em aberto. Deduzir das vendas a prazo, como antes, fazia o
+    // valor nunca zerar: não havia onde registrar que o cliente pagou.
+    receivableTotal: openAccounts(accounts, "receber").reduce((total, account) => total + accountOpen(account), 0),
+    cashBalance: totalReceived - totalPaid,
+    dayBalance: receivedToday - totalPaidToday,
+    netProfit: totalReceived - totalPaid - partsCost,
     closedOrders: orders.filter((order) => order.closed).length,
   };
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }

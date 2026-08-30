@@ -202,6 +202,29 @@ O conteúdo é montado em `src/documents.ts` (funções puras) e conferido por
 ou um nome com `&` quebrando o HTML só apareceria no papel, na frente do
 cliente.
 
+## Contas a receber e a pagar
+
+Uma conta é um registro próprio, com as baixas guardadas dentro dela. Isso é o
+que permite **quitar**: antes as contas a receber eram deduzidas na hora a partir
+das vendas fechadas em "Nota a prazo", e por isso nunca saíam da lista — não
+havia onde registrar que o cliente pagou, e o total só crescia.
+
+- **Lançamento manual** de conta a receber ou a pagar, com categoria,
+  vencimento e observações.
+- **Parcelamento** com vencimento mensal. Os centavos da divisão vão para a
+  primeira parcela: R$ 100 em 3 vezes dá 33,34 + 33,33 + 33,33, para a última
+  — a que o cliente confere no fim — fechar redonda.
+- **Baixa total ou parcial.** Uma conta com baixa parcial aparece como
+  *Parcial*; quitada, sai da lista de abertas.
+- Vendas e OS fechadas em **"Nota a prazo"** geram a conta a receber
+  automaticamente, com vencimento em 30 dias.
+
+As baixas entram no caixa: quitar uma conta a receber soma no "recebido hoje",
+quitar uma a pagar soma nos gastos do dia.
+
+As categorias do grupo **Receitas** classificam o que entra; as do grupo
+**Despesas**, o que sai.
+
 ## Como o dinheiro é contado
 
 Todos os números do financeiro saem de `src/finance.ts`, para as telas não

@@ -185,10 +185,19 @@ export type QuickServiceConfig = {
   active: boolean;
 };
 
+/**
+ * Grupos de categoria. "Receitas" classifica o que entra — antes só existiam
+ * grupos para o que sai (Despesas) e para o que é vendido, então não havia como
+ * responder de onde veio o dinheiro do mês.
+ */
+export const categoryGroups = ["Serviços", "Produtos", "Despesas", "Receitas"] as const;
+
+export type CategoryGroup = (typeof categoryGroups)[number];
+
 export type CategoryConfig = {
   id: string;
   name: string;
-  group: "Serviços" | "Produtos" | "Despesas";
+  group: CategoryGroup;
   active: boolean;
 };
 
@@ -315,6 +324,53 @@ export function systemList(lists: Partial<SystemLists> | null | undefined, key: 
 }
 
 /** Item no carrinho do PDV. Carrega o id do produto no Firestore para a baixa de estoque. */
+/** Uma baixa: parte (ou todo) do valor de uma conta que foi paga ou recebida. */
+export type AccountSettlement = {
+  /** Data no formato brasileiro, para exibição direta nas listas. */
+  date: string;
+  /** ISO 8601, para ordenar e filtrar por período. */
+  settledAt: string;
+  amount: number;
+  method: string;
+  /** Caixa ou conta bancária que recebeu ou pagou. */
+  account?: string;
+  operatorUid?: string;
+  operatorName?: string;
+};
+
+/**
+ * Uma conta a receber ou a pagar.
+ *
+ * Antes as contas a receber eram deduzidas na hora, a partir das vendas e OS
+ * fechadas em "Nota a prazo" — e por isso nunca saíam da lista: não havia onde
+ * registrar que o cliente pagou. O total só crescia. Agora a conta é um
+ * registro próprio, com as baixas guardadas dentro dela.
+ */
+export type AccountRecord = {
+  id: string;
+  kind: "receber" | "pagar";
+  /** Cliente, fornecedor ou favorecido. */
+  person: string;
+  personId?: string;
+  description: string;
+  category: string;
+  /** Valor original desta parcela. */
+  amount: number;
+  /** Vencimento no formato brasileiro. */
+  dueDate: string;
+  settlements: AccountSettlement[];
+  notes?: string;
+  /** De onde a conta veio: "Manual", "Venda", "Ordem de serviço". */
+  origin: string;
+  /** Venda ou OS que gerou a conta, quando não é lançamento manual. */
+  sourceId?: string;
+  /** Número desta parcela e total de parcelas. Lançamento avulso é 1 de 1. */
+  installment: number;
+  installments: number;
+  /** Liga as parcelas do mesmo lançamento. */
+  groupId?: string;
+};
+
 export type CartItem = {
   id: string;
   code: string;

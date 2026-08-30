@@ -117,6 +117,13 @@ service cloud.firestore {
       allow update, delete: if can('finance.manage');
     }
 
+    // Contas a receber e a pagar. Quem cuida do financeiro lança e dá baixa;
+    // quem só consulta o financeiro enxerga sem poder mexer.
+    match /accounts/{documentId} {
+      allow read: if can('finance.view');
+      allow create, update, delete: if can('finance.manage');
+    }
+
     match /expenses/{documentId} {
       allow read: if can('finance.view');
       allow create, update, delete: if can('finance.manage');

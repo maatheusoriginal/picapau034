@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type {
   CategoryConfig,
+  CategoryGroup,
   PartnerConfig,
   PaymentMachineConfig,
   PaymentMethodConfig,
@@ -8,7 +9,7 @@ import type {
   SettingsConfig,
   SystemLists,
 } from "../types";
-import { defaultSystemLists, systemList, systemListLabels } from "../types";
+import { categoryGroups, defaultSystemLists, systemList, systemListLabels } from "../types";
 import { saveFirestoreDoc, deleteFirestoreDoc, observeFirestoreDoc } from "../../app/firebase/client";
 
 interface SettingsWorkspaceProps {
@@ -230,7 +231,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
   const [editingCategory, setEditingCategory] = useState<CategoryConfig | null>(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [catName, setCatName] = useState("");
-  const [catGroup, setCatGroup] = useState<"Serviços" | "Produtos" | "Despesas">("Produtos");
+  const [catGroup, setCatGroup] = useState<CategoryGroup>("Produtos");
   const [catActive, setCatActive] = useState(true);
 
   const openCategoryModal = (cat?: CategoryConfig) => {
@@ -1268,12 +1269,19 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                   <span className="settings-field-label">Módulo / Grupo</span>
                   <select
                     value={catGroup}
-                    onChange={(e) => setCatGroup(e.target.value as "Serviços" | "Produtos" | "Despesas")}
+                    onChange={(e) => setCatGroup(e.target.value as CategoryGroup)}
                     className="settings-select"
                   >
-                    <option value="Produtos">Produtos (Estoque)</option>
-                    <option value="Serviços">Serviços (Oficina)</option>
-                    <option value="Despesas">Despesas (Financeiro)</option>
+                    {/* A lista sai de categoryGroups para não sair de sincronia
+                        com o tipo quando um grupo novo entrar. */}
+                    {categoryGroups.map((group) => (
+                      <option value={group} key={group}>
+                        {group === "Produtos" ? "Produtos (Estoque)"
+                          : group === "Serviços" ? "Serviços (Oficina)"
+                          : group === "Despesas" ? "Despesas (Financeiro)"
+                          : "Receitas (Entradas)"}
+                      </option>
+                    ))}
                   </select>
                 </label>
 
