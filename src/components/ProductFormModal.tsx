@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
-import type { CategoryConfig, ProductRecord, SettingsConfig, SupplierConfig } from "../types";
+import React, { useEffect, useMemo, useState } from "react";
+import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsConfig, StockEntryRecord, SupplierConfig } from "../types";
 import { defaultSystemLists } from "../types";
-import { markupFromPrice, priceFromMarkup } from "../inventory";
+import { markupFromPrice, movementTotals, priceFromMarkup, productMovements } from "../inventory";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 
 interface ProductFormModalProps {
@@ -17,6 +17,12 @@ interface ProductFormModalProps {
   units?: string[];
   /** Padrões da oficina (markup sugerido, estoque mínimo, unidade e modo de preço). */
   settings?: Partial<SettingsConfig> | null;
+  /** Compras, vendas e OS, para montar o histórico da peça. */
+  movementSources?: {
+    stockEntries?: StockEntryRecord[];
+    sales?: SaleRecord[];
+    orders?: OrderRecord[];
+  };
 }
 
 export const ProductFormModal: React.FC<ProductFormModalProps> = ({
@@ -30,8 +36,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   allProducts,
   units = [],
   settings = null,
+  movementSources,
 }) => {
-  const [activeTab, setActiveTab] = useState<"ident" | "prices" | "stock" | "compat" | "extra">("ident");
+  const [activeTab, setActiveTab] = useState<"ident" | "prices" | "stock" | "compat" | "extra" | "history">("ident");
   const [isSaving, setIsSaving] = useState(false);
 
   // Form State
@@ -63,7 +70,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     .filter((c) => c.group === "Produtos" && c.active !== false)
     .map((c) => c.name);
 
+  const money = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const unitOptions = units.length ? units : defaultSystemLists.units;
+  const movements = useMemo(
+    () => (editingProduct ? productMovements(editingProduct.id, movementSources ?? {}) : []),
+    [editingProduct, movementSources],
+  );
+  const totals = useMemo(() => movementTotals(movements), [movements]);
   const defaultCategories = productCategories.length > 0
     ? productCategories
     : ["Motor e Transmissão", "Freios e Rodas", "Elétrica e Ignição", "Suspensão e Direção", "Lubrificantes e Fluidos", "Pneus e Câmaras", "Acessórios e Carenagens", "Cabos e Relação", "Filtros"];
@@ -271,6 +284,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           <button type="button" className={`dialog-tab ${activeTab === "extra" ? "active" : ""}`} onClick={() => setActiveTab("extra")}>
             5. Fornecedor & Obs
           </button>
+          {/* Só faz sentido em peça já cadastrada: produto novo não tem histórico. */}
+          {editingProduct ? (
+            <button type="button" className={`dialog-tab ${activeTab === "history" ? "active" : ""}`} onClick={() => setActiveTab("history")}>
+              6. Movimentação {movements.length ? <b>{movements.length}</b> : null}
+            </button>
+          ) : null}
         </div>
 
         <form onSubmit={handleSubmit} className="dialog-body">
@@ -580,6 +599,45 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             </div>
           )}
 
+          {/* TAB 6: MOVIMENTAÇÃO */}
+          {activeTab === "history" && (
+            <div className="form-section-stack">
+              <div className="module-summary">
+                <article><span>Entrou</span><strong>{totals.inboundQuantity} un.</strong><small>{money(totals.inboundValue)} em compras</small></article>
+                <article><span>Saiu</span><strong>{totals.outboundQuantity} un.</strong><small>{money(totals.outboundValue)} em vendas e OS</small></article>
+                <article><span>Em estoque agora</span><strong>{stock} un.</strong><small>Mínimo de {minimum} un.</small></article>
+              </div>
+
+              {movements.length ? (
+                <div className="table-scroll">
+                  <table>
+                    <thead><tr><th>Documento</th><th>Origem</th><th>Data</th><th>Qtd.</th><th>Unitário</th><th>Total</th></tr></thead>
+                    <tbody>
+                      {movements.map((movement, index) => (
+                        <tr key={`${movement.documentId}-${index}`}>
+                          <td><strong className="order-id">{movement.documentId}</strong><span>{movement.detail}</span></td>
+                          <td><span className={`status ${movement.quantity > 0 ? "green" : "blue"}`}><i/>{movement.kind}</span></td>
+                          <td>{movement.date || "—"}</td>
+                          <td className="mono"><strong>{movement.quantity > 0 ? `+${movement.quantity}` : movement.quantity}</strong></td>
+                          <td className="mono">{money(movement.unitValue)}</td>
+                          <td className="mono">{money(Math.abs(movement.total))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-panel">
+                  <span>Nenhuma movimentação registrada para esta peça ainda.</span>
+                </div>
+              )}
+
+              <span className="settings-hint">
+                As saídas por ordem de serviço aparecem quando a peça é realmente baixada do estoque — uma OS ainda em orçamento não conta.
+              </span>
+            </div>
+          )}
+
           {/* Dialog Footer Actions */}
           <div className="dialog-actions-row">
             <button
@@ -591,27 +649,29 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               Cancelar
             </button>
             <div style={{ display: "flex", gap: "8px" }}>
-              {activeTab !== "ident" && (
+              {activeTab !== "ident" && activeTab !== "history" && (
                 <button
                   type="button"
                   className="outline-button"
                   onClick={() => {
-                    const tabs: Array<"ident" | "prices" | "stock" | "compat" | "extra"> = ["ident", "prices", "stock", "compat", "extra"];
+                    // A aba de movimentação fica fora: é leitura, não etapa do cadastro.
+                    const tabs = ["ident", "prices", "stock", "compat", "extra"] as const;
                     const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx > 0) setActiveTab(tabs[currIdx - 1]);
+                    if (currIdx > 0) setActiveTab(tabs[currIdx - 1]!);
                   }}
                 >
                   Anterior
                 </button>
               )}
-              {activeTab !== "extra" ? (
+              {activeTab !== "extra" && activeTab !== "history" ? (
                 <button
                   type="button"
                   className="primary-button"
                   onClick={() => {
-                    const tabs: Array<"ident" | "prices" | "stock" | "compat" | "extra"> = ["ident", "prices", "stock", "compat", "extra"];
+                    // A aba de movimentação fica fora: é leitura, não etapa do cadastro.
+                    const tabs = ["ident", "prices", "stock", "compat", "extra"] as const;
                     const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx < tabs.length - 1) setActiveTab(tabs[currIdx + 1]);
+                    if (currIdx < tabs.length - 1) setActiveTab(tabs[currIdx + 1]!);
                   }}
                 >
                   Próxima etapa →

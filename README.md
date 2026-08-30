@@ -175,6 +175,13 @@ fato foram usados e o estoque é acertado pela diferença.
 O cadastro de produto também passou a nascer com os padrões da oficina: markup
 sugerido, estoque mínimo e unidade de medida.
 
+**Histórico da peça.** A aba *Movimentação*, no cadastro de um produto já
+existente, mostra de onde a peça veio e para onde foi: compras, vendas do
+balcão, serviços rápidos e ordens de serviço, com quantidade, valor unitário e
+totais de entrada e saída. As saídas por OS aparecem pelo que foi **realmente
+baixado** do estoque — uma OS ainda em orçamento lista a peça sem ter tirado
+nada da prateleira, e por isso não conta.
+
 ## Impressão e WhatsApp
 
 O botão **Imprimir** na OS e o encerramento do serviço geram o documento e
