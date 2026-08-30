@@ -15,7 +15,8 @@
     "check:inventory": "tsx scripts/check-inventory.ts",
     "check:documents": "tsx scripts/check-documents.ts",
     "check:import": "tsx scripts/check-import.ts",
-    "check:cash": "tsx scripts/check-cash.ts"
+    "check:cash": "tsx scripts/check-cash.ts",
+    "check:permissions": "tsx scripts/check-permissions.ts"
   },
   "dependencies": {
     "express": "4.21.2",

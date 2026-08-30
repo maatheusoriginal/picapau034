@@ -331,7 +331,7 @@ export function observeAccessProfile(uid: string, callback: (profile: FirebaseAc
     const rawPermissions = isBootstrapAdmin ? allFirebasePermissions : (accessDoc?.permissions ?? userDoc?.permissions);
     const permissions = Array.isArray(rawPermissions)
       ? rawPermissions.filter((item): item is FirebasePermission => allFirebasePermissions.includes(item))
-      : defaultFirebasePermissions(role, employeeId);
+      : defaultFirebasePermissions(role);
 
     callback({
       uid,
@@ -984,7 +984,7 @@ function managedUserFromData(uid: string, data: DocumentData): FirebaseManagedUs
     active: data.active !== false,
     hasAuthAccount: data.hasAuthAccount !== false,
     hasAccessProfile: data.hasAccessProfile !== false,
-    permissions: Array.isArray(data.permissions) ? data.permissions.filter((item): item is FirebasePermission => allFirebasePermissions.includes(item)) : defaultFirebasePermissions(role, employeeId),
+    permissions: Array.isArray(data.permissions) ? data.permissions.filter((item): item is FirebasePermission => allFirebasePermissions.includes(item)) : defaultFirebasePermissions(role),
     lastSignInAt: String(data.lastSignInAt ?? ""),
   };
 }
