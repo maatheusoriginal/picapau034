@@ -38,6 +38,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:inventory` | Confere as contas de estoque e precificação (markup e custo médio) |
 | `npm run check:documents` | Confere a OS impressa, o cupom e a mensagem de WhatsApp |
 | `npm run check:import` | Confere a leitura da planilha de estoque |
+| `npm run check:cash` | Confere o caixa: o esperado na gaveta e a conferência do fechamento |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -89,12 +90,14 @@ src/
   inventory.ts       Precificação e custo de estoque (funções puras)
   documents.ts       OS impressa, cupom e mensagem de WhatsApp (funções puras)
   import.ts          Leitura da planilha de estoque (funções puras)
+  cash.ts            Caixa: o dinheiro em espécie da gaveta (funções puras)
   components/        Modais de cadastro e a área de Configurações
 scripts/
   check-finance.ts   Confere as contas do financeiro
   check-inventory.ts Confere as contas de estoque e precificação
   check-documents.ts Confere os documentos impressos e a mensagem
   check-import.ts    Confere a leitura da planilha de estoque
+  check-cash.ts      Confere o caixa e a conferência do fechamento
 firestore.rules      Regras de segurança do banco
 ```
 
@@ -295,6 +298,53 @@ Detalhes que costumam morder:
 
 Importar exige permissão de gerenciar estoque; quem só consulta não vê o botão.
 
+## Caixa
+
+O caixa é o **dinheiro em espécie da gaveta**, e só ele. Venda no PIX, no débito
+ou no crédito não entra: aquele dinheiro foi para a conta e nunca passou pela mão
+de ninguém.
+
+Essa separação é o que faz o fechamento valer alguma coisa. Se o esperado
+incluísse o PIX do dia, o caixa acusaria uma falta enorme todo dia, ninguém
+olharia mais para o número — e é assim que um desvio de R$ 50 passa despercebido
+por meses. O saldo do negócio (recebido menos pago, com PIX e cartão dentro)
+continua no Financeiro; são duas contas diferentes de propósito.
+
+### O dia a dia
+
+1. **Abrir caixa** — informe o fundo de troco que já está na gaveta. Só pode
+   haver um caixa aberto por vez; a tela mostra qual é e quem o abriu.
+2. Durante o dia, o caixa se alimenta sozinho: venda no PDV em dinheiro, OS
+   encerrada em dinheiro, cliente que quitou um fiado em dinheiro (entra) e gasto
+   pago em dinheiro (sai).
+3. **Suprimento** põe dinheiro na gaveta (troco extra); **sangria** tira
+   (depósito no banco). Ambos pedem motivo — sem ele ninguém entende o
+   lançamento depois. Sangria acima do que há na gaveta é recusada.
+4. **Fechar caixa** — conte o dinheiro e digite o valor. A tela compara com o
+   esperado e mostra **Confere**, **Sobra** ou **Falta** antes de você confirmar.
+
+### O que fica gravado
+
+O fechamento grava o contado **e** o esperado daquele momento, além da diferença.
+Recalcular o esperado meses depois daria outro número se algum lançamento antigo
+for corrigido — e aí a falta que alguém precisava explicar simplesmente sumiria.
+Pelo mesmo motivo, fechar duas vezes é recusado e apagar uma sessão é só do Super
+Admin: quem causou a falta é exatamente quem teria motivo para apagá-la.
+
+### Detalhes
+
+- **Conta esperada**: fundo de troco + vendas e OS em dinheiro + fiados quitados
+  em dinheiro + suprimentos − sangrias − gastos pagos em dinheiro.
+- Uma diferença abaixo de um centavo conta como **Confere**: arredondamento de
+  parcela não é erro de caixa.
+- Caixa aberto há mais de 20 horas aparece com um aviso — quase sempre é o caixa
+  de ontem que ninguém fechou.
+- No fechamento a tela também mostra, à parte, quanto entrou em PIX, débito e
+  crédito na sessão, para deixar claro que aquele valor **não** deve estar na
+  gaveta.
+- Abrir, movimentar e fechar exige permissão de gerenciar o financeiro. Quem
+  opera o PDV consegue ver se o caixa está aberto, mas não mexe na conferência.
+
 ## Modelo de segurança
 
 Esconder um botão na tela não é segurança. O bloqueio real está em três camadas:
@@ -327,6 +377,7 @@ sessões anteriores daquele usuário.
 - [ ] `npm run check:inventory` com todas as contas batendo
 - [ ] `npm run check:documents` sem falhas
 - [ ] `npm run check:import` sem falhas
+- [ ] `npm run check:cash` sem falhas
 - [ ] `npm run build` conclui sem erros
 - [ ] Variáveis `VITE_FIREBASE_*` configuradas no ambiente de produção
 - [ ] `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` e `INITIAL_SUPER_ADMIN_EMAIL` cadastradas

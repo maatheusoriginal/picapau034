@@ -124,6 +124,20 @@ service cloud.firestore {
       allow create, update, delete: if can('finance.manage');
     }
 
+    // Sessões de caixa: abertura, suprimento, sangria e fechamento.
+    // É o dinheiro físico da gaveta, então quem cuida do financeiro é quem
+    // abre, movimenta e fecha. Quem opera o PDV consegue ler para saber se o
+    // caixa está aberto, mas não mexe na conferência.
+    //
+    // Apagar é só do Super Admin de propósito: a conferência de um caixa
+    // fechado é o registro de uma falta ou sobra, e quem causou a falta é
+    // exatamente quem teria motivo para apagá-la.
+    match /cashSessions/{documentId} {
+      allow read: if can('finance.view') || can('pos.use');
+      allow create, update: if can('finance.manage');
+      allow delete: if isSuperAdmin();
+    }
+
     match /expenses/{documentId} {
       allow read: if can('finance.view');
       allow create, update, delete: if can('finance.manage');

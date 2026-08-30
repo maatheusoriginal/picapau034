@@ -3,7 +3,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { accountOpen, accountStatus, financeSummary, isCreditPayment, payableEntries, receivableAccountEntries, splitInstallments } from "../src/finance";
-import { mergeParts, shouldReserveStock, stockDeltas, type ReservedPart } from "../src/inventory";
+import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
+import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
 import { openWhatsapp, printDocument } from "./printing";
@@ -32,6 +33,9 @@ import {
   recordSale,
   saveAccounts,
   settleAccount,
+  addCashMovement,
+  closeCashSession,
+  openCashSession,
   recordStockEntry,
   saveImportedProducts,
   saveOrderWithStock,
@@ -69,6 +73,7 @@ import {
 import type {
   AccountRecord,
   CartItem,
+  CashSession,
   CategoryConfig,
   ClientRecord,
   DialogKind,
@@ -158,6 +163,7 @@ const initialSales: SaleRecord[] = [];
 const initialStockEntries: StockEntryRecord[] = [];
 
 const initialAccounts: AccountRecord[] = [];
+const initialCashSessions: CashSession[] = [];
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -676,6 +682,7 @@ function FinanceWorkspace({
   sales,
   orders,
   accounts,
+  cashSessions,
 }: {
   openDialog: OpenDialog;
   navigate: (destination: string) => void;
@@ -684,22 +691,27 @@ function FinanceWorkspace({
   sales: SaleRecord[];
   orders: OrderRecord[];
   accounts: AccountRecord[];
+  cashSessions: CashSession[];
 }) {
   // grossRevenue, partsCost e cardRevenue eram constantes 0 escritas no código,
   // então o lucro líquido era sempre o negativo dos gastos.
   const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
   const { grossTotal: grossRevenue, cardFees, paidExpenses, pendingExpenses, netProfit } = summary;
+  // O botão precisa dizer a verdade: com o caixa aberto, o que se faz é
+  // movimentar e fechar, não "abrir" de novo.
+  const openCash = openSession(cashSessions);
+  const drawerExpected = cashSummary(openCash, { sales, orders, expenses, accounts }).expected;
   const payrollPaid = expenses.filter((expense) => expense.status === "Pago" && expense.category === "Pagamento de funcionário").reduce((sum, expense) => sum + expense.amount, 0);
   return (
     <>
       <div className="module-heading">
         <div><p>Controle financeiro</p><h1>Financeiro</h1><span>Caixa, recebimentos, pagamentos e gastos da oficina em um só lugar.</span></div>
-        <div className="heading-actions"><button className="outline-button large" onClick={() => openDialog("cash")}>Abrir caixa</button><button className="primary-button" onClick={() => openDialog("expense")}><Icon name="plus" size={18}/>Adicionar gasto</button></div>
+        <div className="heading-actions"><button className="outline-button large" onClick={() => openDialog("cash")}>{openCash ? "Movimentar caixa" : "Abrir caixa"}</button><button className="primary-button" onClick={() => openDialog("expense")}><Icon name="plus" size={18}/>Adicionar gasto</button></div>
       </div>
       <div className="finance-kpi-grid">
         <button className="finance-kpi receive" onClick={() => navigate("Contas a receber")}><span className="finance-kpi-icon"><Icon name="arrow"/></span><div><small>Total a receber</small><strong>{formatBRL(summary.receivableTotal)}</strong><em>{summary.receivableTotal ? "Vendas e OS a prazo" : "Nenhum valor em aberto"}</em></div><Icon name="arrow" size={18}/></button>
         <button className="finance-kpi pay" onClick={() => navigate("Contas a pagar")}><span className="finance-kpi-icon"><Icon name="file"/></span><div><small>Total a pagar</small><strong>{formatBRL(pendingExpenses)}</strong><em>{expenses.filter((e) => e.status === "Agendado").length} contas agendadas</em></div><Icon name="arrow" size={18}/></button>
-        <button className="finance-kpi balance" onClick={() => openDialog("cash")}><span className="finance-kpi-icon"><Icon name="wallet"/></span><div><small>Saldo disponível hoje</small><strong>{formatBRL(summary.cashBalance)}</strong><em>Recebido menos gastos pagos</em></div><Icon name="arrow" size={18}/></button>
+        <button className="finance-kpi balance" onClick={() => openDialog("cash")}><span className="finance-kpi-icon"><Icon name="wallet"/></span><div><small>{openCash ? `Dinheiro na gaveta · ${openCash.id}` : "Saldo disponível hoje"}</small><strong>{formatBRL(openCash ? drawerExpected : summary.cashBalance)}</strong><em>{openCash ? `Caixa aberto ${openCash.openedDate}` : "Caixa fechado · abra para começar o dia"}</em></div><Icon name="arrow" size={18}/></button>
       </div>
       <section className="finance-result-strip panel"><div className="result-strip-head"><div><small>Resultado real da oficina</small><h2>Lucro líquido estimado</h2></div><strong>{formatBRL(netProfit)}</strong></div><div className="result-breakdown"><span><small>Faturamento</small><b>{formatBRL(grossRevenue)}</b></span><span><small>Custo das peças</small><b>− {formatBRL(summary.partsCost)}</b></span><span><small>Gastos pagos</small><b>− {formatBRL(paidExpenses)}</b></span><span><small>Taxas de maquininha</small><b>− {formatBRL(cardFees)}</b></span></div><p>Considera vendas, custo das peças, gastos lançados, pagamentos de funcionários ({formatBRL(payrollPaid)}) e as taxas de maquininha já descontadas das vendas no cartão.</p></section>
       <div className="finance-body-grid">
@@ -1424,6 +1436,7 @@ function ModuleWorkspace({
   setCart,
   sales,
   accounts,
+  cashSessions,
   openSettings,
   settingsTab,
   settings,
@@ -1460,6 +1473,7 @@ function ModuleWorkspace({
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   sales: SaleRecord[];
   accounts: AccountRecord[];
+  cashSessions: CashSession[];
   openSettings: (tab: SettingsTab) => void;
   settingsTab: SettingsTab;
   settings: Partial<SettingsConfig> | null;
@@ -1470,7 +1484,7 @@ function ModuleWorkspace({
 
   if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} products={products} clients={clients} blockZeroStockSale={settings?.blockZeroStockSale !== false} />;
   if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
-  if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts}/>;
+  if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} />;
@@ -1701,6 +1715,7 @@ function AppDialog({
   sales,
   stockEntries,
   accounts,
+  cashSessions,
   lists,
   settings,
   currentUser,
@@ -1734,6 +1749,7 @@ function AppDialog({
   sales: SaleRecord[];
   stockEntries: StockEntryRecord[];
   accounts: AccountRecord[];
+  cashSessions: CashSession[];
   lists: Partial<SystemLists> | null;
   settings: Partial<SettingsConfig> | null;
   currentUser: FirebaseUserSummary | null;
@@ -1913,6 +1929,10 @@ function AppDialog({
   const [dialogError, setDialogError] = useState("");
   // Importação de planilha: a prévia fica em pé até a pessoa confirmar, para
   // ela conferir o que vai entrar antes de mexer no estoque.
+  // Caixa: valor e motivo da movimentação, e o contado no fechamento.
+  const [cashAmount, setCashAmount] = useState("");
+  const [cashReason, setCashReason] = useState("");
+  const [cashCounted, setCashCounted] = useState("");
   const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
   const [importFileName, setImportFileName] = useState("");
   const [importReading, setImportReading] = useState(false);
@@ -1941,6 +1961,15 @@ function AppDialog({
     setImportPlan(null);
     setImportFileName("");
     setImportReading(false);
+  }, [dialog]);
+
+  // Mesmo motivo no caixa: reabrir o diálogo com o valor da sangria anterior
+  // ainda digitado é o tipo de coisa que faz sair dinheiro duas vezes.
+  useEffect(() => {
+    if (dialog === "cash") return;
+    setCashAmount("");
+    setCashReason("");
+    setCashCounted("");
   }, [dialog]);
 
   if (!dialog) return null;
@@ -2010,6 +2039,15 @@ function AppDialog({
   ];
   const cartTotal = cart.reduce((sum, item) => sum + item.unit * item.quantity, 0);
   const dialogSummary = financeSummary(sales, orders, expenses, accounts);
+  // Caixa: a sessão aberta e o que o sistema espera encontrar na gaveta.
+  const cashOpen = openSession(cashSessions);
+  const cashSources = { sales, orders, expenses, accounts };
+  const drawer = cashSummary(cashOpen, cashSources);
+  const drawerMoves = drawerEntries(cashOpen, cashSources);
+  const cashAmountValue = toAmount(cashAmount);
+  const cashCountedValue = toAmount(cashCounted);
+  const cashProblem = cashAction === "Fechar caixa" ? "" : movementProblem(cashAction === "Sangria" ? "Sangria" : "Suprimento", cashAmountValue, drawer.expected);
+  const cashGap = cashDifference(cashCountedValue, drawer.expected);
   const paymentGross = dialog === "orderCheckout" ? checkoutTotal : cartTotal;
   const paymentFeeRate = paymentMethod === "Débito" ? selectedMachine?.debitFee ?? 0 : paymentMethod === "Crédito" ? paymentInstallments === 1 ? selectedMachine?.credit1xFee ?? 0 : paymentInstallments <= 6 ? selectedMachine?.credit2to6Fee ?? 0 : selectedMachine?.credit7to12Fee ?? 0 : 0;
   const paymentFeeAmount = paymentGross * (paymentFeeRate / 100);
@@ -2396,6 +2434,60 @@ function AppDialog({
     setDialogError("");
     if (dialog === "os" && step < 5) return setStep(step + 1);
 
+    if (dialog === "cash") {
+      const operator = { uid: currentUser?.uid, name: currentUser?.displayName || currentUser?.email || "" };
+      setSaving(true);
+      try {
+        if (!cashOpen) {
+          const now = new Date();
+          const id = await openCashSession({
+            openedAt: now.toISOString(),
+            openedDate: now.toLocaleDateString("pt-BR"),
+            openedByUid: operator.uid ?? "",
+            openedByName: operator.name,
+            openingAmount: cashAmountValue,
+            openingNotes: cashReason.trim(),
+            movements: [],
+          });
+          setCashAmount(""); setCashReason("");
+          return finish(`Caixa ${id} aberto com ${formatBRL(cashAmountValue)} de fundo de troco.`);
+        }
+
+        if (cashAction === "Fechar caixa") {
+          const now = new Date();
+          // Grava o esperado junto do contado: a diferença precisa continuar
+          // fazendo sentido meses depois, mesmo que algum lançamento antigo
+          // seja corrigido e o recálculo dê outro número.
+          await closeCashSession(cashOpen.id, {
+            closedAt: now.toISOString(),
+            closedDate: now.toLocaleDateString("pt-BR"),
+            closedByUid: operator.uid ?? "",
+            closedByName: operator.name,
+            countedAmount: cashCountedValue,
+            expectedAmount: drawer.expected,
+            difference: cashGap,
+            closingNotes: cashReason.trim(),
+          });
+          const label = differenceLabel(cashGap);
+          setCashCounted(""); setCashReason(""); setCashAction("Suprimento");
+          return finish(label === "Confere"
+            ? `Caixa ${cashOpen.id} fechado e conferido: ${formatBRL(cashCountedValue)} na gaveta.`
+            : `Caixa ${cashOpen.id} fechado com ${label.toLowerCase()} de ${formatBRL(Math.abs(cashGap))}.`);
+        }
+
+        const kind = cashAction === "Sangria" ? "Sangria" : "Suprimento";
+        if (cashProblem) return setDialogError(cashProblem);
+        if (!cashReason.trim()) return setDialogError("Diga o motivo. Sem ele, ninguém entende a movimentação depois.");
+        await addCashMovement(cashOpen.id, buildMovement(kind, cashAmountValue, cashReason, operator));
+        setCashAmount(""); setCashReason("");
+        return finish(`${kind} de ${formatBRL(cashAmountValue)} lançado no caixa ${cashOpen.id}.`);
+      } catch (error) {
+        return setDialogError(error instanceof Error ? error.message : "Não foi possível movimentar o caixa.");
+      } finally {
+        setSaving(false);
+      }
+    }
+
     if (dialog === "import") {
       if (!importPlan) return setDialogError("Escolha a planilha preenchida antes de importar.");
       const total = importPlan.create.length + importPlan.update.length;
@@ -2484,6 +2576,9 @@ function AppDialog({
             paymentMethod,
             closed: true,
             closedAt: new Date().toLocaleDateString("pt-BR"),
+            // Só a data não basta para o caixa: ele precisa saber a hora para
+            // saber a qual sessão esta OS pertence.
+            closedAtISO: new Date().toISOString(),
             deductedItems: target,
           }, stockDeltas(target, reserved));
           // Imprime já com o que foi conferido no checkout, e não com os itens
@@ -2707,6 +2802,9 @@ function AppDialog({
         dueDate: expensePaymentMode === "Pagar depois" ? expenseDueDate.split("-").reverse().join("/") : new Date().toLocaleDateString("pt-BR"),
         status: expensePaymentMode === "Pagar depois" ? "Agendado" : "Pago",
         method: expensePaymentMode === "Caixa" ? "Dinheiro" : expensePaymentMode === "Banco" ? "Banco Inter" : "A definir",
+        // A hora do pagamento é o que prende o gasto à sessão de caixa certa:
+        // só a data não distingue dois caixas abertos no mesmo dia.
+        paidAt: expensePaymentMode === "Pagar depois" ? undefined : new Date().toISOString(),
         order: isPartPurchase ? expenseOrder : undefined,
         charged: isPartPurchase ? expenseCharged : undefined,
         employeeId: isEmployeePayment ? selectedEmployee?.id : undefined,
@@ -2757,7 +2855,8 @@ function AppDialog({
     order: "Salvar alterações",
     orderCheckout: "Receber e finalizar OS",
     settings: "Salvar configurações",
-    cash: `Confirmar ${cashAction.toLowerCase()}`,
+    // O botão diz o que vai acontecer: com o caixa fechado a única ação é abrir.
+    cash: !cashOpen ? "Abrir caixa" : cashAction === "Fechar caixa" ? "Fechar e conferir" : `Confirmar ${cashAction.toLowerCase()}`,
     expense: expensePaymentMode === "Pagar depois" ? "Agendar conta a pagar" : "Registrar gasto",
     receivable: "Criar conta a receber",
     payable: "Criar conta a pagar",
@@ -3115,11 +3214,93 @@ function AppDialog({
           </div>
         ) : null}
 
-        {dialog === "cash" ? (
+        {dialog === "cash" && !cashOpen ? (
           <div className="dialog-body form-section">
-            <div className="cash-balance"><span>Saldo atual do caixa</span><strong>{formatBRL(dialogSummary.cashBalance)}</strong><small>Recebido menos gastos pagos</small></div>
-            <div className="cash-actions">{[{name:"Suprimento", detail:"Adicionar dinheiro", icon:"plus" as IconName},{name:"Sangria", detail:"Retirar dinheiro", icon:"arrow" as IconName},{name:"Fechar caixa", detail:"Conferir o dia", icon:"check" as IconName}].map((action) => <button className={cashAction === action.name ? "selected" : ""} key={action.name} onClick={() => setCashAction(action.name)}><Icon name={action.icon}/><strong>{action.name}</strong><small>{action.detail}</small></button>)}</div>
-            <div className="form-grid form-top-gap"><label className="field"><span>Valor</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Motivo</span><input placeholder="Ex.: Troco para o caixa"/></label></div>
+            <div className="cash-balance"><span>Nenhum caixa aberto</span><strong>{formatBRL(0)}</strong><small>Abra o caixa com o dinheiro que já está na gaveta</small></div>
+            <div className="form-grid form-top-gap">
+              <label className="field"><span>Fundo de troco</span><input inputMode="decimal" value={cashAmount} onChange={(event) => setCashAmount(event.target.value)} placeholder="R$ 0,00"/></label>
+              <label className="field"><span>Observação (opcional)</span><input value={cashReason} onChange={(event) => setCashReason(event.target.value)} placeholder="Ex.: Troco separado ontem"/></label>
+            </div>
+            {closedSessions(cashSessions).length ? (
+              <div className="table-scroll">
+                <table>
+                  <thead><tr><th>Caixa</th><th>Fechado em</th><th>Esperado</th><th>Contado</th><th>Conferência</th></tr></thead>
+                  <tbody>{closedSessions(cashSessions).slice(0, 5).map((past) => {
+                    const gap = past.difference ?? 0;
+                    const label = differenceLabel(gap);
+                    return (
+                      <tr key={past.id}>
+                        <td><strong className="order-id">{past.id}</strong><span>{past.openedByName || "—"}</span></td>
+                        <td>{past.closedDate || "—"}</td>
+                        <td className="mono">{formatBRL(past.expectedAmount ?? 0)}</td>
+                        <td className="mono">{formatBRL(past.countedAmount ?? 0)}</td>
+                        <td><span className={`status ${label === "Confere" ? "green" : label === "Sobra" ? "blue" : "red"}`}><i/>{label === "Confere" ? "Confere" : `${label} de ${formatBRL(Math.abs(gap))}`}</span></td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table>
+              </div>
+            ) : null}
+            <div className="info-strip"><Icon name="check" size={18}/><span>O caixa conta o dinheiro em espécie da gaveta. Venda no PIX, no débito ou no crédito não entra aqui — vai direto para a conta.</span></div>
+          </div>
+        ) : null}
+
+        {dialog === "cash" && cashOpen ? (
+          <div className="dialog-body form-section">
+            <div className="cash-balance"><span>Esperado na gaveta agora · {cashOpen.id}</span><strong>{formatBRL(drawer.expected)}</strong><small>Aberto {cashOpen.openedDate} por {cashOpen.openedByName || "—"} · {drawer.count} movimentação(ões)</small></div>
+
+            {sessionIsStale(cashOpen) ? <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>Este caixa está aberto há mais de 20 horas. Provavelmente ficou de um dia anterior — confira e feche antes de continuar.</span></div> : null}
+
+            <div className="module-summary">
+              <article><span>Fundo de troco</span><strong>{formatBRL(drawer.opening)}</strong><small>Abertura do caixa</small></article>
+              <article><span>Entrou em dinheiro</span><strong>{formatBRL(drawer.sales + drawer.received + drawer.supplies)}</strong><small>{formatBRL(drawer.sales)} em vendas e OS</small></article>
+              <article><span>Saiu em dinheiro</span><strong>{formatBRL(drawer.withdrawals + drawer.expenses)}</strong><small>{formatBRL(drawer.withdrawals)} em sangrias</small></article>
+            </div>
+
+            <div className="cash-actions">{[{name:"Suprimento", detail:"Adicionar dinheiro", icon:"plus" as IconName},{name:"Sangria", detail:"Retirar dinheiro", icon:"arrow" as IconName},{name:"Fechar caixa", detail:"Conferir o dia", icon:"check" as IconName}].map((action) => <button className={cashAction === action.name ? "selected" : ""} key={action.name} onClick={() => { setCashAction(action.name); setDialogError(""); }}><Icon name={action.icon}/><strong>{action.name}</strong><small>{action.detail}</small></button>)}</div>
+
+            {cashAction === "Fechar caixa" ? (
+              <>
+                <div className="form-grid form-top-gap">
+                  <label className="field"><span>Dinheiro contado na gaveta</span><input autoFocus inputMode="decimal" value={cashCounted} onChange={(event) => setCashCounted(event.target.value)} placeholder="R$ 0,00"/></label>
+                  <label className="field"><span>Observação do fechamento</span><input value={cashReason} onChange={(event) => setCashReason(event.target.value)} placeholder="Ex.: Faltou troco de uma venda"/></label>
+                </div>
+                {/* module-summary, e não machine-fee-summary: aquele pinta a
+                    última coluna de verde sempre, porque foi feito para "valor
+                    líquido". Uma falta de caixa em verde é justamente o que faz
+                    ninguém reparar nela. Aqui summary-danger deixa o número
+                    vermelho quando falta dinheiro. */}
+                <div className="module-summary">
+                  <article><span>Esperado pelo sistema</span><strong>{formatBRL(drawer.expected)}</strong><small>Já com o fundo de troco</small></article>
+                  <article><span>Contado por você</span><strong>{formatBRL(cashCountedValue)}</strong><small>Dinheiro na gaveta</small></article>
+                  <article className={differenceLabel(cashGap) === "Falta" ? "summary-danger" : ""}><span>{differenceLabel(cashGap)}</span><strong>{differenceLabel(cashGap) === "Confere" ? formatBRL(0) : `${cashGap > 0 ? "+" : "−"} ${formatBRL(Math.abs(cashGap))}`}</strong><small>{differenceLabel(cashGap) === "Confere" ? "O caixa bate" : "Fica registrado no fechamento"}</small></article>
+                </div>
+                {nonDrawerTotal(cashOpen, sales, orders) > 0 ? <div className="info-strip"><Icon name="check" size={18}/><span>Fora da gaveta, esta sessão recebeu {formatBRL(nonDrawerTotal(cashOpen, sales, orders))} em PIX, débito e crédito. Esse valor foi para a conta e não deve ser contado aqui.</span></div> : null}
+              </>
+            ) : (
+              <div className="form-grid form-top-gap">
+                <label className="field"><span>Valor</span><input autoFocus inputMode="decimal" value={cashAmount} onChange={(event) => setCashAmount(event.target.value)} placeholder="R$ 0,00"/></label>
+                <label className="field"><span>Motivo</span><input value={cashReason} onChange={(event) => setCashReason(event.target.value)} placeholder={cashAction === "Sangria" ? "Ex.: Depósito no banco" : "Ex.: Troco para o caixa"}/></label>
+              </div>
+            )}
+
+            {cashProblem ? <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>{cashProblem}</span></div> : null}
+
+            {drawerMoves.length ? (
+              <div className="table-scroll">
+                <table>
+                  <thead><tr><th>Movimentação</th><th>Origem</th><th>Hora</th><th>Valor</th></tr></thead>
+                  <tbody>{drawerMoves.map((entry) => (
+                    <tr key={entry.id}>
+                      <td><strong className="order-id">{entry.kind}</strong><span>{entry.description}</span></td>
+                      <td>{entry.id.startsWith(cashOpen.id) ? "Caixa" : entry.id}</td>
+                      <td>{new Date(entry.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</td>
+                      <td className="mono"><strong className={entry.amount < 0 ? "danger-text" : ""}>{entry.amount < 0 ? "− " : "+ "}{formatBRL(Math.abs(entry.amount))}</strong></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -3449,6 +3630,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [sales] = useFirebaseSyncedCollection<SaleRecord>("sales", initialSales, firebaseEnabled && (canSeeFinance || canUsePdv || canUseQuickService), false, firebaseSession.reportSyncError);
   const [stockEntries] = useFirebaseSyncedCollection<StockEntryRecord>("stockEntries", initialStockEntries, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
   const [accounts] = useFirebaseSyncedCollection<AccountRecord>("accounts", initialAccounts, firebaseEnabled && canSeeFinance, false, firebaseSession.reportSyncError);
+  const [cashSessions] = useFirebaseSyncedCollection<CashSession>("cashSessions", initialCashSessions, firebaseEnabled && (canSeeFinance || canUsePdv), false, firebaseSession.reportSyncError);
   const [workshopSettings, setWorkshopSettings] = useState<Partial<SettingsConfig> | null>(null);
   useEffect(() => {
     if (!firebaseEnabled) return setWorkshopSettings(null);
@@ -3483,6 +3665,10 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
 
   // Os cartões de dinheiro da Visão geral eram "R$ 0,00" escritos no código.
   const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
+  // O cartão da Visão geral mostra a gaveta quando há caixa aberto: é o número
+  // que a pessoa vai conferir, e não o saldo acumulado do negócio.
+  const dashboardCash = openSession(cashSessions);
+  const dashboardDrawer = cashSummary(dashboardCash, { sales, orders, expenses, accounts }).expected;
 
   // A barra de endereços acompanha a navegação: /admin no painel administrativo,
   // / no resto. Quem abre /admin sem ser Super Admin volta para a raiz, em vez
@@ -3662,7 +3848,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           {canSeeFinance ? <section className="dashboard-finance-grid" aria-label="Valores financeiros">
             <button className="dashboard-money-card receive" onClick={() => setActive("Contas a receber")}><span className="money-card-icon"><Icon name="arrow"/></span><div><small>A receber</small><strong>{formatBRL(summary.receivableTotal)}</strong><em>{summary.receivableTotal ? "Vendas e OS a prazo" : "Nenhum valor em aberto"}</em></div><Icon name="arrow" size={18}/></button>
             <button className="dashboard-money-card pay" onClick={() => setActive("Contas a pagar")}><span className="money-card-icon"><Icon name="file"/></span><div><small>A pagar</small><strong>{formatBRL(expenses.filter((e) => e.status === "Agendado").reduce((sum, e) => sum + e.amount, 0))}</strong><em>{expenses.filter((e) => e.status === "Agendado").length} conta(s) agendada(s)</em></div><Icon name="arrow" size={18}/></button>
-            <button className="dashboard-money-card cash" onClick={() => openDialog("cash")}><span className="money-card-icon"><Icon name="wallet"/></span><div><small>Saldo do caixa</small><strong>{formatBRL(summary.cashBalance)}</strong><em>Recebido menos gastos pagos</em></div><Icon name="arrow" size={18}/></button>
+            <button className="dashboard-money-card cash" onClick={() => openDialog("cash")}><span className="money-card-icon"><Icon name="wallet"/></span><div><small>{dashboardCash ? "Dinheiro na gaveta" : "Saldo do caixa"}</small><strong>{formatBRL(dashboardCash ? dashboardDrawer : summary.cashBalance)}</strong><em>{dashboardCash ? `${dashboardCash.id} aberto ${dashboardCash.openedDate}` : "Caixa fechado · abra para começar o dia"}</em></div><Icon name="arrow" size={18}/></button>
           </section> : null}
 
           {canViewOrders ? <section className="flow-section">
@@ -3733,11 +3919,11 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} sales={sales} accounts={accounts} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
+            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} sales={sales} accounts={accounts} cashSessions={cashSessions} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} stockEntries={stockEntries} accounts={accounts} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} stockEntries={stockEntries} accounts={accounts} cashSessions={cashSessions} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );
