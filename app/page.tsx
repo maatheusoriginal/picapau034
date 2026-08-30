@@ -1,7 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isMechanicUser, serviceOrderStatuses, statusTone } from "../src/types";
+import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { financeSummary, payableEntries, receivableEntries } from "../src/finance";
 import type { SettingsTab } from "../src/components/SettingsWorkspace";
 
@@ -74,6 +74,7 @@ import type {
   QuickServiceConfig,
   SaleRecord,
   ServiceOrderStatus,
+  SystemLists,
   ServiceOrderItem,
   SettingsConfig,
   SupplierConfig,
@@ -1672,6 +1673,7 @@ function AppDialog({
   cart,
   setCart,
   sales,
+  lists,
   currentUser,
 }: {
   dialog: DialogKind;
@@ -1701,6 +1703,7 @@ function AppDialog({
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   sales: SaleRecord[];
+  lists: Partial<SystemLists> | null;
   currentUser: FirebaseUserSummary | null;
 }) {
   if (dialog === "product") {
@@ -1714,6 +1717,7 @@ function AppDialog({
           suppliers={suppliers}
           notify={notify || finish}
           allProducts={products}
+          units={systemList(lists, "units")}
         />
       </Suspense>
     );
@@ -1743,6 +1747,7 @@ function AppDialog({
           clients={clients}
           notify={notify || finish}
           allMotorcycles={motorcycles}
+          brands={systemList(lists, "motorcycleBrands")}
         />
       </Suspense>
     );
@@ -1832,6 +1837,8 @@ function AppDialog({
   const [osMileage, setOsMileage] = useState("");
   const [osProblem, setOsProblem] = useState("");
   const [osPriority, setOsPriority] = useState("Normal");
+  const [osFuel, setOsFuel] = useState("");
+  const [quickAccount, setQuickAccount] = useState("");
   const [osDelivery, setOsDelivery] = useState("");
   // Cadastro rápido da etapa 1, quando o cliente ou a moto ainda não existem.
   const [newCustomerName, setNewCustomerName] = useState("");
@@ -1884,6 +1891,32 @@ function AppDialog({
   const tradeCompensated = Math.min(Math.max(Number(tradeValue) || 0, 0), checkoutTotal);
   const tradeRemaining = Math.max(checkoutTotal - tradeCompensated, 0);
   const tradeCreditRemaining = Math.max((Number(tradeValue) || 0) - checkoutTotal, 0);
+  // Listas configuráveis em Configurações -> Listas do sistema, com o padrão de
+  // fábrica quando a oficina ainda não ajustou nada.
+  const orderPriorities = systemList(lists, "orderPriorities");
+  const fuelLevels = systemList(lists, "fuelLevels");
+  const cashAccounts = systemList(lists, "cashAccounts");
+  // Se a oficina renomear ou remover uma opção, o valor guardado no estado pode
+  // não existir mais na lista — nesse caso o select mostraria vazio. Cai na
+  // primeira opção válida.
+  const pick = (list: string[], current: string) => (list.includes(current) ? current : list[0] ?? "");
+  const currentPriority = pick(orderPriorities, osPriority);
+  const currentFuel = pick(fuelLevels, osFuel);
+  const currentAccount = pick(cashAccounts, quickAccount);
+  // Os filtros do catálogo e as categorias de gasto vinham escritos no JSX e
+  // ignoravam o cadastro de categorias da própria oficina.
+  const productCategoryNames = categories.filter((item) => item.active !== false && item.group === "Produtos").map((item) => item.name);
+  const expenseCategoryNames = categories.filter((item) => item.active !== false && item.group === "Despesas").map((item) => item.name);
+  // "Peça comprada fora do estoque" e "Pagamento de funcionário" ficam fixas
+  // porque disparam comportamento próprio no formulário (vínculo com a OS e
+  // com o funcionário). As demais vêm do cadastro de categorias da oficina, com
+  // a lista antiga como padrão enquanto nenhuma categoria de despesa existir.
+  const behaviourExpenseCategories = ["Peça comprada fora do estoque", "Pagamento de funcionário"];
+  const fallbackExpenseCategories = ["Comissões", "Compra para o estoque", "Fornecedor de peças", "Frete e motoboy", "Ferramentas e equipamentos", "Despesas fixas", "Taxas de cartão", "Outros gastos"];
+  const expenseCategoryOptions = [
+    ...behaviourExpenseCategories,
+    ...(expenseCategoryNames.length ? expenseCategoryNames : fallbackExpenseCategories).filter((name) => !behaviourExpenseCategories.includes(name)),
+  ];
   const cartTotal = cart.reduce((sum, item) => sum + item.unit * item.quantity, 0);
   const dialogSummary = financeSummary(sales, orders, expenses);
   const paymentGross = dialog === "orderCheckout" ? checkoutTotal : cartTotal;
@@ -2047,7 +2080,8 @@ function AppDialog({
       items: osItems,
       problem: osProblem,
       mileage: osMileage,
-      priority: osPriority,
+      priority: currentPriority,
+      fuelLevel: currentFuel,
       delivery: osDelivery ? osDelivery.split("-").reverse().join("/") : "",
       origin: osOrigin === "partner" ? `Encaminhado por ${selectedPartner?.name ?? "parceiro"}` : "Cliente direto",
       total: osTotal,
@@ -2065,6 +2099,7 @@ function AppDialog({
     mechanicId?: string;
     mechanicName?: string;
     method: string;
+    account?: string;
   }) => {
     const usesMachine = ["Débito", "Crédito"].includes(input.method);
     const installments = input.method === "Crédito" ? paymentInstallments : 1;
@@ -2087,6 +2122,7 @@ function AppDialog({
         installments,
       } : {}),
       ...(input.mechanicId ? { mechanicId: input.mechanicId, mechanicName: input.mechanicName ?? "" } : {}),
+      ...(input.account ? { account: input.account } : {}),
       operatorUid: currentUser?.uid ?? "",
       operatorName: currentUser?.displayName ?? "",
       date: new Date().toLocaleDateString("pt-BR"),
@@ -2237,6 +2273,7 @@ function AppDialog({
         const saleId = await registerSale({
           origin: "Serviço rápido",
           method: quickPayment,
+          account: currentAccount,
           total: quickTotal,
           mechanicId: mechanic?.id,
           mechanicName: mechanic?.name,
@@ -2339,7 +2376,7 @@ function AppDialog({
         {dialog === "osChoice" ? (
           <div className="dialog-body attendance-choice">
             <button onClick={() => changeDialog("quick")}><span className="attendance-icon fast"><Icon name="clock"/></span><div><b>É um serviço rápido</b><strong>Atendimento expresso</strong><small>Troca de óleo, lâmpada, regulagem ou ajuste concluído na hora. Cliente e moto são opcionais.</small><em>Ir para Serviço Rápido <Icon name="arrow" size={16}/></em></div></button>
-            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
+            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
           </div>
         ) : null}
 
@@ -2383,9 +2420,9 @@ function AppDialog({
                   <div className="form-intro"><span className="form-icon"><Icon name="wrench"/></span><div><h3>Dados da recepção</h3><p>Registre a reclamação e escolha um ou mais mecânicos responsáveis.</p></div></div>
                   <div className="form-grid">
                     <label className="field"><span>Quilometragem</span><input value={osMileage} onChange={(event) => setOsMileage(event.target.value)} placeholder="Ex.: 38.420 km"/></label>
-                    <label className="field"><span>Nível de combustível</span><select defaultValue="1/2"><option>Reserva</option><option>1/4</option><option value="1/2">1/2 tanque</option><option>Cheio</option></select></label>
+                    <label className="field"><span>Nível de combustível</span><select value={currentFuel} onChange={(event) => setOsFuel(event.target.value)}>{fuelLevels.map((level) => <option key={level}>{level}</option>)}</select></label>
                     <label className="field field-full"><span>Problema relatado pelo cliente</span><textarea value={osProblem} onChange={(event) => setOsProblem(event.target.value)} placeholder="Descreva o problema relatado ou serviço solicitado"/></label>
-                    <label className="field"><span>Prioridade</span><select value={osPriority} onChange={(event) => setOsPriority(event.target.value)}><option>Normal</option><option>Urgente</option><option>Baixa</option></select></label>
+                    <label className="field"><span>Prioridade</span><select value={currentPriority} onChange={(event) => setOsPriority(event.target.value)}>{orderPriorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
                     <label className="field"><span>Previsão de entrega</span><input type="date" value={osDelivery} onChange={(event) => setOsDelivery(event.target.value)}/></label>
                     <label className="field"><span>Odômetro conferido?</span><select><option>Sim</option><option>Não</option></select></label>
                   </div>
@@ -2451,7 +2488,7 @@ function AppDialog({
               <label className="field"><span>Cliente (opcional)</span><input placeholder="Nome ou telefone"/></label>
               <label className="field"><span>Moto / placa (opcional)</span><input placeholder="Ex.: CG 160 · ABC-1234"/></label>
               <label className="field"><span>Pagamento</span><select value={quickPayment} onChange={(event) => setQuickPayment(event.target.value)}>{activePaymentMethods.filter((method) => method.name !== "Faturamento parceiro").map((method) => <option key={method.id}>{method.name}</option>)}</select></label>
-              <label className="field"><span>Conta de entrada</span><select><option>Caixa balcão</option><option>Banco Inter</option>{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label>
+              <label className="field"><span>Conta de entrada</span><select value={currentAccount} onChange={(event) => setQuickAccount(event.target.value)}>{cashAccounts.map((account) => <option key={account}>{account}</option>)}{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label>
             </div>
             <div className="quick-service-total"><div><span>{quickService}</span><small>{quickProduct === "Sem produto" ? "Somente mão de obra" : `${quickQuantity}x ${quickProduct} · ${quickPayment}`}</small></div><strong>{formatBRL(quickTotal)}</strong></div>
             <div className="info-strip"><Icon name="check" size={18}/><span>Ao finalizar, o produto será baixado do estoque, o recebimento entra no caixa e um cupom não fiscal fica pronto para impressão.</span></div>
@@ -2474,7 +2511,7 @@ function AppDialog({
         {dialog === "catalog" ? (
           <div className="dialog-body">
             <label className="pdv-search modal-search"><Icon name="search"/><input autoFocus value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Buscar produto, código de barras ou SKU"/><kbd>F2</kbd></label>
-            <div className="catalog-filters">{["Todos", "Óleos", "Freios", "Transmissão", "Elétrica"].map((category) => <button className={catalogCategory === category ? "selected" : ""} key={category} onClick={() => setCatalogCategory(category)}>{category}</button>)}</div>
+            <div className="catalog-filters">{["Todos", ...productCategoryNames].map((category) => <button className={catalogCategory === category ? "selected" : ""} key={category} onClick={() => setCatalogCategory(category)}>{category}</button>)}</div>
             <div className="catalog-list">{products.filter((product) => (catalogCategory === "Todos" || product.category === catalogCategory) && `${product.name} ${product.code} ${product.barcode ?? ""}`.toLowerCase().includes(catalogSearch.toLowerCase())).map((product) => (
               <button className={catalogSelection === product.code ? "catalog-row selected" : "catalog-row"} key={product.code} onClick={() => setCatalogSelection(product.code)} disabled={product.stock === 0}>
                 <span className="catalog-code">{product.code.slice(-2)}</span>
@@ -2536,7 +2573,7 @@ function AppDialog({
             </div>
             <div className="form-section form-top-gap">
               <div className="form-grid">
-                <label className="field field-full"><span>Categoria do gasto</span><select value={expenseCategory} onChange={(event) => { const category = event.target.value; setExpenseCategory(category); if (category === "Pagamento de funcionário") setExpenseAmount(String(selectedEmployee?.baseSalary || 0)); }}><option>Peça comprada fora do estoque</option><option>Pagamento de funcionário</option><option>Comissões</option><option>Compra para o estoque</option><option>Fornecedor de peças</option><option>Frete e motoboy</option><option>Ferramentas e equipamentos</option><option>Despesas fixas</option><option>Taxas de cartão</option><option>Outros gastos</option></select></label>
+                <label className="field field-full"><span>Categoria do gasto</span><select value={expenseCategory} onChange={(event) => { const category = event.target.value; setExpenseCategory(category); if (category === "Pagamento de funcionário") setExpenseAmount(String(selectedEmployee?.baseSalary || 0)); }}>{expenseCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label>
                 {expenseCategory === "Peça comprada fora do estoque" ? <>
                   <label className="field field-full"><span>Nome da peça comprada</span><input value={expensePart} onChange={(event) => setExpensePart(event.target.value)} placeholder="Ex.: Retificador CG 160"/></label>
                   <label className="field"><span>Ordem de serviço</span><select value={expenseOrder} onChange={(event) => setExpenseOrder(event.target.value)}>{orders?.length ? orders.map((o) => <option key={o.id} value={o.id}>{o.id} · {o.customer}</option>) : null}<option value="Sem vínculo">Sem vínculo com OS</option></select></label>
@@ -2576,7 +2613,7 @@ function AppDialog({
         {dialog === "settleReceivable" || dialog === "settlePayable" ? (
           <div className="dialog-body form-section">
             <div className={`settlement-card ${dialog === "settleReceivable" ? "receive" : "pay"}`}><span>{dialog === "settleReceivable" ? "Saldo a receber" : "Saldo a pagar"}</span><strong>R$ 0,00</strong><small>{dialog === "settleReceivable" ? "Conta a receber" : "Conta a pagar"}</small></div>
-            <div className="form-grid form-top-gap"><label className="field"><span>Valor desta baixa</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Data</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label><label className="field"><span>Forma de pagamento</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Crédito</option><option>Transferência</option></select></label><label className="field"><span>{dialog === "settleReceivable" ? "Conta de entrada" : "Conta de saída"}</span><select><option>Banco Inter PJ</option><option>Caixa balcão</option><option>Stone</option><option>Infinity Pay</option></select></label></div>
+            <div className="form-grid form-top-gap"><label className="field"><span>Valor desta baixa</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Data</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label><label className="field"><span>Forma de pagamento</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Crédito</option><option>Transferência</option></select></label><label className="field"><span>{dialog === "settleReceivable" ? "Conta de entrada" : "Conta de saída"}</span><select>{cashAccounts.map((account) => <option key={account}>{account}</option>)}{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label></div>
             <label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Quitar este lançamento</strong><small>Desative para registrar apenas um pagamento parcial</small></div></label>
           </div>
         ) : null}
@@ -2653,17 +2690,6 @@ function AppDialog({
                 <div className="print-ready-strip"><Icon name="file" size={19}/><div><strong>Impressão automática em 3 vias</strong><small>1 · Mecânico &nbsp; 2 · Caixa &nbsp; 3 · Cliente</small></div><span>80mm</span></div>
               </section>
             </div>
-          </div>
-        ) : null}
-
-        {dialog === "settings" ? (
-          <div className="dialog-body settings-body">
-            <div className="settings-tabs">{["Oficina", "OS e serviços", "Pagamentos", "Impressão", "Usuários"].map((tab) => <button className={settingsTab === tab ? "selected" : ""} key={tab} onClick={() => setSettingsTab(tab)}>{tab}</button>)}</div>
-            {settingsTab === "Oficina" ? <div className="form-section form-top-gap"><div className="form-grid"><label className="field field-full"><span>Nome da oficina</span><input defaultValue="Pica Pau Motos"/></label><label className="field"><span>WhatsApp</span><input defaultValue="(34) 99999-9999"/></label><label className="field"><span>Cidade</span><input defaultValue="Uberlândia - MG"/></label><label className="field"><span>Horário de atendimento</span><input defaultValue="08:00 às 18:00"/></label><label className="field"><span>Parceiro principal</span><input placeholder="Parceiro principal"/></label></div></div> : null}
-            {settingsTab === "OS e serviços" ? <div className="form-section form-top-gap"><div className="form-grid"><label className="field"><span>Prefixo das ordens</span><input defaultValue="OS"/></label><label className="field"><span>Próximo número</span><input defaultValue="1"/></label><label className="field"><span>Desconto parceiro na mão de obra</span><input defaultValue="15%"/></label><label className="field"><span>Previsão padrão</span><input defaultValue="2 dias"/></label></div><div className="settings-toggles"><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Vários mecânicos por OS</strong><small>Todos os responsáveis podem atualizar a situação e marcar como pronta.</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Mostrar carga de trabalho</strong><small>Ajuda a distribuir as OS entre a equipe.</small></div></label></div></div> : null}
-            {settingsTab === "Pagamentos" ? <div className="form-section form-top-gap"><div className="payment-config-list">{["PIX", "Dinheiro", "Débito", "Crédito", "Boleto", "Transferência", "Nota a prazo", "Troca de serviços"].map((method) => <label className="toggle-row" key={method}><input type="checkbox" defaultChecked/><span/><div><strong>{method}</strong><small>{method === "Crédito" ? "Infinity Pay e Stone · parcelas configuráveis" : method === "Nota a prazo" ? "Respeita o limite de crédito do cliente" : method === "Troca de serviços" ? "Compensa a dívida sem lançar dinheiro no caixa" : "Disponível no PDV e no fechamento da OS"}</small></div></label>)}</div></div> : null}
-            {settingsTab === "Impressão" ? <div className="form-section form-top-gap"><div className="form-grid"><label className="field field-full"><span>Impressora térmica</span><select><option>Elgin i9 · USB · 80mm</option><option>Outra impressora</option></select></label><label className="field"><span>Formato padrão</span><select><option>Cupom 80mm</option><option>A4</option></select></label><label className="field"><span>Cópias automáticas</span><input type="number" value="3" readOnly/></label></div><div className="print-copy-grid compact"><article><span>1</span><div><strong>Mecânico</strong><small>Execução e itens</small></div></article><article><span>2</span><div><strong>Caixa</strong><small>Valores e baixa</small></div></article><article><span>3</span><div><strong>Cliente</strong><small>Cobrança e garantia</small></div></article></div><div className="settings-toggles"><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Imprimir 3 vias ao finalizar</strong><small>Cada via sai identificada para o destinatário correto.</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Imprimir comprovante ao receber</strong><small>Inclui pagamentos divididos, compensações e troco</small></div></label></div></div> : null}
-            {settingsTab === "Usuários" ? <div className="form-section form-top-gap"><div className="role-grid"><article><span className="setting-icon"><Icon name="shield"/></span><div><strong>Super Admin</strong><small>Acesso completo ao sistema</small></div><b>{users.filter((u) => u.role === "Super Admin").length} usuário(s)</b></article><article><span className="setting-icon"><Icon name="wrench"/></span><div><strong>Mecânicos</strong><small>Acesso e atualização das OS</small></div><b>{users.filter((u) => u.canReceiveServiceOrders).length} usuário(s)</b></article><article><span className="setting-icon"><Icon name="users"/></span><div><strong>Equipe ativa</strong><small>Usuários ativos no sistema</small></div><b>{users.filter((u) => u.active).length} usuário(s)</b></article></div></div> : null}
           </div>
         ) : null}
 
@@ -2927,6 +2953,13 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   useEffect(() => {
     if (!firebaseEnabled) return setWorkshopSettings(null);
     return observeFirestoreDoc<Partial<SettingsConfig>>("settings", "global", setWorkshopSettings);
+  }, [firebaseEnabled]);
+  // Listas configuráveis (unidades, marcas, contas, prioridades...). Alimentam
+  // os selects que antes traziam a lista fixa no próprio JSX.
+  const [systemLists, setSystemLists] = useState<Partial<SystemLists> | null>(null);
+  useEffect(() => {
+    if (!firebaseEnabled) return setSystemLists(null);
+    return observeFirestoreDoc<Partial<SystemLists>>("settings", "lists", setSystemLists);
   }, [firebaseEnabled]);
 
   const visibleNavGroups = navGroups.map((group) => ({
@@ -3204,7 +3237,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} currentUser={firebaseSession.user} selectedOrderId={selectedOrderId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} lists={systemLists} currentUser={firebaseSession.user} selectedOrderId={selectedOrderId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );

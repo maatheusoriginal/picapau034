@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { CategoryConfig, ProductRecord, SupplierConfig } from "../types";
+import { defaultSystemLists } from "../types";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 
 interface ProductFormModalProps {
@@ -11,6 +12,8 @@ interface ProductFormModalProps {
   suppliers: SupplierConfig[];
   notify: (msg: string) => void;
   allProducts: ProductRecord[];
+  /** Unidades configuradas em Configurações → Listas do sistema. */
+  units?: string[];
 }
 
 export const ProductFormModal: React.FC<ProductFormModalProps> = ({
@@ -22,6 +25,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   suppliers,
   notify,
   allProducts,
+  units = [],
 }) => {
   const [activeTab, setActiveTab] = useState<"ident" | "prices" | "stock" | "compat" | "extra">("ident");
   const [isSaving, setIsSaving] = useState(false);
@@ -55,6 +59,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     .filter((c) => c.group === "Produtos" && c.active !== false)
     .map((c) => c.name);
 
+  const unitOptions = units.length ? units : defaultSystemLists.units;
   const defaultCategories = productCategories.length > 0
     ? productCategories
     : ["Motor e Transmissão", "Freios e Rodas", "Elétrica e Ignição", "Suspensão e Direção", "Lubrificantes e Fluidos", "Pneus e Câmaras", "Acessórios e Carenagens", "Cabos e Relação", "Filtros"];
@@ -348,13 +353,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     onChange={(e) => setUnit(e.target.value)}
                     className="dialog-select"
                   >
-                    <option value="UN">Unidade (UN)</option>
-                    <option value="LT">Litro (LT)</option>
-                    <option value="PC">Peça (PC)</option>
-                    <option value="PAR">Par (PAR)</option>
-                    <option value="JOGO">Jogo / Kit (JOGO)</option>
-                    <option value="KG">Quilo (KG)</option>
-                    <option value="M">Metro (M)</option>
+                    {/* Lista vinda de Configurações -> Listas do sistema. Antes era
+                        fixa aqui e diferente da lista de Configurações, então a
+                        unidade padrão escolhida pelo dono podia nem aparecer. */}
+                    {unitOptions.map((option) => <option value={option} key={option}>{option}</option>)}
                   </select>
                 </label>
                 <label className="field-group">

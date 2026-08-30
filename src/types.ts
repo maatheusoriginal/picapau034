@@ -250,6 +250,8 @@ export type OrderRecord = {
   motorcycleId?: string;
   /** Quilometragem registrada na recepção. */
   mileage?: string;
+  /** Nível de combustível na entrada da moto. */
+  fuelLevel?: string;
   /** OS entregue e recebida: sai das listas de serviço em andamento. */
   closed?: boolean;
   /** Data do encerramento, no formato brasileiro. */
@@ -257,6 +259,50 @@ export type OrderRecord = {
   /** Forma de pagamento usada no encerramento. */
   paymentMethod?: string;
 };
+
+/**
+ * Listas que a oficina ajusta em Configurações → Listas e que alimentam os
+ * selects espalhados pelo sistema.
+ *
+ * Antes cada tela trazia a sua própria lista fixa no código — e elas nem
+ * batiam entre si: Configurações oferecia as unidades "JG" e "MT" enquanto o
+ * cadastro de produto oferecia "JOGO", "KG" e "M", então a unidade padrão
+ * escolhida pelo dono não existia como opção na hora de cadastrar a peça.
+ */
+export type SystemLists = {
+  /** Unidades de medida das peças (UN, LT, PC...). */
+  units: string[];
+  /** Marcas de motocicleta oferecidas no cadastro. */
+  motorcycleBrands: string[];
+  /** Caixas e contas bancárias que recebem e pagam. */
+  cashAccounts: string[];
+  /** Prioridades atribuídas a uma OS na recepção. */
+  orderPriorities: string[];
+  /** Níveis de combustível registrados na entrada da moto. */
+  fuelLevels: string[];
+};
+
+export const systemListLabels: Record<keyof SystemLists, { title: string; hint: string; placeholder: string }> = {
+  units: { title: "Unidades de medida", hint: "Usadas no cadastro de peças e na unidade padrão.", placeholder: "Ex.: UN, LT, PC" },
+  motorcycleBrands: { title: "Marcas de motocicleta", hint: "Aparecem no cadastro de motos.", placeholder: "Ex.: Honda" },
+  cashAccounts: { title: "Caixas e contas", hint: "Contas de entrada e saída de dinheiro.", placeholder: "Ex.: Caixa balcão" },
+  orderPriorities: { title: "Prioridades da OS", hint: "Escolhidas na recepção da motocicleta.", placeholder: "Ex.: Urgente" },
+  fuelLevels: { title: "Níveis de combustível", hint: "Registrados na entrada da moto.", placeholder: "Ex.: 1/2 tanque" },
+};
+
+export const defaultSystemLists: SystemLists = {
+  units: ["UN", "PC", "LT", "KG", "M", "PAR", "JG", "CX"],
+  motorcycleBrands: ["Honda", "Yamaha", "Suzuki", "Shineray", "Kawasaki", "Dafra", "BMW", "Triumph", "Royal Enfield", "Outra"],
+  cashAccounts: ["Caixa balcão", "Banco Inter"],
+  orderPriorities: ["Normal", "Urgente", "Baixa"],
+  fuelLevels: ["Reserva", "1/4", "1/2 tanque", "3/4", "Cheio"],
+};
+
+/** Devolve a lista configurada ou o padrão, quando ainda não houve ajuste. */
+export function systemList(lists: Partial<SystemLists> | null | undefined, key: keyof SystemLists): string[] {
+  const value = lists?.[key];
+  return Array.isArray(value) && value.length ? value : defaultSystemLists[key];
+}
 
 /** Item no carrinho do PDV. Carrega o id do produto no Firestore para a baixa de estoque. */
 export type CartItem = {
@@ -285,6 +331,8 @@ export type SaleRecord = {
   /** Valor líquido depois da taxa. */
   net?: number;
   machineName?: string;
+  /** Caixa ou conta bancária que recebeu o valor. */
+  account?: string;
   installments?: number;
   customer?: string;
   clientId?: string;

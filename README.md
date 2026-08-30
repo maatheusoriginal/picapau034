@@ -106,6 +106,27 @@ direto à aba certa.
 O endereço funciona ao recarregar a página porque o Express devolve o
 `index.html` para qualquer caminho. Quem não é Super Admin cai na Visão geral.
 
+## Configurações
+
+Tudo que a oficina ajusta fica em **Configurações**, em oito abas: Oficina & OS,
+Serviços Rápidos, Categorias, Pagamentos & Taxas, Parceiros & Frotas, Estoque &
+Reposição, Impressão & WhatsApp e **Listas do sistema**.
+
+A aba "Listas do sistema" guarda as opções que aparecem nos campos de escolha
+espalhados pelo app — unidades de medida, marcas de motocicleta, caixas e
+contas, prioridades da OS e níveis de combustível. Elas ficam em
+`settings/lists` e valem para o sistema inteiro: antes cada tela trazia a sua
+lista fixa no código, e algumas nem batiam entre si (a unidade padrão escolhida
+em Configurações podia não existir como opção no cadastro da peça).
+
+As categorias cadastradas na aba Categorias alimentam os filtros do catálogo do
+PDV (grupo Produtos) e as categorias de gasto (grupo Despesas). Duas categorias
+de gasto continuam fixas — "Peça comprada fora do estoque" e "Pagamento de
+funcionário" — porque disparam comportamento próprio no formulário.
+
+Toda lista tem um padrão de fábrica: enquanto a oficina não ajustar nada, o
+sistema usa a lista original, sem tela vazia.
+
 ## Como o dinheiro é contado
 
 Todos os números do financeiro saem de `src/finance.ts`, para as telas não
