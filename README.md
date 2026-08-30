@@ -37,6 +37,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:finance` | Confere as contas do financeiro contra um cenário montado à mão |
 | `npm run check:inventory` | Confere as contas de estoque e precificação (markup e custo médio) |
 | `npm run check:documents` | Confere a OS impressa, o cupom e a mensagem de WhatsApp |
+| `npm run check:import` | Confere a leitura da planilha de estoque |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -87,11 +88,13 @@ src/
   finance.ts         Cálculos do financeiro (funções puras, sem Firebase)
   inventory.ts       Precificação e custo de estoque (funções puras)
   documents.ts       OS impressa, cupom e mensagem de WhatsApp (funções puras)
+  import.ts          Leitura da planilha de estoque (funções puras)
   components/        Modais de cadastro e a área de Configurações
 scripts/
   check-finance.ts   Confere as contas do financeiro
   check-inventory.ts Confere as contas de estoque e precificação
   check-documents.ts Confere os documentos impressos e a mensagem
+  check-import.ts    Confere a leitura da planilha de estoque
 firestore.rules      Regras de segurança do banco
 ```
 
@@ -249,6 +252,49 @@ discordarem entre si. As regras que valem a pena saber:
 
 `npm run check:finance` confere essas regras com um cenário montado à mão.
 
+## Importar o estoque por planilha
+
+Quem já tem as peças em planilha não precisa digitar tudo de novo. Em **Estoque →
+Importar planilha**:
+
+1. **Baixar modelo Sheets** gera o CSV com as colunas certas. A primeira linha de
+   dados é um exemplo marcado com `EXEMPLO` no nome — ele mostra o formato de cada
+   coluna e a importação o ignora, então não precisa apagar (mas pode).
+2. **Escolher arquivo** lê a planilha e mostra a prévia: quantas peças serão
+   cadastradas, quantas serão atualizadas e **quais linhas têm problema**, com o
+   número da linha como aparece no Excel.
+3. O botão só grava depois disso, e diz quantas peças vai importar.
+
+Só **Nome** e **Quantidade** são obrigatórios. As demais colunas podem faltar ou
+vir em branco; a ordem delas não importa e o cabeçalho pode estar sem acento.
+
+| O que acontece | Regra |
+| --- | --- |
+| Peça já cadastrada | Casa por código de barras; sem código, casa por nome |
+| Quantidade | **Substitui** a do sistema — a planilha é uma contagem, não uma entrada de mercadoria |
+| Coluna em branco | Não apaga o que já está cadastrado |
+| Preço sem custo, ou custo sem preço | O que faltar sai do markup sugerido, quando a precificação está por markup |
+| Sem unidade / estoque mínimo / categoria | Usa o padrão configurado em Configurações |
+| Linha com problema | Fica de fora e aparece na prévia; as outras entram normalmente |
+
+Recusadas: linha sem nome, quantidade que não é número, quantidade negativa e peça
+repetida dentro da própria planilha (a mensagem diz em que linha ela já apareceu).
+Preço de venda abaixo do custo é apenas **avisado** — a peça entra, porque às vezes
+é liquidação de verdade.
+
+Detalhes que costumam morder:
+
+- **Acento sai errado?** O Excel em português salva CSV em ANSI, não em UTF-8. O
+  sistema detecta e converte (`decodeSheetBytes`), então tanto faz.
+- **Separador**: `;` (Excel brasileiro) e `,` (Sheets em inglês) são reconhecidos
+  pelo cabeçalho. Célula entre aspas pode conter o separador.
+- **Números**: `25,00`, `25.00` e `1.234,56` são lidos igual.
+- **Planilha grande**: a gravação vai em blocos de 400 (limite do Firestore). Se
+  cair no meio, **importe o mesmo arquivo de novo** — as peças que já entraram são
+  reconhecidas e só atualizadas, sem duplicar nada.
+
+Importar exige permissão de gerenciar estoque; quem só consulta não vê o botão.
+
 ## Modelo de segurança
 
 Esconder um botão na tela não é segurança. O bloqueio real está em três camadas:
@@ -280,6 +326,7 @@ sessões anteriores daquele usuário.
 - [ ] `npm run check:finance` com todas as contas batendo
 - [ ] `npm run check:inventory` com todas as contas batendo
 - [ ] `npm run check:documents` sem falhas
+- [ ] `npm run check:import` sem falhas
 - [ ] `npm run build` conclui sem erros
 - [ ] Variáveis `VITE_FIREBASE_*` configuradas no ambiente de produção
 - [ ] `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` e `INITIAL_SUPER_ADMIN_EMAIL` cadastradas

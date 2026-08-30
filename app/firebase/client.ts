@@ -707,6 +707,69 @@ export async function saveOrderWithStock(
 }
 
 /**
+ * Grava a importação da planilha de estoque.
+ *
+ * As peças novas recebem um número livre da sequência — mesma busca usada nas
+ * contas e na OS, e pelo mesmo motivo: a lista carregada na tela pode estar
+ * velha e `set` não reclama de colisão, ele sobrescreve.
+ *
+ * Um batch do Firestore aceita no máximo 500 escritas, e uma planilha de
+ * oficina passa disso com facilidade, então a gravação vai em blocos. Isso
+ * abre mão da atomicidade, e a saída para isso é a importação ser repetível:
+ * a quantidade da planilha substitui a do estoque em vez de somar, e a peça
+ * criada no bloco que passou é reconhecida como já cadastrada na segunda
+ * tentativa (casa por código de barras ou nome). Ou seja, se cair no meio,
+ * basta importar o mesmo arquivo de novo — o erro diz quantas peças já
+ * entraram para a pessoa não ficar no escuro.
+ *
+ * A atualização mexe só no que veio preenchido na planilha. Quem exportou o
+ * estoque só com nome e quantidade para fazer a contagem não deveria voltar
+ * com preço, categoria e fornecedor apagados.
+ */
+const IMPORT_BATCH_SIZE = 400;
+
+export async function saveImportedProducts(
+  create: Array<Record<string, unknown>>,
+  update: Array<{ id: string; data: Record<string, unknown> }>,
+) {
+  if (!create.length && !update.length) return { created: [] as string[], updated: [] as string[] };
+  const { db } = services();
+  let written = 0;
+  try {
+    // Procura os códigos livres antes de gravar qualquer coisa: se faltar
+    // código, nada foi escrito ainda e a pessoa pode tentar de novo limpo.
+    const ids: string[] = [];
+    for (let number = 1; ids.length < create.length && number <= 20000; number += 1) {
+      const id = `PRD-${String(number).padStart(3, "0")}`;
+      if ((await getDoc(doc(db, "products", id))).exists()) continue;
+      ids.push(id);
+    }
+    if (ids.length < create.length) throw new Error("Não foi possível gerar o código das peças novas. Tente novamente.");
+
+    const writes = [
+      ...create.map((data, index) => ({ id: ids[index]!, data: { ...data, code: data.code || ids[index]!, createdAt: serverTimestamp() }, merge: false })),
+      ...update.map(({ id, data }) => ({ id, data, merge: true })),
+    ];
+
+    for (let start = 0; start < writes.length; start += IMPORT_BATCH_SIZE) {
+      const batch = writeBatch(db);
+      const block = writes.slice(start, start + IMPORT_BATCH_SIZE);
+      block.forEach(({ id, data, merge }) => {
+        batch.set(doc(db, "products", id), { ...data, updatedAt: serverTimestamp() }, { merge });
+      });
+      await batch.commit();
+      written += block.length;
+    }
+    return { created: ids, updated: update.map((item) => item.id) };
+  } catch (error) {
+    if (written > 0) {
+      throw new Error(`A importação parou depois de gravar ${written} peça(s). Importe o mesmo arquivo de novo: as peças que já entraram serão reconhecidas e apenas atualizadas.`);
+    }
+    handleFirestoreError(error, OperationType.WRITE, "products");
+  }
+}
+
+/**
  * Grava as parcelas de um lançamento de conta em um lote só.
  *
  * Parcelas separadas em gravações independentes deixariam a oficina com metade
