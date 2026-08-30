@@ -21,9 +21,11 @@ import {
   getFirestore,
   onSnapshot,
   increment,
+  query,
   runTransaction,
   serverTimestamp,
   setDoc,
+  where,
   writeBatch,
   type DocumentData,
   type Unsubscribe,
@@ -802,6 +804,87 @@ export async function saveAccounts(prefix: string, startNumber: number, accounts
     return ids;
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, "accounts");
+  }
+}
+
+/**
+ * Abre o caixa do dia.
+ *
+ * Antes de gravar, confere no servidor se já não existe uma sessão aberta —
+ * a lista carregada na tela pode estar velha, e duas sessões abertas fariam a
+ * mesma venda ser contada nas duas, com nenhuma das duas conferências
+ * fechando. Sobra uma janela mínima entre a consulta e a escrita: se duas
+ * pessoas abrirem o caixa no mesmo segundo, em máquinas diferentes, as duas
+ * passam. É pouco provável numa oficina (quem abre o caixa é uma pessoa só,
+ * de manhã), e a tela mostra a sessão aberta com quem a abriu, então dá para
+ * perceber e fechar a duplicada.
+ */
+export async function openCashSession(data: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    const existing = await getDocs(query(collection(db, "cashSessions"), where("status", "==", "aberto")));
+    if (!existing.empty) throw new Error("Já existe um caixa aberto. Feche o caixa atual antes de abrir outro.");
+
+    for (let number = 1; number < 10000; number += 1) {
+      const id = `CX-${String(number).padStart(4, "0")}`;
+      const reference = doc(db, "cashSessions", id);
+      if ((await getDoc(reference)).exists()) continue;
+      await setDoc(reference, { ...data, status: "aberto", createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      return id;
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "cashSessions");
+  }
+  throw new Error("Não foi possível gerar o número do caixa. Tente novamente.");
+}
+
+/**
+ * Lança um suprimento ou uma sangria na sessão aberta.
+ *
+ * Transação, e não escrita direta, porque a movimentação é acrescentada à
+ * lista que já está gravada: duas pessoas lançando ao mesmo tempo com a lista
+ * lida na tela fariam uma apagar a outra. Também recusa lançamento em caixa
+ * já fechado, que entraria numa conferência que a oficina já deu por encerrada.
+ */
+export async function addCashMovement(sessionId: string, movement: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const reference = doc(db, "cashSessions", sessionId);
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists()) throw new Error("Este caixa não existe mais.");
+      const data = snapshot.data() ?? {};
+      if (data.status !== "aberto") throw new Error("Este caixa já foi fechado.");
+      const movements = Array.isArray(data.movements) ? data.movements : [];
+      transaction.set(reference, { movements: [...movements, movement], updatedAt: serverTimestamp() }, { merge: true });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `cashSessions/${sessionId}`);
+  }
+}
+
+/**
+ * Fecha o caixa com a conferência.
+ *
+ * Grava junto o que o sistema esperava e o que foi contado, porque a diferença
+ * precisa continuar fazendo sentido meses depois — recalcular o esperado com
+ * os dados de hoje daria outro número se algum lançamento antigo for corrigido.
+ *
+ * Recusa fechar duas vezes: o segundo fechamento sobrescreveria a conferência
+ * do primeiro, apagando justamente o registro da falta que alguém precisava ver.
+ */
+export async function closeCashSession(sessionId: string, closing: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const reference = doc(db, "cashSessions", sessionId);
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists()) throw new Error("Este caixa não existe mais.");
+      if ((snapshot.data() ?? {}).status !== "aberto") throw new Error("Este caixa já foi fechado.");
+      transaction.set(reference, { ...closing, status: "fechado", updatedAt: serverTimestamp() }, { merge: true });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `cashSessions/${sessionId}`);
   }
 }
 

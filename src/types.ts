@@ -65,6 +65,8 @@ export type ExpenseRecord = {
   dueDate: string;
   status: "Pago" | "Agendado";
   method: string;
+  /** ISO 8601 do pagamento. Só existe em gasto pago, e é o que prende o gasto à sessão de caixa certa. */
+  paidAt?: string;
   order?: string;
   charged?: number;
   employeeId?: string;
@@ -270,6 +272,8 @@ export type OrderRecord = {
   closed?: boolean;
   /** Data do encerramento, no formato brasileiro. */
   closedAt?: string;
+  /** ISO 8601 do encerramento. `closedAt` só tem a data, e a sessão de caixa precisa da hora. */
+  closedAtISO?: string;
   /** Forma de pagamento usada no encerramento. */
   paymentMethod?: string;
   /**
@@ -325,6 +329,52 @@ export function systemList(lists: Partial<SystemLists> | null | undefined, key: 
 
 /** Item no carrinho do PDV. Carrega o id do produto no Firestore para a baixa de estoque. */
 /** Uma baixa: parte (ou todo) do valor de uma conta que foi paga ou recebida. */
+/**
+ * Uma sessão de caixa: da abertura ao fechamento.
+ *
+ * É o dinheiro **físico** da gaveta, e só ele. Venda no PIX ou no cartão não
+ * entra aqui — vai para a conta, e conferir a gaveta com esses valores dentro
+ * faria toda conferência fechar errado. É justamente essa separação que
+ * permite descobrir no fim do dia que faltam R$ 50.
+ */
+export type CashSession = {
+  id: string;
+  /** ISO 8601 da abertura. Delimita quais vendas pertencem a esta sessão. */
+  openedAt: string;
+  /** Data brasileira da abertura, para exibição direta. */
+  openedDate: string;
+  openedByUid?: string;
+  openedByName?: string;
+  /** Fundo de troco com que o caixa começou o dia. */
+  openingAmount: number;
+  /** Suprimentos e sangrias lançados durante a sessão. */
+  movements?: CashMovement[];
+  status: "aberto" | "fechado";
+  closedAt?: string;
+  closedDate?: string;
+  closedByUid?: string;
+  closedByName?: string;
+  /** Quanto foi contado na gaveta no fechamento. */
+  countedAmount?: number;
+  /** Quanto o sistema esperava encontrar, gravado no momento do fechamento. */
+  expectedAmount?: number;
+  /** Contado menos esperado: positivo é sobra, negativo é falta. */
+  difference?: number;
+  closingNotes?: string;
+};
+
+/** Dinheiro colocado na gaveta (suprimento) ou retirado dela (sangria). */
+export type CashMovement = {
+  kind: "Suprimento" | "Sangria";
+  amount: number;
+  reason: string;
+  /** ISO 8601, para ordenar. */
+  at: string;
+  date: string;
+  operatorUid?: string;
+  operatorName?: string;
+};
+
 export type AccountSettlement = {
   /** Data no formato brasileiro, para exibição direta nas listas. */
   date: string;
