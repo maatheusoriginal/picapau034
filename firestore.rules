@@ -100,6 +100,14 @@ service cloud.firestore {
       allow create, update, delete: if can('customers.manage');
     }
 
+    // Vendas do balcão e serviços rápidos. Quem opera o PDV registra a venda;
+    // corrigir ou apagar uma venda já registrada é do financeiro.
+    match /sales/{documentId} {
+      allow read: if can('finance.view') || can('pos.use') || can('quickService.use');
+      allow create: if can('pos.use') || can('quickService.use');
+      allow update, delete: if can('finance.manage');
+    }
+
     match /expenses/{documentId} {
       allow read: if can('finance.view');
       allow create, update, delete: if can('finance.manage');
