@@ -39,6 +39,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:documents` | Confere a OS impressa, o cupom e a mensagem de WhatsApp |
 | `npm run check:import` | Confere a leitura da planilha de estoque |
 | `npm run check:cash` | Confere o caixa: o esperado na gaveta e a conferência do fechamento |
+| `npm run check:permissions` | Confere o que cada cargo recebe por padrão |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -98,6 +99,7 @@ scripts/
   check-documents.ts Confere os documentos impressos e a mensagem
   check-import.ts    Confere a leitura da planilha de estoque
   check-cash.ts      Confere o caixa e a conferência do fechamento
+  check-permissions.ts Confere as permissões padrão de cada cargo
 firestore.rules      Regras de segurança do banco
 ```
 
@@ -388,6 +390,55 @@ ticket médio e a leitura de como a oficina está vendendo. Elas entram em saldo
 caixa, recebido do dia e lucro; ficam fora de faturamento, ticket médio e
 contagem de vendas.
 
+## Usuários e acessos
+
+**Usuários e acessos** (só Super Admin) cria a conta no Firebase Authentication e
+o perfil de acesso na mesma operação. Se algum passo falhar no meio, a conta
+recém-criada é apagada — melhor nenhum usuário do que um pela metade.
+
+O que dá para fazer depois: mudar nome, e-mail (muda o login de verdade),
+telefone, cargo, vínculo com funcionário e ativo/inativo; redefinir a senha
+temporária (encerrando as sessões abertas da pessoa); e apagar o usuário. Toda
+alteração fica registrada em `auditLogs`.
+
+Duas travas contra se trancar para fora: ninguém desativa ou apaga a própria
+conta, e o último Super Admin ativo não pode ser rebaixado nem removido.
+
+### Permissões
+
+O cargo (Super Admin, Balcão, Mecânico) define um **ponto de partida**; quem cria
+o usuário marca e desmarca cada permissão na lista. Super Admin recebe tudo
+automaticamente e não tem lista.
+
+**Nada é concedido fora do que foi marcado.** Havia uma exceção: o mecânico
+vinculado ao funcionário de id `USR-003` ganhava "abrir OS" e "ver equipe"
+sozinho, porque era o que fazia sentido para o Ronaldo dos dados de exemplo. Numa
+oficina de verdade esse id é outra pessoa qualquer, e o efeito era um funcionário
+aparecer com permissão que o administrador não deu. A exceção foi removida, e
+`npm run check:permissions` existe para impedir que outra apareça — inclusive um
+caso que quebra se alguém acrescentar um segundo parâmetro à função.
+
+Padrões por cargo:
+
+| | Super Admin | Balcão | Mecânico |
+| --- | --- | --- | --- |
+| Ver e atualizar OS | sim | sim | sim |
+| Abrir OS | sim | sim | **não** |
+| PDV e serviço rápido | sim | sim | não |
+| Ver estoque | sim | sim | sim |
+| Gerenciar estoque | sim | sim | não |
+| Clientes | sim | ver e cadastrar | só ver |
+| Financeiro | sim | sim | não |
+| Ver equipe | sim | não | não |
+
+### Depende da credencial do servidor
+
+Criar, editar, apagar e redefinir senha usam o Admin SDK e exigem
+`FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` configurada. Sem ela a tela ainda **lista**
+os usuários (modo de leitura, lendo o Firestore), mas as operações falham com
+erro de configuração. Como o Admin SDK não passa pelas regras do Firestore, a
+criação de usuário funciona mesmo antes de publicar `firestore.rules`.
+
 ## Modelo de segurança
 
 Esconder um botão na tela não é segurança. O bloqueio real está em três camadas:
@@ -421,6 +472,7 @@ sessões anteriores daquele usuário.
 - [ ] `npm run check:documents` sem falhas
 - [ ] `npm run check:import` sem falhas
 - [ ] `npm run check:cash` sem falhas
+- [ ] `npm run check:permissions` sem falhas
 - [ ] `npm run build` conclui sem erros
 - [ ] Variáveis `VITE_FIREBASE_*` configuradas no ambiente de produção
 - [ ] `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` e `INITIAL_SUPER_ADMIN_EMAIL` cadastradas

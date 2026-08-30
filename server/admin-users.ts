@@ -38,7 +38,7 @@ function roleValue(data: unknown): UserRole {
 
 function permissionValues(data: unknown, role: UserRole, employeeId: string): UserPermission[] {
   if (role === "Super Admin") return [...permissions];
-  if (!Array.isArray(data)) return defaultPermissionsForRole(role, employeeId);
+  if (!Array.isArray(data)) return defaultPermissionsForRole(role);
   return data.filter((item): item is UserPermission => typeof item === "string" && permissions.includes(item as UserPermission));
 }
 

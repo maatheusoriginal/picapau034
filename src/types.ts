@@ -124,16 +124,28 @@ export const allFirebasePermissions: FirebasePermission[] = [
   "customers.view", "customers.manage", "finance.view", "finance.manage", "team.view",
 ];
 
-export function defaultPermissionsForRole(role: UserRole, employeeId = ""): FirebasePermission[] {
+/**
+ * Permissões que o cargo recebe por padrão.
+ *
+ * É só um ponto de partida: quem cria o usuário marca e desmarca o que quiser
+ * na lista de permissões. Nada é concedido fora do que está aqui ou do que foi
+ * marcado à mão.
+ *
+ * Não existe exceção por funcionário. Havia uma — o mecânico de id "USR-003"
+ * ganhava "abrir OS" e "ver equipe" automaticamente, o que fazia sentido para o
+ * Ronaldo dos dados de exemplo e para mais ninguém. Numa oficina de verdade
+ * esse id é outra pessoa qualquer, ou ninguém, e o efeito era um funcionário
+ * aparecer com permissão que o administrador não deu. Mecânico que precisa
+ * abrir OS recebe a permissão marcada na tela, onde fica visível.
+ */
+export function defaultPermissionsForRole(role: UserRole): FirebasePermission[] {
   if (role === "Super Admin") return [...allFirebasePermissions];
   if (role === "Balcão") return [
     "orders.view", "orders.create", "orders.update", "budgets.view",
     "pos.use", "quickService.use", "inventory.view", "inventory.manage",
     "customers.view", "customers.manage", "finance.view", "finance.manage",
   ];
-  const mechanicDefaults: FirebasePermission[] = ["orders.view", "orders.update", "budgets.view", "inventory.view", "customers.view"];
-  if (employeeId === "USR-003") mechanicDefaults.push("orders.create", "team.view");
-  return mechanicDefaults;
+  return ["orders.view", "orders.update", "budgets.view", "inventory.view", "customers.view"];
 }
 
 export function isMechanicUser(user: Partial<UserConfig>): boolean {
