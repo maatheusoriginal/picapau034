@@ -21,7 +21,11 @@ interface SettingsWorkspaceProps {
   partners: PartnerConfig[];
   setPartners: React.Dispatch<React.SetStateAction<PartnerConfig[]>>;
   notify: (msg: string) => void;
+  /** Aba aberta ao entrar na tela. O painel /admin usa isto para levar direto ao grupo escolhido. */
+  initialTab?: SettingsTab;
 }
+
+export type SettingsTab = "general" | "services" | "categories" | "payments" | "partners" | "stock" | "print";
 
 export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
   quickServices,
@@ -35,8 +39,9 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
   partners,
   setPartners,
   notify,
+  initialTab = "general",
 }) => {
-  const [activeTab, setActiveTab] = useState<"general" | "services" | "categories" | "payments" | "partners" | "stock" | "print">("general");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [isSavingGeneral, setIsSavingGeneral] = useState(false);
 
   // General Settings State

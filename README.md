@@ -92,6 +92,20 @@ firestore.rules      Regras de segurança do banco
 cargo são importados de lá pela interface **e** pelo servidor. Adicionar uma
 permissão em um lugar só não deixa mais front e back fora de sincronia.
 
+## Painel administrativo
+
+`/admin` abre o painel do Super Admin: o estado real do sistema (OS em aberto,
+recebido hoje, cadastros, estoque em alerta) e um atalho para cada grupo de
+configuração — usuários, oficina e OS, pagamentos, serviços rápidos, estoque,
+categorias, parceiros, impressão e fornecedores.
+
+Quando falta configurar algo essencial (dados da oficina, formas de pagamento,
+categorias ou serviços rápidos), o painel mostra a lista do que falta e leva
+direto à aba certa.
+
+O endereço funciona ao recarregar a página porque o Express devolve o
+`index.html` para qualquer caminho. Quem não é Super Admin cai na Visão geral.
+
 ## Como o dinheiro é contado
 
 Todos os números do financeiro saem de `src/finance.ts`, para as telas não

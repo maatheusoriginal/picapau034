@@ -3,6 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMechanicUser, serviceOrderStatuses, statusTone } from "../src/types";
 import { financeSummary, payableEntries, receivableEntries } from "../src/finance";
+import type { SettingsTab } from "../src/components/SettingsWorkspace";
 
 // Carregados sob demanda: cada um só é montado quando o diálogo/aba
 // correspondente é aberto (ver DialogRouter e a aba "Configurações" mais
@@ -85,6 +86,14 @@ const formatBRL = (value: number) => value.toLocaleString("pt-BR", { style: "cur
 const parseBRL = (value: string) => Number(value.replace(/[^\d,]/g, "").replace(",", ".")) || 0;
 const onlyDigits = (value: string) => value.replace(/\D/g, "");
 const normalizePlate = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7);
+/**
+ * O painel administrativo tem endereço próprio (/admin). Não há biblioteca de
+ * rotas no projeto: o Express devolve o index.html para qualquer caminho, então
+ * basta ler e escrever o pathname.
+ */
+const currentPath = () => window.location.pathname.replace(/\/+$/, "") || "/";
+const isAdminPath = () => currentPath() === "/admin";
+
 /**
  * Maior número já usado em ids do tipo `PREFIXO-0007`. Base para gerar o
  * próximo da sequência sem reaproveitar o id de um registro apagado.
@@ -1169,27 +1178,191 @@ function UserAccessWorkspace({
   );
 }
 
-function AdminWorkspace({ navigate }: { navigate: (destination: string) => void }) {
-  const sections = [
-    { icon: "users" as IconName, title: "Usuários e acessos", text: "Erasmo, Rayane e equipe da oficina", badge: "6 usuários" },
-    { icon: "wrench" as IconName, title: "Oficina e OS", text: "Numeração, prazos e fluxo de serviço", badge: "Configurado" },
-    { icon: "wallet" as IconName, title: "Caixa e pagamentos", text: "Formas, maquininhas e taxas", badge: "7 formas" },
-    { icon: "box" as IconName, title: "Produtos e estoque", text: "Categorias, unidades e alertas", badge: "12 alertas" },
-    { icon: "file" as IconName, title: "Impressão e WhatsApp", text: "Cupom térmico, A4 e mensagens", badge: "Elgin i9" },
-    { icon: "chart" as IconName, title: "Auditoria e suporte", text: "Histórico de alterações e saúde do sistema", badge: "Tudo certo" },
+/**
+ * Painel /admin: uma tela só, com o estado real do sistema e o caminho direto
+ * para cada grupo de configuração.
+ *
+ * A versão anterior era fachada — "Erasmo, Rayane e equipe da oficina",
+ * "6 usuários", "12 alertas", "Último backup Hoje, 02:15" eram textos fixos no
+ * código, e os seis cartões caíam todos na mesma tela de Configurações. Agora
+ * cada número vem dos dados e cada cartão abre a aba certa.
+ */
+function AdminWorkspace({
+  navigate,
+  openSettings,
+  settings,
+  users,
+  products,
+  orders,
+  clients,
+  motorcycles,
+  sales,
+  expenses,
+  categories,
+  quickServices,
+  partners,
+  paymentMachines,
+  paymentMethods,
+  suppliers,
+}: {
+  navigate: (destination: string) => void;
+  openSettings: (tab: SettingsTab) => void;
+  settings: Partial<SettingsConfig> | null;
+  users: UserConfig[];
+  products: ProductRecord[];
+  orders: OrderRecord[];
+  clients: ClientRecord[];
+  motorcycles: MotorcycleRecord[];
+  sales: SaleRecord[];
+  expenses: ExpenseRecord[];
+  categories: CategoryConfig[];
+  quickServices: QuickServiceConfig[];
+  partners: PartnerConfig[];
+  paymentMachines: PaymentMachineConfig[];
+  paymentMethods: PaymentMethodConfig[];
+  suppliers: SupplierConfig[];
+}) {
+  const summary = useMemo(() => financeSummary(sales, orders, expenses), [sales, orders, expenses]);
+  const activeUsers = users.filter((user) => user.active !== false);
+  const lowStock = products.filter((product) => product.stock <= product.minimum);
+  const openOrders = orders.filter((order) => !order.closed && order.status !== "Entrega");
+  const activeMethods = paymentMethods.filter((method) => method.active);
+  const activeMachines = paymentMachines.filter((machine) => machine.active);
+  const activeQuickServices = quickServices.filter((service) => service.active);
+  const activePartners = partners.filter((partner) => partner.active);
+  const osPrefix = settings?.osPrefix || "OS";
+
+  // O que ainda falta configurar para a oficina operar sem tropeço. Substitui o
+  // selo "Sistema funcionando normalmente", que estava sempre verde.
+  const pending = [
+    !settings?.workshopName ? { label: "Dados da oficina", tab: "general" as SettingsTab } : null,
+    !activeMethods.length ? { label: "Formas de pagamento", tab: "payments" as SettingsTab } : null,
+    !categories.length ? { label: "Categorias", tab: "categories" as SettingsTab } : null,
+    !activeQuickServices.length ? { label: "Serviços rápidos", tab: "services" as SettingsTab } : null,
+  ].filter((item): item is { label: string; tab: SettingsTab } => item !== null);
+
+  const sections: Array<{ icon: IconName; title: string; text: string; badge: string; onOpen: () => void }> = [
+    {
+      icon: "users", title: "Usuários e acessos",
+      text: "Contas, perfis e permissões de cada funcionário",
+      badge: `${activeUsers.length} de ${users.length} ativo${users.length === 1 ? "" : "s"}`,
+      onOpen: () => navigate("Usuários e acessos"),
+    },
+    {
+      icon: "wrench", title: "Oficina e OS",
+      text: "Dados da oficina, numeração das OS, garantia e prazos",
+      badge: `Prefixo ${osPrefix} · próxima ${orders.length + 1}`,
+      onOpen: () => openSettings("general"),
+    },
+    {
+      icon: "wallet", title: "Pagamentos e taxas",
+      text: "Formas de recebimento, maquininhas e taxas por bandeira",
+      badge: `${activeMethods.length} forma${activeMethods.length === 1 ? "" : "s"} · ${activeMachines.length} maquininha${activeMachines.length === 1 ? "" : "s"}`,
+      onOpen: () => openSettings("payments"),
+    },
+    {
+      icon: "clock", title: "Serviços rápidos",
+      text: "Atendimentos expressos com preço de mão de obra fixo",
+      badge: `${activeQuickServices.length} ativo${activeQuickServices.length === 1 ? "" : "s"}`,
+      onOpen: () => openSettings("services"),
+    },
+    {
+      icon: "box", title: "Estoque e reposição",
+      text: "Estoque mínimo, unidades, markup e regras de venda",
+      badge: lowStock.length ? `${lowStock.length} item(ns) em alerta` : "Estoque regularizado",
+      onOpen: () => openSettings("stock"),
+    },
+    {
+      icon: "file", title: "Categorias",
+      text: "Categorias de serviços, produtos e despesas",
+      badge: `${categories.length} cadastrada${categories.length === 1 ? "" : "s"}`,
+      onOpen: () => openSettings("categories"),
+    },
+    {
+      icon: "users", title: "Parceiros e frotas",
+      text: "Empresas que encaminham motos e o desconto de cada uma",
+      badge: `${activePartners.length} ativo${activePartners.length === 1 ? "" : "s"}`,
+      onOpen: () => openSettings("partners"),
+    },
+    {
+      icon: "printer", title: "Impressão e WhatsApp",
+      text: "Cupom térmico, vias impressas e mensagem padrão",
+      badge: settings?.thermalPrinter || "Não configurada",
+      onOpen: () => openSettings("print"),
+    },
+    {
+      icon: "box", title: "Fornecedores",
+      text: "Contatos, prazos e condições de compra",
+      badge: `${suppliers.filter((supplier) => supplier.active).length} ativo${suppliers.filter((supplier) => supplier.active).length === 1 ? "" : "s"}`,
+      onOpen: () => navigate("Fornecedores"),
+    },
   ];
+
   return (
     <>
       <div className="module-heading">
-        <div><p>Administração</p><h1>Painel administrativo</h1><span>Configurações objetivas, agrupadas pelo que você quer resolver.</span></div>
-        <span className="system-healthy"><i/><b>Sistema funcionando normalmente</b></span>
+        <div><p>Administração</p><h1>Painel administrativo</h1><span>O estado do sistema e todas as configurações, agrupadas pelo que você quer resolver.</span></div>
+        {pending.length
+          ? <span className="system-healthy pending"><i/><b>{pending.length} item(ns) a configurar</b></span>
+          : <span className="system-healthy"><i/><b>Configuração completa</b></span>}
       </div>
+
+      {pending.length ? (
+        <div className="admin-pending" role="status">
+          <Icon name="alert" size={18}/>
+          <div>
+            <strong>Falta configurar antes de usar no dia a dia</strong>
+            <small>Sem isso, algumas telas abrem sem opção para escolher.</small>
+          </div>
+          <div className="admin-pending-actions">
+            {pending.map((item) => (
+              <button key={item.label} onClick={() => openSettings(item.tab)}>{item.label}</button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="admin-overview">
-        <section className="admin-welcome"><span className="admin-shield">PP</span><div><small>Ambiente principal</small><h2>Pica Pau Motos</h2><p>Uberlândia · Oficina e motopeças</p></div><button onClick={() => navigate("Configurações")}>Editar dados</button></section>
-        <div className="admin-mini-stats"><article><span>Último backup</span><strong>Hoje, 02:15</strong><small>Concluído com sucesso</small></article><article><span>Usuários conectados</span><strong>3 agora</strong><small>Erasmo, Rayane e Ronaldo</small></article></div>
+        <section className="admin-welcome">
+          <span className="admin-shield">PP</span>
+          <div>
+            <small>Ambiente principal</small>
+            <h2>{settings?.workshopName || "Pica Pau Motos"}</h2>
+            <p>{[settings?.cnpj, settings?.phone, settings?.address].filter(Boolean).join(" · ") || "Complete os dados da oficina em Oficina e OS"}</p>
+          </div>
+          <button onClick={() => openSettings("general")}>Editar dados</button>
+        </section>
+        <div className="admin-mini-stats">
+          <article>
+            <span>OS em aberto</span>
+            <strong>{openOrders.length}</strong>
+            <small>{summary.closedOrders} encerrada{summary.closedOrders === 1 ? "" : "s"}</small>
+          </article>
+          <article>
+            <span>Recebido hoje</span>
+            <strong>{formatBRL(summary.receivedToday)}</strong>
+            <small>{summary.salesTodayCount} movimentação(ões)</small>
+          </article>
+          <article>
+            <span>Cadastros</span>
+            <strong>{clients.length} cliente{clients.length === 1 ? "" : "s"}</strong>
+            <small>{motorcycles.length} moto(s) · {products.length} produto(s)</small>
+          </article>
+          <article>
+            <span>Estoque em alerta</span>
+            <strong>{lowStock.length}</strong>
+            <small>{products.filter((product) => product.stock === 0).length} zerado(s)</small>
+          </article>
+        </div>
       </div>
+
       <div className="settings-grid">{sections.map((section) => (
-        <button key={section.title} onClick={() => navigate(section.title === "Usuários e acessos" ? "Usuários e acessos" : "Configurações")}><span className="setting-icon"><Icon name={section.icon}/></span><div><strong>{section.title}</strong><small>{section.text}</small></div><b>{section.badge}</b><Icon name="arrow" size={17}/></button>
+        <button key={section.title} onClick={section.onOpen}>
+          <span className="setting-icon"><Icon name={section.icon}/></span>
+          <div><strong>{section.title}</strong><small>{section.text}</small></div>
+          <b>{section.badge}</b>
+          <Icon name="arrow" size={17}/>
+        </button>
       ))}</div>
     </>
   );
@@ -1226,6 +1399,9 @@ function ModuleWorkspace({
   cart,
   setCart,
   sales,
+  openSettings,
+  settingsTab,
+  settings,
   motorcycles,
 }: {
   active: string;
@@ -1258,6 +1434,9 @@ function ModuleWorkspace({
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   sales: SaleRecord[];
+  openSettings: (tab: SettingsTab) => void;
+  settingsTab: SettingsTab;
+  settings: Partial<SettingsConfig> | null;
   motorcycles: MotorcycleRecord[];
 }) {
   const [query, setQuery] = useState("");
@@ -1272,10 +1451,10 @@ function ModuleWorkspace({
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
   if (active === "Configurações") return (
     <Suspense fallback={<LazyFallback />}>
-      <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify}/>
+      <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify} initialTab={settingsTab}/>
     </Suspense>
   );
-  if (active === "Administração") return <AdminWorkspace navigate={navigate} />;
+  if (active === "Administração") return <AdminWorkspace navigate={navigate} openSettings={openSettings} settings={settings} users={users} products={products} orders={orders} clients={clients} motorcycles={motorcycles} sales={sales} expenses={expenses} categories={categories} quickServices={quickServices} partners={partners} paymentMachines={paymentMachines} paymentMethods={paymentMethods} suppliers={suppliers}/>;
 
   if (active === "Ordens de serviço" || active === "Orçamentos") {
     const isBudget = active === "Orçamentos";
@@ -2694,13 +2873,22 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const canViewTeam = hasPermission("team.view");
   const canManageSettings = firebaseAdmin;
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [active, setActive] = useState("Visão geral");
+  // A tela inicial sai da URL de forma síncrona, no primeiro render: decidir
+  // isso em um efeito faria o endereço piscar /admin -> / -> /admin.
+  const [active, setActive] = useState(() => (canManageSettings && isAdminPath() ? "Administração" : "Visão geral"));
   const [dialog, setDialog] = useState<DialogKind>(null);
   // Qual OS o diálogo de detalhe deve abrir. Vazio = nenhuma selecionada.
   const [selectedOrderId, setSelectedOrderId] = useState("");
   // Carrinho do PDV: mora aqui porque a tela do balcão monta a venda e o
   // diálogo de pagamento a recebe.
   const [cart, setCart] = useState<CartItem[]>([]);
+  // Aba de Configurações a abrir. O painel /admin usa isto para levar direto
+  // ao grupo escolhido em vez de sempre cair na primeira aba.
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const openSettings = useCallback((tab: SettingsTab) => {
+    setSettingsTab(tab);
+    setActive("Configurações");
+  }, []);
   const [osStep, setOsStep] = useState(1);
   const [toast, setToast] = useState("");
   const [openGroup, setOpenGroup] = useState("Oficina");
@@ -2762,6 +2950,14 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
 
   // Os cartões de dinheiro da Visão geral eram "R$ 0,00" escritos no código.
   const summary = useMemo(() => financeSummary(sales, orders, expenses), [sales, orders, expenses]);
+
+  // A barra de endereços acompanha a navegação: /admin no painel administrativo,
+  // / no resto. Quem abre /admin sem ser Super Admin volta para a raiz, em vez
+  // de ficar com a URL prometendo uma tela que não vai abrir.
+  useEffect(() => {
+    const path = active === "Administração" && canManageSettings ? "/admin" : "/";
+    if (currentPath() !== path) window.history.replaceState(null, "", path + window.location.search);
+  }, [active, canManageSettings]);
 
   // A topbar sempre anunciou o atalho no badge "Ctrl K", mas nada o escutava.
   // Esc fecha a busca sem precisar do mouse.
@@ -3004,7 +3200,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} sales={sales}/>
+            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} sales={sales} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>
