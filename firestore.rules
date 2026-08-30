@@ -100,6 +100,52 @@ service cloud.firestore {
       allow create, update, delete: if can('customers.manage');
     }
 
+    // Vendas do balcão e serviços rápidos. Quem opera o PDV registra a venda;
+    // corrigir ou apagar uma venda já registrada é do financeiro.
+    match /sales/{documentId} {
+      allow read: if can('finance.view') || can('pos.use') || can('quickService.use');
+      allow create: if can('pos.use') || can('quickService.use');
+      allow update, delete: if can('finance.manage');
+    }
+
+    // Entradas de estoque (compras de peças). Quem gerencia o estoque registra;
+    // corrigir ou apagar uma entrada já registrada é do financeiro, porque ela
+    // mexeu no custo das peças.
+    match /stockEntries/{documentId} {
+      allow read: if can('inventory.view') || can('finance.view');
+      allow create: if can('inventory.manage');
+      allow update, delete: if can('finance.manage');
+    }
+
+    // Contas a receber e a pagar. Quem cuida do financeiro lança e dá baixa;
+    // quem só consulta o financeiro enxerga sem poder mexer.
+    match /accounts/{documentId} {
+      allow read: if can('finance.view');
+      allow create, update, delete: if can('finance.manage');
+    }
+
+    // Movimentações de dinheiro lançadas à mão (sucata, aporte, frete pago na
+    // hora). Mexem no saldo e no caixa, então são do financeiro.
+    match /movements/{documentId} {
+      allow read: if can('finance.view');
+      allow create, update: if can('finance.manage');
+      allow delete: if isSuperAdmin();
+    }
+
+    // Sessões de caixa: abertura, suprimento, sangria e fechamento.
+    // É o dinheiro físico da gaveta, então quem cuida do financeiro é quem
+    // abre, movimenta e fecha. Quem opera o PDV consegue ler para saber se o
+    // caixa está aberto, mas não mexe na conferência.
+    //
+    // Apagar é só do Super Admin de propósito: a conferência de um caixa
+    // fechado é o registro de uma falta ou sobra, e quem causou a falta é
+    // exatamente quem teria motivo para apagá-la.
+    match /cashSessions/{documentId} {
+      allow read: if can('finance.view') || can('pos.use');
+      allow create, update: if can('finance.manage');
+      allow delete: if isSuperAdmin();
+    }
+
     match /expenses/{documentId} {
       allow read: if can('finance.view');
       allow create, update, delete: if can('finance.manage');

@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from "react";
 import type {
   CategoryConfig,
+  CategoryGroup,
   PartnerConfig,
   PaymentMachineConfig,
   PaymentMethodConfig,
   QuickServiceConfig,
   SettingsConfig,
+  SystemLists,
 } from "../types";
+import { categoryGroups, defaultSystemLists, systemList, systemListLabels } from "../types";
 import { saveFirestoreDoc, deleteFirestoreDoc, observeFirestoreDoc } from "../../app/firebase/client";
 
 interface SettingsWorkspaceProps {
@@ -21,7 +24,11 @@ interface SettingsWorkspaceProps {
   partners: PartnerConfig[];
   setPartners: React.Dispatch<React.SetStateAction<PartnerConfig[]>>;
   notify: (msg: string) => void;
+  /** Aba aberta ao entrar na tela. O painel /admin usa isto para levar direto ao grupo escolhido. */
+  initialTab?: SettingsTab;
 }
+
+export type SettingsTab = "general" | "services" | "categories" | "payments" | "partners" | "stock" | "print" | "lists";
 
 export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
   quickServices,
@@ -35,8 +42,9 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
   partners,
   setPartners,
   notify,
+  initialTab = "general",
 }) => {
-  const [activeTab, setActiveTab] = useState<"general" | "services" | "categories" | "payments" | "partners" | "stock" | "print">("general");
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [isSavingGeneral, setIsSavingGeneral] = useState(false);
 
   // General Settings State
@@ -60,6 +68,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
     blockZeroStockSale: false,
     deductStockOnlyWhenUsed: true,
     useAverageCost: false,
+    pricingMode: "fixed",
     thermalPrinter: "Elgin i9 / Não Fiscal",
     printFormat: "Cupom 80mm",
     printThreeCopies: true,
@@ -75,6 +84,59 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
     });
     return () => unsub();
   }, []);
+
+  // Listas do sistema (unidades, marcas, contas, prioridades...). Ficam em
+  // settings/lists, ao lado de settings/global.
+  const [lists, setLists] = useState<SystemLists>(defaultSystemLists);
+  const [isSavingLists, setIsSavingLists] = useState(false);
+  const [newListItem, setNewListItem] = useState<Partial<Record<keyof SystemLists, string>>>({});
+
+  useEffect(() => {
+    const unsub = observeFirestoreDoc<Partial<SystemLists>>("settings", "lists", (data) => {
+      if (!data) return;
+      setLists((prev) => {
+        const next = { ...prev };
+        (Object.keys(defaultSystemLists) as (keyof SystemLists)[]).forEach((key) => {
+          next[key] = systemList(data, key);
+        });
+        return next;
+      });
+    });
+    return () => unsub();
+  }, []);
+
+  const addListItem = (key: keyof SystemLists) => {
+    const value = (newListItem[key] ?? "").trim();
+    if (!value) return;
+    if (lists[key].some((item) => item.toLowerCase() === value.toLowerCase())) {
+      notify(`"${value}" já está na lista.`);
+      return;
+    }
+    setLists({ ...lists, [key]: [...lists[key], value] });
+    setNewListItem({ ...newListItem, [key]: "" });
+  };
+
+  const removeListItem = (key: keyof SystemLists, value: string) => {
+    if (lists[key].length <= 1) {
+      notify("A lista precisa ter ao menos uma opção.");
+      return;
+    }
+    setLists({ ...lists, [key]: lists[key].filter((item) => item !== value) });
+  };
+
+  const handleSaveLists = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingLists(true);
+    try {
+      await saveFirestoreDoc("settings", "lists", lists);
+      notify("Listas do sistema salvas com sucesso!");
+    } catch (err: unknown) {
+      console.error("Erro ao salvar listas:", err);
+      notify("Erro ao salvar as listas do sistema.");
+    } finally {
+      setIsSavingLists(false);
+    }
+  };
 
   const handleSaveGeneral = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,7 +231,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
   const [editingCategory, setEditingCategory] = useState<CategoryConfig | null>(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [catName, setCatName] = useState("");
-  const [catGroup, setCatGroup] = useState<"Serviços" | "Produtos" | "Despesas">("Produtos");
+  const [catGroup, setCatGroup] = useState<CategoryGroup>("Produtos");
   const [catActive, setCatActive] = useState(true);
 
   const openCategoryModal = (cat?: CategoryConfig) => {
@@ -443,6 +505,13 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
           onClick={() => setActiveTab("print")}
         >
           Impressão & WhatsApp
+        </button>
+        <button
+          type="button"
+          className={`settings-tab-button ${activeTab === "lists" ? "active" : ""}`}
+          onClick={() => setActiveTab("lists")}
+        >
+          Listas do sistema
         </button>
       </div>
 
@@ -907,20 +976,53 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
               </label>
 
               <label className="settings-field">
+                <span className="settings-field-label">Modo de Precificação</span>
+                <select
+                  value={generalSettings.pricingMode ?? "fixed"}
+                  onChange={(e) => setGeneralSettings({ ...generalSettings, pricingMode: e.target.value as "markup" | "fixed" })}
+                  className="settings-select"
+                >
+                  <option value="fixed">Preço digitado à mão</option>
+                  <option value="markup">Preço calculado pela margem</option>
+                </select>
+                <span className="settings-hint">
+                  {generalSettings.pricingMode === "markup"
+                    ? "O preço de venda fica travado em custo + margem, sem risco de vender abaixo do custo."
+                    : "O preço é digitado no cadastro da peça e a margem apenas acompanha."}
+                </span>
+              </label>
+
+              <label className="settings-field">
+                <span className="settings-field-label">Custo das Peças</span>
+                <select
+                  value={generalSettings.useAverageCost ? "average" : "last"}
+                  onChange={(e) => setGeneralSettings({ ...generalSettings, useAverageCost: e.target.value === "average" })}
+                  className="settings-select"
+                >
+                  <option value="last">Último preço pago</option>
+                  <option value="average">Custo médio ponderado</option>
+                </select>
+                <span className="settings-hint">
+                  {generalSettings.useAverageCost
+                    ? "Cada entrada de estoque faz a média com o que já havia na prateleira: 10 peças a R$ 10 mais 10 a R$ 20 dão custo de R$ 15."
+                    : "Cada entrada de estoque substitui o custo da peça pelo preço da compra mais recente."}
+                </span>
+              </label>
+
+              <label className="settings-field">
                 <span className="settings-field-label">Unidade de Medida Padrão</span>
                 <select
                   value={generalSettings.defaultUnit}
                   onChange={(e) => setGeneralSettings({ ...generalSettings, defaultUnit: e.target.value })}
                   className="settings-select"
                 >
-                  <option value="UN">Unidade (UN)</option>
-                  <option value="LT">Litro (LT)</option>
-                  <option value="PC">Peça (PC)</option>
-                  <option value="PAR">Par (PAR)</option>
-                  <option value="JG">Jogo (JG)</option>
-                  <option value="MT">Metro (MT)</option>
+                  {/* A lista vem da aba "Listas do sistema". Antes esta lista e a do
+                      cadastro de produto eram fixas e diferentes entre si (JG/MT aqui,
+                      JOGO/KG/M lá), então a unidade padrão escolhida aqui podia nem
+                      existir como opção na hora de cadastrar a peça. */}
+                  {lists.units.map((unit) => <option value={unit} key={unit}>{unit}</option>)}
                 </select>
-                <span className="settings-hint">Unidade pré-selecionada no cadastro de peças</span>
+                <span className="settings-hint">Unidade pré-selecionada no cadastro de peças. Edite a lista em "Listas do sistema".</span>
               </label>
             </div>
 
@@ -1167,12 +1269,19 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                   <span className="settings-field-label">Módulo / Grupo</span>
                   <select
                     value={catGroup}
-                    onChange={(e) => setCatGroup(e.target.value as "Serviços" | "Produtos" | "Despesas")}
+                    onChange={(e) => setCatGroup(e.target.value as CategoryGroup)}
                     className="settings-select"
                   >
-                    <option value="Produtos">Produtos (Estoque)</option>
-                    <option value="Serviços">Serviços (Oficina)</option>
-                    <option value="Despesas">Despesas (Financeiro)</option>
+                    {/* A lista sai de categoryGroups para não sair de sincronia
+                        com o tipo quando um grupo novo entrar. */}
+                    {categoryGroups.map((group) => (
+                      <option value={group} key={group}>
+                        {group === "Produtos" ? "Produtos (Estoque)"
+                          : group === "Serviços" ? "Serviços (Oficina)"
+                          : group === "Despesas" ? "Despesas (Financeiro)"
+                          : "Receitas (Entradas)"}
+                      </option>
+                    ))}
                   </select>
                 </label>
 
@@ -1396,6 +1505,67 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
             </form>
           </section>
         </div>
+      )}
+
+      {/* TAB 8: LISTAS DO SISTEMA */}
+      {activeTab === "lists" && (
+        <form onSubmit={handleSaveLists} className="settings-card">
+          <div className="settings-card-header">
+            <div>
+              <h2>Listas do Sistema</h2>
+              <p>As opções que aparecem nos campos de escolha do sistema inteiro</p>
+            </div>
+            <button type="submit" className="primary-button" disabled={isSavingLists}>
+              {isSavingLists ? "Salvando..." : "Salvar Alterações"}
+            </button>
+          </div>
+
+          <div className="settings-card-body">
+            <div className="settings-list-grid">
+              {(Object.keys(defaultSystemLists) as (keyof SystemLists)[]).map((key) => (
+                <section className="settings-list-block" key={key}>
+                  <div className="settings-list-head">
+                    <strong>{systemListLabels[key].title}</strong>
+                    <small>{systemListLabels[key].hint}</small>
+                  </div>
+                  <div className="settings-chips">
+                    {lists[key].map((item) => (
+                      <span className="settings-chip" key={item}>
+                        {item}
+                        <button
+                          type="button"
+                          onClick={() => removeListItem(key, item)}
+                          aria-label={`Remover ${item}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="settings-chip-add">
+                    <input
+                      value={newListItem[key] ?? ""}
+                      onChange={(e) => setNewListItem({ ...newListItem, [key]: e.target.value })}
+                      onKeyDown={(e) => {
+                        // Enter adiciona o item em vez de enviar o formulário
+                        // inteiro, que salvaria sem o que acabou de ser digitado.
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addListItem(key);
+                        }
+                      }}
+                      placeholder={systemListLabels[key].placeholder}
+                      className="dialog-input"
+                    />
+                    <button type="button" className="outline-button" onClick={() => addListItem(key)}>
+                      Adicionar
+                    </button>
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
+        </form>
       )}
     </div>
   );

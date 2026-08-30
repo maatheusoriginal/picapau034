@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from "react";
-import type { CategoryConfig, ProductRecord, SupplierConfig } from "../types";
+import React, { useEffect, useMemo, useState } from "react";
+import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsConfig, StockEntryRecord, SupplierConfig } from "../types";
+import { defaultSystemLists } from "../types";
+import { markupFromPrice, movementTotals, priceFromMarkup, productMovements } from "../inventory";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 
 interface ProductFormModalProps {
@@ -11,6 +13,16 @@ interface ProductFormModalProps {
   suppliers: SupplierConfig[];
   notify: (msg: string) => void;
   allProducts: ProductRecord[];
+  /** Unidades configuradas em Configurações → Listas do sistema. */
+  units?: string[];
+  /** Padrões da oficina (markup sugerido, estoque mínimo, unidade e modo de preço). */
+  settings?: Partial<SettingsConfig> | null;
+  /** Compras, vendas e OS, para montar o histórico da peça. */
+  movementSources?: {
+    stockEntries?: StockEntryRecord[];
+    sales?: SaleRecord[];
+    orders?: OrderRecord[];
+  };
 }
 
 export const ProductFormModal: React.FC<ProductFormModalProps> = ({
@@ -22,8 +34,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   suppliers,
   notify,
   allProducts,
+  units = [],
+  settings = null,
+  movementSources,
 }) => {
-  const [activeTab, setActiveTab] = useState<"ident" | "prices" | "stock" | "compat" | "extra">("ident");
+  const [activeTab, setActiveTab] = useState<"ident" | "prices" | "stock" | "compat" | "extra" | "history">("ident");
   const [isSaving, setIsSaving] = useState(false);
 
   // Form State
@@ -55,6 +70,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     .filter((c) => c.group === "Produtos" && c.active !== false)
     .map((c) => c.name);
 
+  const money = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const unitOptions = units.length ? units : defaultSystemLists.units;
+  const movements = useMemo(
+    () => (editingProduct ? productMovements(editingProduct.id, movementSources ?? {}) : []),
+    [editingProduct, movementSources],
+  );
+  const totals = useMemo(() => movementTotals(movements), [movements]);
   const defaultCategories = productCategories.length > 0
     ? productCategories
     : ["Motor e Transmissão", "Freios e Rodas", "Elétrica e Ignição", "Suspensão e Direção", "Lubrificantes e Fluidos", "Pneus e Câmaras", "Acessórios e Carenagens", "Cabos e Relação", "Filtros"];
@@ -70,7 +92,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setPartNumber(editingProduct.partNumber || "");
       setCategory(editingProduct.category || defaultCategories[0] || "Peças");
       setBrand(editingProduct.brand || "");
-      setUnit(editingProduct.unit || "UN");
+      setUnit(editingProduct.unit || settings?.defaultUnit || "UN");
       setLocation(editingProduct.location || "");
 
       const parsedCost = typeof editingProduct.cost === "number" ? editingProduct.cost : Number(String(editingProduct.cost).replace(/[^\d,.]/g, "").replace(",", ".")) || 0;
@@ -83,11 +105,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         const calculatedMarkup = Math.round(((parsedPrice - parsedCost) / parsedCost) * 100);
         setMarkup(calculatedMarkup);
       } else {
-        setMarkup(editingProduct.markup ?? 45);
+        setMarkup(editingProduct.markup ?? settings?.suggestedMarkup ?? 45);
       }
 
       setStock(editingProduct.stock ?? 0);
-      setMinimum(editingProduct.minimum ?? 2);
+      setMinimum(editingProduct.minimum ?? settings?.defaultMinStock ?? 2);
       setMaximum(editingProduct.maximum ?? 20);
       setAlertLowStock(editingProduct.alertLowStock !== false);
       setCompatibility(editingProduct.compatibility || "");
@@ -105,13 +127,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setPartNumber("");
       setCategory(defaultCategories[0] || "Peças");
       setBrand("");
-      setUnit("UN");
+      setUnit(settings?.defaultUnit || unitOptions[0] || "UN");
       setLocation("");
       setCost(0);
-      setMarkup(45);
+      setMarkup(settings?.suggestedMarkup ?? 45);
       setPrice(0);
       setStock(0);
-      setMinimum(2);
+      setMinimum(settings?.defaultMinStock ?? 2);
       setMaximum(20);
       setAlertLowStock(true);
       setCompatibility("");
@@ -120,31 +142,29 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setActive(true);
     }
     setActiveTab("ident");
-  }, [isOpen, editingProduct, allProducts.length]);
+  }, [isOpen, editingProduct, allProducts.length, settings?.defaultUnit, settings?.suggestedMarkup, settings?.defaultMinStock]);
 
-  // Recalculate price when cost or markup change
+  // "markup": o preço de venda é sempre custo + margem, e o campo fica travado —
+  // é a configuração que garante a margem e impede vender abaixo do custo por
+  // um erro de digitação. "fixed": o preço é digitado à mão e a margem apenas
+  // acompanha. Definido em Configurações → Estoque & Reposição.
+  const pricingMode = settings?.pricingMode ?? "fixed";
+  const priceFollowsMarkup = pricingMode === "markup";
+
   const handleCostChange = (newCost: number) => {
     setCost(newCost);
-    if (newCost > 0) {
-      const calculatedPrice = Number((newCost * (1 + markup / 100)).toFixed(2));
-      setPrice(calculatedPrice);
-    }
+    if (newCost > 0) setPrice(priceFromMarkup(newCost, markup));
   };
 
   const handleMarkupChange = (newMarkup: number) => {
     setMarkup(newMarkup);
-    if (cost > 0) {
-      const calculatedPrice = Number((cost * (1 + newMarkup / 100)).toFixed(2));
-      setPrice(calculatedPrice);
-    }
+    if (cost > 0) setPrice(priceFromMarkup(cost, newMarkup));
   };
 
   const handlePriceChange = (newPrice: number) => {
+    if (priceFollowsMarkup) return;
     setPrice(newPrice);
-    if (cost > 0 && newPrice >= cost) {
-      const calculatedMarkup = Math.round(((newPrice - cost) / cost) * 100);
-      setMarkup(calculatedMarkup);
-    }
+    if (cost > 0 && newPrice >= cost) setMarkup(markupFromPrice(cost, newPrice));
   };
 
   const applyQuickMarkup = (quickMarkup: number) => {
@@ -208,9 +228,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         brand: productData.brand,
         unit: productData.unit,
         location: productData.location,
-        cost: cost,
+        // Texto em reais, não o número cru: o tipo ProductRecord declara
+        // cost/price como string, a tabela de estoque imprime o valor direto
+        // ("R$ 45,00") e a entrada de mercadoria grava no mesmo formato.
+        // Gravando número, o produto voltava do Firestore como "45".
+        cost: productData.cost,
         markup: productData.markup,
-        price: price,
+        price: productData.price,
         stock: productData.stock,
         minimum: productData.minimum,
         maximum: productData.maximum,
@@ -264,6 +288,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           <button type="button" className={`dialog-tab ${activeTab === "extra" ? "active" : ""}`} onClick={() => setActiveTab("extra")}>
             5. Fornecedor & Obs
           </button>
+          {/* Só faz sentido em peça já cadastrada: produto novo não tem histórico. */}
+          {editingProduct ? (
+            <button type="button" className={`dialog-tab ${activeTab === "history" ? "active" : ""}`} onClick={() => setActiveTab("history")}>
+              6. Movimentação {movements.length ? <b>{movements.length}</b> : null}
+            </button>
+          ) : null}
         </div>
 
         <form onSubmit={handleSubmit} className="dialog-body">
@@ -348,13 +378,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     onChange={(e) => setUnit(e.target.value)}
                     className="dialog-select"
                   >
-                    <option value="UN">Unidade (UN)</option>
-                    <option value="LT">Litro (LT)</option>
-                    <option value="PC">Peça (PC)</option>
-                    <option value="PAR">Par (PAR)</option>
-                    <option value="JOGO">Jogo / Kit (JOGO)</option>
-                    <option value="KG">Quilo (KG)</option>
-                    <option value="M">Metro (M)</option>
+                    {/* Lista vinda de Configurações -> Listas do sistema. Antes era
+                        fixa aqui e diferente da lista de Configurações, então a
+                        unidade padrão escolhida pelo dono podia nem aparecer. */}
+                    {unitOptions.map((option) => <option value={option} key={option}>{option}</option>)}
                   </select>
                 </label>
                 <label className="field-group">
@@ -423,8 +450,12 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                       value={price === 0 ? "" : price}
                       onChange={(e) => handlePriceChange(parseFloat(e.target.value) || 0)}
                       placeholder="0,00"
-                      className="dialog-input bold-number highlight-price"
+                      readOnly={priceFollowsMarkup}
+                      className={`dialog-input bold-number highlight-price ${priceFollowsMarkup ? "is-derived" : ""}`}
                     />
+                    {priceFollowsMarkup ? (
+                      <small className="field-help">Calculado pelo custo e pela margem. Para digitar o preço à mão, mude o modo de precificação em Configurações.</small>
+                    ) : null}
                   </label>
                 </div>
 
@@ -572,6 +603,45 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             </div>
           )}
 
+          {/* TAB 6: MOVIMENTAÇÃO */}
+          {activeTab === "history" && (
+            <div className="form-section-stack">
+              <div className="module-summary">
+                <article><span>Entrou</span><strong>{totals.inboundQuantity} un.</strong><small>{money(totals.inboundValue)} em compras</small></article>
+                <article><span>Saiu</span><strong>{totals.outboundQuantity} un.</strong><small>{money(totals.outboundValue)} em vendas e OS</small></article>
+                <article><span>Em estoque agora</span><strong>{stock} un.</strong><small>Mínimo de {minimum} un.</small></article>
+              </div>
+
+              {movements.length ? (
+                <div className="table-scroll">
+                  <table>
+                    <thead><tr><th>Documento</th><th>Origem</th><th>Data</th><th>Qtd.</th><th>Unitário</th><th>Total</th></tr></thead>
+                    <tbody>
+                      {movements.map((movement, index) => (
+                        <tr key={`${movement.documentId}-${index}`}>
+                          <td><strong className="order-id">{movement.documentId}</strong><span>{movement.detail}</span></td>
+                          <td><span className={`status ${movement.quantity > 0 ? "green" : "blue"}`}><i/>{movement.kind}</span></td>
+                          <td>{movement.date || "—"}</td>
+                          <td className="mono"><strong>{movement.quantity > 0 ? `+${movement.quantity}` : movement.quantity}</strong></td>
+                          <td className="mono">{money(movement.unitValue)}</td>
+                          <td className="mono">{money(Math.abs(movement.total))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="empty-panel">
+                  <span>Nenhuma movimentação registrada para esta peça ainda.</span>
+                </div>
+              )}
+
+              <span className="settings-hint">
+                As saídas por ordem de serviço aparecem quando a peça é realmente baixada do estoque — uma OS ainda em orçamento não conta.
+              </span>
+            </div>
+          )}
+
           {/* Dialog Footer Actions */}
           <div className="dialog-actions-row">
             <button
@@ -583,27 +653,29 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               Cancelar
             </button>
             <div style={{ display: "flex", gap: "8px" }}>
-              {activeTab !== "ident" && (
+              {activeTab !== "ident" && activeTab !== "history" && (
                 <button
                   type="button"
                   className="outline-button"
                   onClick={() => {
-                    const tabs: Array<"ident" | "prices" | "stock" | "compat" | "extra"> = ["ident", "prices", "stock", "compat", "extra"];
+                    // A aba de movimentação fica fora: é leitura, não etapa do cadastro.
+                    const tabs = ["ident", "prices", "stock", "compat", "extra"] as const;
                     const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx > 0) setActiveTab(tabs[currIdx - 1]);
+                    if (currIdx > 0) setActiveTab(tabs[currIdx - 1]!);
                   }}
                 >
                   Anterior
                 </button>
               )}
-              {activeTab !== "extra" ? (
+              {activeTab !== "extra" && activeTab !== "history" ? (
                 <button
                   type="button"
                   className="primary-button"
                   onClick={() => {
-                    const tabs: Array<"ident" | "prices" | "stock" | "compat" | "extra"> = ["ident", "prices", "stock", "compat", "extra"];
+                    // A aba de movimentação fica fora: é leitura, não etapa do cadastro.
+                    const tabs = ["ident", "prices", "stock", "compat", "extra"] as const;
                     const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx < tabs.length - 1) setActiveTab(tabs[currIdx + 1]);
+                    if (currIdx < tabs.length - 1) setActiveTab(tabs[currIdx + 1]!);
                   }}
                 >
                   Próxima etapa →

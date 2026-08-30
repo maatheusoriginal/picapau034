@@ -299,6 +299,8 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .summary-lines > div { display: flex; align-items: center; justify-content: space-between; color: #747579; font-size: 9px; }
 .summary-lines b { color: #45464a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .summary-lines button { padding: 0; border: 0; background: transparent; color: var(--red); font-size: 8px; font-weight: 750; }
+/* Campo do desconto no resumo da venda. Mesmos valores do input compacto de .config-record, para não destoar do resto. */
+.summary-discount-input { width: 92px; height: 26px; padding: 0 7px; border: 1px solid #deddda; border-radius: 7px; outline: 0; background: white; color: #55565a; font: inherit; font-size: 8px; text-align: right; }
 .grand-total { padding: 18px 0; }
 .grand-total span, .grand-total strong { display: block; }
 .grand-total span { color: #6f7074; font-size: 9px; }
@@ -335,6 +337,17 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 
 .system-healthy { display: flex !important; align-items: center; gap: 8px; margin: 0 !important; padding: 9px 12px; border: 1px solid #cde7d8; border-radius: 9px; background: #f1faf5; color: #3c725c !important; font-size: 9px !important; }
 .system-healthy i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+/* Variação âmbar do selo verde, para quando ainda falta configurar algo. */
+.system-healthy.pending { border-color: #efdcb4; background: #fdf7ec; color: #8a6420 !important; }
+.system-healthy.pending i { background: var(--amber); }
+/* Faixa com o que falta configurar, no topo do painel administrativo. */
+.admin-pending { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 13px; padding: 13px 15px; border: 1px solid #efdcb4; border-radius: 12px; background: #fdf7ec; color: #8a6420; }
+.admin-pending strong { display: block; font-size: 11px; }
+.admin-pending small { display: block; margin-top: 3px; color: #a08040; font-size: 9px; }
+.admin-pending > div:first-of-type { flex: 1; min-width: 180px; }
+.admin-pending-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.admin-pending-actions button { height: 30px; padding: 0 11px; border: 1px solid #e4c98f; border-radius: 8px; background: white; color: #8a6420; font-size: 9px; font-weight: 700; }
+.admin-pending-actions button:hover { border-color: #d1ae6a; }
 .admin-overview { display: grid; grid-template-columns: 1.5fr 1fr; gap: 13px; margin-bottom: 13px; }
 .admin-welcome { min-height: 126px; display: flex; align-items: center; gap: 15px; padding: 19px; border-radius: 13px; background: linear-gradient(135deg, #191a1d, #2b2c30); color: white; box-shadow: 0 12px 30px rgba(25,26,29,.12); }
 .admin-shield { width: 52px; height: 52px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 14px; background: var(--red); font-size: 15px; font-weight: 900; box-shadow: 0 8px 24px rgba(214,40,40,.3); }
@@ -575,6 +588,9 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .history-list > div i { width: 7px; height: 7px; flex: 0 0 auto; margin-top: 3px; border-radius: 50%; background: var(--red); }
 .history-list > div span { display: flex; gap: 12px; }
 .history-list > div b { color: #444549; font-weight: 700; }
+/* Erro de gravação do diálogo: mesma paleta do .auth-alert.error, ancorado
+   logo acima do rodapé para a pessoa ver o motivo sem rolar a janela. */
+.dialog-error-strip { flex: 0 0 auto; display: flex; gap: 9px; align-items: flex-start; margin: 0 23px 12px; padding: 11px 12px; border-radius: 10px; font-size: 12px; line-height: 1.4; background: #fff1f1; border: 1px solid #f3caca; color: #9f1d1d; }
 .dialog-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 14px 23px; border-top: 1px solid #eceae7; background: #faf9f7; }
 .dialog-footer > div { display: flex; align-items: center; gap: 8px; }
 .ghost-button { height: 38px; padding: 0 11px; border: 0; background: transparent; color: #747579; font-size: 10px; font-weight: 700; }
@@ -1350,6 +1366,7 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   .form-grid, .choice-grid, .review-grid { grid-template-columns: 1fr; }
   .field-full { grid-column: auto; }
   .review-grid > div { border-right: 0; }
+  .dialog-error-strip { margin-left: 17px; margin-right: 17px; }
   .dialog-footer { padding-left: 17px; padding-right: 17px; }
   .dialog-footer .primary-button { padding: 0 12px; }
   .firebase-user-summary, .firebase-user-summary.connected { grid-template-columns: 1fr; align-items: stretch; }
@@ -1593,6 +1610,69 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+}
+
+/* Campo calculado pelo sistema (preço no modo markup): continua legível, mas
+   sinaliza que não é digitável. */
+.dialog-input.is-derived { background: #f4f2ef; color: #6c6a66; cursor: not-allowed; }
+
+/* Aba "Listas do sistema": cada bloco é uma lista de opções editável por
+   etiquetas, no lugar de uma tabela inteira para valores de uma palavra. */
+.settings-list-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.settings-list-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fcfbfa;
+}
+
+.settings-list-head strong { display: block; font-size: 12px; color: #37383b; }
+.settings-list-head small { display: block; margin-top: 3px; color: #929296; font-size: 10px; line-height: 1.45; }
+
+.settings-chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 26px; }
+
+.settings-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 10px;
+  border: 1px solid #e4e1dc;
+  border-radius: 999px;
+  background: white;
+  font-size: 11px;
+  color: #37383b;
+}
+
+.settings-chip button {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: #f1efec;
+  color: #8a8781;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.settings-chip button:hover { background: #fbe5e3; color: var(--red); }
+
+.settings-chip-add { display: flex; gap: 8px; }
+.settings-chip-add input { flex: 1; min-width: 0; }
+.settings-chip-add .outline-button { flex: 0 0 auto; white-space: nowrap; }
+
+@media (max-width: 860px) {
+  .settings-list-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 1080px) {

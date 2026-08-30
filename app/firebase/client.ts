@@ -20,13 +20,18 @@ import {
   getDocs,
   getFirestore,
   onSnapshot,
+  increment,
+  query,
+  runTransaction,
   serverTimestamp,
   setDoc,
+  where,
   writeBatch,
   type DocumentData,
   type Unsubscribe,
 } from "firebase/firestore";
 import { allFirebasePermissions, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../../src/types";
+import { costAfterEntry, toAmount } from "../../src/inventory";
 
 type FirebaseWebConfig = {
   apiKey: string;
@@ -566,6 +571,375 @@ export async function saveFirestoreDoc<T extends Record<string, unknown>>(collec
     await setDoc(doc(db, collectionName, id), { ...cleanData, updatedAt: serverTimestamp() }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${id}`);
+  }
+}
+
+/**
+ * Cria a ordem de serviço com o próximo número livre da sequência.
+ *
+ * A numeração não vem de settings/global.nextOsNumber de propósito: as regras
+ * do Firestore só deixam o Super Admin escrever em settings, então um usuário
+ * de Balcão não conseguiria incrementar o contador ao abrir uma OS. O próximo
+ * número sai da maior OS já existente, e antes de gravar conferimos se o
+ * documento está livre — se duas pessoas abrirem uma OS no mesmo instante, a
+ * segunda avança para o número seguinte em vez de sobrescrever a primeira
+ * (setDoc com merge não reclamaria da colisão).
+ */
+export async function createServiceOrder(prefix: string, startNumber: number, data: Record<string, unknown>) {
+  const { db } = services();
+  const safePrefix = (prefix || "OS").trim().replace(/-+$/, "") || "OS";
+  try {
+    for (let number = Math.max(1, startNumber); number < startNumber + 50; number += 1) {
+      const id = `${safePrefix}-${String(number).padStart(4, "0")}`;
+      const reference = doc(db, "serviceOrders", id);
+      if ((await getDoc(reference)).exists()) continue;
+      await setDoc(reference, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      return id;
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "serviceOrders");
+  }
+  throw new Error("Não foi possível gerar um número livre para a ordem de serviço. Tente novamente.");
+}
+
+/**
+ * Grava a venda e a baixa de estoque no MESMO lote.
+ *
+ * Os dois precisam acontecer juntos: uma venda registrada sem a baixa deixa o
+ * estoque mentindo, e uma baixa sem a venda tira a peça da prateleira sem o
+ * dinheiro entrar. Como writeBatch é atômico, se o usuário não tiver permissão
+ * para escrever em products a venda inteira falha com um erro claro, em vez de
+ * gravar metade.
+ */
+export async function recordSale(
+  saleId: string,
+  sale: Record<string, unknown>,
+  stockUpdates: Array<{ productId: string; quantity: number }>,
+) {
+  const { db } = services();
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "sales", saleId), { ...sale, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    stockUpdates.forEach(({ productId, quantity }) => {
+      // increment() em vez de gravar (estoque - vendido): a quantidade que o
+      // carrinho conhece foi lida quando o item entrou na venda e pode estar
+      // velha. Duas vendas simultâneas da mesma peça, gravando valor absoluto,
+      // fariam a segunda desfazer a baixa da primeira.
+      batch.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, "sales");
+  }
+}
+
+/**
+ * Registra uma entrada de estoque: soma a quantidade e recalcula o custo de
+ * cada peça.
+ *
+ * Usa runTransaction, e não writeBatch, porque o custo médio depende do estoque
+ * e do custo que estão gravados AGORA — a transação lê e grava no mesmo passo
+ * atômico. Com um batch, duas entradas simultâneas da mesma peça leriam o mesmo
+ * custo antigo e a segunda apagaria a média da primeira.
+ */
+export async function recordStockEntry(
+  entryId: string,
+  entry: Record<string, unknown>,
+  items: Array<{ productId: string; quantity: number; unitCost: number }>,
+  useAverageCost: boolean,
+) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const references = items.map((item) => doc(db, "products", item.productId));
+      // Todas as leituras antes de qualquer escrita: é exigência do Firestore.
+      const snapshots = await Promise.all(references.map((reference) => transaction.get(reference)));
+
+      snapshots.forEach((snapshot, index) => {
+        const item = items[index]!;
+        const data = snapshot.data() ?? {};
+        const currentStock = toAmount(data.stock);
+        const currentCost = toAmount(data.cost);
+        const newCost = costAfterEntry(useAverageCost, currentStock, currentCost, item.quantity, item.unitCost);
+        transaction.set(references[index]!, {
+          stock: currentStock + item.quantity,
+          // O cadastro de produto grava o custo como texto em reais
+          // ("R$ 12,50"); gravar número aqui deixaria os dois formatos
+          // convivendo na mesma coleção e quebraria quem lê com parseBRL.
+          cost: newCost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      });
+
+      transaction.set(doc(db, "stockEntries", entryId), {
+        ...entry,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, "stockEntries");
+  }
+}
+
+/**
+ * Grava a OS e a baixa (ou devolução) das peças no mesmo lote.
+ *
+ * `deltas` positivos tiram do estoque, negativos devolvem — é o que acontece
+ * quando uma peça sai da ordem ou quando a OS volta para orçamento. Usa
+ * increment pelo mesmo motivo da venda no PDV: a quantidade lida na tela pode
+ * estar velha, e gravar valor absoluto faria uma operação apagar a outra.
+ */
+export async function saveOrderWithStock(
+  orderId: string,
+  order: Record<string, unknown>,
+  deltas: Array<{ productId: string; quantity: number }>,
+) {
+  const { db } = services();
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "serviceOrders", orderId), { ...order, updatedAt: serverTimestamp() }, { merge: true });
+    deltas.forEach(({ productId, quantity }) => {
+      batch.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `serviceOrders/${orderId}`);
+  }
+}
+
+/**
+ * Grava a importação da planilha de estoque.
+ *
+ * As peças novas recebem um número livre da sequência — mesma busca usada nas
+ * contas e na OS, e pelo mesmo motivo: a lista carregada na tela pode estar
+ * velha e `set` não reclama de colisão, ele sobrescreve.
+ *
+ * Um batch do Firestore aceita no máximo 500 escritas, e uma planilha de
+ * oficina passa disso com facilidade, então a gravação vai em blocos. Isso
+ * abre mão da atomicidade, e a saída para isso é a importação ser repetível:
+ * a quantidade da planilha substitui a do estoque em vez de somar, e a peça
+ * criada no bloco que passou é reconhecida como já cadastrada na segunda
+ * tentativa (casa por código de barras ou nome). Ou seja, se cair no meio,
+ * basta importar o mesmo arquivo de novo — o erro diz quantas peças já
+ * entraram para a pessoa não ficar no escuro.
+ *
+ * A atualização mexe só no que veio preenchido na planilha. Quem exportou o
+ * estoque só com nome e quantidade para fazer a contagem não deveria voltar
+ * com preço, categoria e fornecedor apagados.
+ */
+const IMPORT_BATCH_SIZE = 400;
+
+export async function saveImportedProducts(
+  create: Array<Record<string, unknown>>,
+  update: Array<{ id: string; data: Record<string, unknown> }>,
+) {
+  if (!create.length && !update.length) return { created: [] as string[], updated: [] as string[] };
+  const { db } = services();
+  let written = 0;
+  try {
+    // Procura os códigos livres antes de gravar qualquer coisa: se faltar
+    // código, nada foi escrito ainda e a pessoa pode tentar de novo limpo.
+    const ids: string[] = [];
+    for (let number = 1; ids.length < create.length && number <= 20000; number += 1) {
+      const id = `PRD-${String(number).padStart(3, "0")}`;
+      if ((await getDoc(doc(db, "products", id))).exists()) continue;
+      ids.push(id);
+    }
+    if (ids.length < create.length) throw new Error("Não foi possível gerar o código das peças novas. Tente novamente.");
+
+    const writes = [
+      ...create.map((data, index) => ({ id: ids[index]!, data: { ...data, code: data.code || ids[index]!, createdAt: serverTimestamp() }, merge: false })),
+      ...update.map(({ id, data }) => ({ id, data, merge: true })),
+    ];
+
+    for (let start = 0; start < writes.length; start += IMPORT_BATCH_SIZE) {
+      const batch = writeBatch(db);
+      const block = writes.slice(start, start + IMPORT_BATCH_SIZE);
+      block.forEach(({ id, data, merge }) => {
+        batch.set(doc(db, "products", id), { ...data, updatedAt: serverTimestamp() }, { merge });
+      });
+      await batch.commit();
+      written += block.length;
+    }
+    return { created: ids, updated: update.map((item) => item.id) };
+  } catch (error) {
+    if (written > 0) {
+      throw new Error(`A importação parou depois de gravar ${written} peça(s). Importe o mesmo arquivo de novo: as peças que já entraram serão reconhecidas e apenas atualizadas.`);
+    }
+    handleFirestoreError(error, OperationType.WRITE, "products");
+  }
+}
+
+/**
+ * Grava as parcelas de um lançamento de conta em um lote só.
+ *
+ * Parcelas separadas em gravações independentes deixariam a oficina com metade
+ * do parcelamento no banco se a conexão caísse no meio.
+ */
+export async function saveAccounts(prefix: string, startNumber: number, accounts: Array<Record<string, unknown>>) {
+  if (!accounts.length) return [] as string[];
+  const { db } = services();
+  const safePrefix = (prefix || "CT").trim().replace(/-+$/, "") || "CT";
+  try {
+    // Procura números livres antes de gravar. A tela só enxerga as contas se o
+    // usuário tiver permissão de ver o financeiro — quem opera só o PDV recebe
+    // a lista vazia, a sequência recomeçaria do 1 e o batch sobrescreveria uma
+    // conta existente sem reclamar.
+    const ids: string[] = [];
+    let number = Math.max(1, startNumber);
+    for (let attempts = 0; ids.length < accounts.length && attempts < accounts.length + 60; attempts += 1) {
+      const id = `${safePrefix}-${String(number).padStart(4, "0")}`;
+      number += 1;
+      if ((await getDoc(doc(db, "accounts", id))).exists()) continue;
+      ids.push(id);
+    }
+    if (ids.length < accounts.length) throw new Error("Não foi possível gerar a numeração das contas. Tente novamente.");
+
+    const batch = writeBatch(db);
+    accounts.forEach((data, index) => {
+      batch.set(doc(db, "accounts", ids[index]!), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    });
+    await batch.commit();
+    return ids;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "accounts");
+  }
+}
+
+/**
+ * Grava uma movimentação de dinheiro lançada à mão.
+ *
+ * Numeração pela busca do próximo número livre, como nas contas e na OS: a
+ * lista carregada na tela pode estar velha, e `set` sobrescreveria o
+ * lançamento de outra pessoa sem reclamar.
+ */
+export async function recordMovement(data: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    for (let number = 1; number < 100000; number += 1) {
+      const id = `MOV-${String(number).padStart(4, "0")}`;
+      const reference = doc(db, "movements", id);
+      if ((await getDoc(reference)).exists()) continue;
+      await setDoc(reference, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      return id;
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "movements");
+  }
+  throw new Error("Não foi possível gerar o número da movimentação. Tente novamente.");
+}
+
+/**
+ * Abre o caixa do dia.
+ *
+ * Antes de gravar, confere no servidor se já não existe uma sessão aberta —
+ * a lista carregada na tela pode estar velha, e duas sessões abertas fariam a
+ * mesma venda ser contada nas duas, com nenhuma das duas conferências
+ * fechando. Sobra uma janela mínima entre a consulta e a escrita: se duas
+ * pessoas abrirem o caixa no mesmo segundo, em máquinas diferentes, as duas
+ * passam. É pouco provável numa oficina (quem abre o caixa é uma pessoa só,
+ * de manhã), e a tela mostra a sessão aberta com quem a abriu, então dá para
+ * perceber e fechar a duplicada.
+ */
+export async function openCashSession(data: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    const existing = await getDocs(query(collection(db, "cashSessions"), where("status", "==", "aberto")));
+    if (!existing.empty) throw new Error("Já existe um caixa aberto. Feche o caixa atual antes de abrir outro.");
+
+    for (let number = 1; number < 10000; number += 1) {
+      const id = `CX-${String(number).padStart(4, "0")}`;
+      const reference = doc(db, "cashSessions", id);
+      if ((await getDoc(reference)).exists()) continue;
+      await setDoc(reference, { ...data, status: "aberto", createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      return id;
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "cashSessions");
+  }
+  throw new Error("Não foi possível gerar o número do caixa. Tente novamente.");
+}
+
+/**
+ * Lança um suprimento ou uma sangria na sessão aberta.
+ *
+ * Transação, e não escrita direta, porque a movimentação é acrescentada à
+ * lista que já está gravada: duas pessoas lançando ao mesmo tempo com a lista
+ * lida na tela fariam uma apagar a outra. Também recusa lançamento em caixa
+ * já fechado, que entraria numa conferência que a oficina já deu por encerrada.
+ */
+export async function addCashMovement(sessionId: string, movement: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const reference = doc(db, "cashSessions", sessionId);
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists()) throw new Error("Este caixa não existe mais.");
+      const data = snapshot.data() ?? {};
+      if (data.status !== "aberto") throw new Error("Este caixa já foi fechado.");
+      const movements = Array.isArray(data.movements) ? data.movements : [];
+      transaction.set(reference, { movements: [...movements, movement], updatedAt: serverTimestamp() }, { merge: true });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `cashSessions/${sessionId}`);
+  }
+}
+
+/**
+ * Fecha o caixa com a conferência.
+ *
+ * Grava junto o que o sistema esperava e o que foi contado, porque a diferença
+ * precisa continuar fazendo sentido meses depois — recalcular o esperado com
+ * os dados de hoje daria outro número se algum lançamento antigo for corrigido.
+ *
+ * Recusa fechar duas vezes: o segundo fechamento sobrescreveria a conferência
+ * do primeiro, apagando justamente o registro da falta que alguém precisava ver.
+ */
+export async function closeCashSession(sessionId: string, closing: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const reference = doc(db, "cashSessions", sessionId);
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists()) throw new Error("Este caixa não existe mais.");
+      if ((snapshot.data() ?? {}).status !== "aberto") throw new Error("Este caixa já foi fechado.");
+      transaction.set(reference, { ...closing, status: "fechado", updatedAt: serverTimestamp() }, { merge: true });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `cashSessions/${sessionId}`);
+  }
+}
+
+/**
+ * Registra uma baixa (total ou parcial) em uma conta.
+ *
+ * Usa transação porque a baixa é acrescentada à lista que já está gravada: ler
+ * a conta na tela e regravar a lista inteira faria duas baixas simultâneas
+ * apagarem uma à outra. Também impede baixa acima do saldo, que viraria crédito
+ * fantasma na conta.
+ */
+export async function settleAccount(accountId: string, settlement: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const reference = doc(db, "accounts", accountId);
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists()) throw new Error("Esta conta não existe mais.");
+      const data = snapshot.data() ?? {};
+      const settlements = Array.isArray(data.settlements) ? data.settlements : [];
+      const paid = settlements.reduce((total: number, item: { amount?: number }) => total + (Number(item?.amount) || 0), 0);
+      const open = Math.max(0, Number(data.amount ?? 0) - paid);
+      const amount = Number(settlement.amount) || 0;
+      if (amount <= 0) throw new Error("Informe o valor da baixa.");
+      if (amount > open + 0.005) throw new Error(`O valor da baixa passa do saldo em aberto (${open.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}).`);
+      transaction.set(reference, {
+        settlements: [...settlements, settlement],
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `accounts/${accountId}`);
   }
 }
 

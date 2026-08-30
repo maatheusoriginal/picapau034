@@ -50,7 +50,12 @@ export type DialogKind =
   | "changePassword"
   | null;
 
-export type OpenDialog = (dialog: Exclude<DialogKind, null>) => void;
+/**
+ * `recordId` diz qual registro o diálogo deve abrir — sem ele, o detalhe da OS
+ * mostrava sempre `orders[0]`, então clicar em qualquer linha da lista abria a
+ * primeira ordem de serviço.
+ */
+export type OpenDialog = (dialog: Exclude<DialogKind, null>, recordId?: string) => void;
 
 export type ExpenseRecord = {
   id: string;
@@ -60,6 +65,8 @@ export type ExpenseRecord = {
   dueDate: string;
   status: "Pago" | "Agendado";
   method: string;
+  /** ISO 8601 do pagamento. Só existe em gasto pago, e é o que prende o gasto à sessão de caixa certa. */
+  paidAt?: string;
   order?: string;
   charged?: number;
   employeeId?: string;
@@ -180,10 +187,19 @@ export type QuickServiceConfig = {
   active: boolean;
 };
 
+/**
+ * Grupos de categoria. "Receitas" classifica o que entra — antes só existiam
+ * grupos para o que sai (Despesas) e para o que é vendido, então não havia como
+ * responder de onde veio o dinheiro do mês.
+ */
+export const categoryGroups = ["Serviços", "Produtos", "Despesas", "Receitas"] as const;
+
+export type CategoryGroup = (typeof categoryGroups)[number];
+
 export type CategoryConfig = {
   id: string;
   name: string;
-  group: "Serviços" | "Produtos" | "Despesas";
+  group: CategoryGroup;
   active: boolean;
 };
 
@@ -214,6 +230,11 @@ export type ServiceOrderItem = {
   price: number;
   quantity?: number;
   cost?: number;
+  /**
+   * Produto no Firestore, quando o item veio do estoque. `id` guarda o código
+   * da peça (visível para a oficina), que não serve para dar baixa.
+   */
+  productId?: string;
 };
 
 export type OrderRecord = {
@@ -239,7 +260,281 @@ export type OrderRecord = {
   priority?: string;
   /** Resumo do serviço principal, usado nas listagens. */
   service?: string;
+  /** Cliente cadastrado que abriu a OS, quando existe. */
+  clientId?: string;
+  /** Motocicleta cadastrada, quando existe. */
+  motorcycleId?: string;
+  /** Quilometragem registrada na recepção. */
+  mileage?: string;
+  /** Nível de combustível na entrada da moto. */
+  fuelLevel?: string;
+  /** OS entregue e recebida: sai das listas de serviço em andamento. */
+  closed?: boolean;
+  /** Data do encerramento, no formato brasileiro. */
+  closedAt?: string;
+  /** ISO 8601 do encerramento. `closedAt` só tem a data, e a sessão de caixa precisa da hora. */
+  closedAtISO?: string;
+  /** Forma de pagamento usada no encerramento. */
+  paymentMethod?: string;
+  /**
+   * Peças que esta OS já tirou do estoque. Comparar com os itens atuais é o que
+   * evita baixa dobrada e devolve a peça quando ela sai da ordem.
+   */
+  deductedItems?: Array<{ productId: string; quantity: number }>;
 };
+
+/**
+ * Listas que a oficina ajusta em Configurações → Listas e que alimentam os
+ * selects espalhados pelo sistema.
+ *
+ * Antes cada tela trazia a sua própria lista fixa no código — e elas nem
+ * batiam entre si: Configurações oferecia as unidades "JG" e "MT" enquanto o
+ * cadastro de produto oferecia "JOGO", "KG" e "M", então a unidade padrão
+ * escolhida pelo dono não existia como opção na hora de cadastrar a peça.
+ */
+export type SystemLists = {
+  /** Unidades de medida das peças (UN, LT, PC...). */
+  units: string[];
+  /** Marcas de motocicleta oferecidas no cadastro. */
+  motorcycleBrands: string[];
+  /** Caixas e contas bancárias que recebem e pagam. */
+  cashAccounts: string[];
+  /** Prioridades atribuídas a uma OS na recepção. */
+  orderPriorities: string[];
+  /** Níveis de combustível registrados na entrada da moto. */
+  fuelLevels: string[];
+  /** Motivos de entrada de dinheiro que não são venda. */
+  movementIncomeCategories: string[];
+  /** Motivos de saída de dinheiro que não são conta agendada. */
+  movementExpenseCategories: string[];
+};
+
+export const systemListLabels: Record<keyof SystemLists, { title: string; hint: string; placeholder: string }> = {
+  units: { title: "Unidades de medida", hint: "Usadas no cadastro de peças e na unidade padrão.", placeholder: "Ex.: UN, LT, PC" },
+  motorcycleBrands: { title: "Marcas de motocicleta", hint: "Aparecem no cadastro de motos.", placeholder: "Ex.: Honda" },
+  cashAccounts: { title: "Caixas e contas", hint: "Contas de entrada e saída de dinheiro.", placeholder: "Ex.: Caixa balcão" },
+  orderPriorities: { title: "Prioridades da OS", hint: "Escolhidas na recepção da motocicleta.", placeholder: "Ex.: Urgente" },
+  fuelLevels: { title: "Níveis de combustível", hint: "Registrados na entrada da moto.", placeholder: "Ex.: 1/2 tanque" },
+  movementIncomeCategories: { title: "Motivos de entrada", hint: "Dinheiro que entra sem ser venda nem OS.", placeholder: "Ex.: Venda de sucata" },
+  movementExpenseCategories: { title: "Motivos de saída", hint: "Dinheiro que sai sem ser conta agendada.", placeholder: "Ex.: Manutenção da oficina" },
+};
+
+export const defaultSystemLists: SystemLists = {
+  units: ["UN", "PC", "LT", "KG", "M", "PAR", "JG", "CX"],
+  motorcycleBrands: ["Honda", "Yamaha", "Suzuki", "Shineray", "Kawasaki", "Dafra", "BMW", "Triumph", "Royal Enfield", "Outra"],
+  cashAccounts: ["Caixa balcão", "Banco Inter"],
+  orderPriorities: ["Normal", "Urgente", "Baixa"],
+  fuelLevels: ["Reserva", "1/4", "1/2 tanque", "3/4", "Cheio"],
+  // Sangria e suprimento não estão aqui de propósito: quem faz isso é o caixa.
+  movementIncomeCategories: ["Venda de sucata", "Devolução de fornecedor", "Aporte do dono", "Reembolso recebido", "Outra entrada"],
+  movementExpenseCategories: ["Manutenção da oficina", "Frete e entrega", "Material de limpeza", "Retirada do dono", "Outra saída"],
+};
+
+/** Devolve a lista configurada ou o padrão, quando ainda não houve ajuste. */
+export function systemList(lists: Partial<SystemLists> | null | undefined, key: keyof SystemLists): string[] {
+  const value = lists?.[key];
+  return Array.isArray(value) && value.length ? value : defaultSystemLists[key];
+}
+
+/** Item no carrinho do PDV. Carrega o id do produto no Firestore para a baixa de estoque. */
+/** Uma baixa: parte (ou todo) do valor de uma conta que foi paga ou recebida. */
+/**
+ * Uma entrada ou saída de dinheiro lançada à mão.
+ *
+ * É o que não é venda nem conta agendada: venda de sucata, devolução de
+ * fornecedor, aporte do dono, conserto pago na hora. Sangria e suprimento NÃO
+ * entram aqui — quem faz isso é o caixa, e ter dois caminhos para a mesma
+ * coisa faria a conferência da gaveta contar o mesmo dinheiro duas vezes.
+ */
+export type MovementRecord = {
+  id: string;
+  kind: "entrada" | "saida";
+  amount: number;
+  category: string;
+  method: string;
+  description: string;
+  /** Data brasileira, para exibição direta. */
+  date: string;
+  /** ISO 8601, para ordenar e para prender a movimentação à sessão de caixa certa. */
+  at: string;
+  operatorUid?: string;
+  operatorName?: string;
+};
+
+/**
+ * Uma sessão de caixa: da abertura ao fechamento.
+ *
+ * É o dinheiro **físico** da gaveta, e só ele. Venda no PIX ou no cartão não
+ * entra aqui — vai para a conta, e conferir a gaveta com esses valores dentro
+ * faria toda conferência fechar errado. É justamente essa separação que
+ * permite descobrir no fim do dia que faltam R$ 50.
+ */
+export type CashSession = {
+  id: string;
+  /** ISO 8601 da abertura. Delimita quais vendas pertencem a esta sessão. */
+  openedAt: string;
+  /** Data brasileira da abertura, para exibição direta. */
+  openedDate: string;
+  openedByUid?: string;
+  openedByName?: string;
+  /** Fundo de troco com que o caixa começou o dia. */
+  openingAmount: number;
+  /** Suprimentos e sangrias lançados durante a sessão. */
+  movements?: CashMovement[];
+  status: "aberto" | "fechado";
+  closedAt?: string;
+  closedDate?: string;
+  closedByUid?: string;
+  closedByName?: string;
+  /** Quanto foi contado na gaveta no fechamento. */
+  countedAmount?: number;
+  /** Quanto o sistema esperava encontrar, gravado no momento do fechamento. */
+  expectedAmount?: number;
+  /** Contado menos esperado: positivo é sobra, negativo é falta. */
+  difference?: number;
+  closingNotes?: string;
+};
+
+/** Dinheiro colocado na gaveta (suprimento) ou retirado dela (sangria). */
+export type CashMovement = {
+  kind: "Suprimento" | "Sangria";
+  amount: number;
+  reason: string;
+  /** ISO 8601, para ordenar. */
+  at: string;
+  date: string;
+  operatorUid?: string;
+  operatorName?: string;
+};
+
+export type AccountSettlement = {
+  /** Data no formato brasileiro, para exibição direta nas listas. */
+  date: string;
+  /** ISO 8601, para ordenar e filtrar por período. */
+  settledAt: string;
+  amount: number;
+  method: string;
+  /** Caixa ou conta bancária que recebeu ou pagou. */
+  account?: string;
+  operatorUid?: string;
+  operatorName?: string;
+};
+
+/**
+ * Uma conta a receber ou a pagar.
+ *
+ * Antes as contas a receber eram deduzidas na hora, a partir das vendas e OS
+ * fechadas em "Nota a prazo" — e por isso nunca saíam da lista: não havia onde
+ * registrar que o cliente pagou. O total só crescia. Agora a conta é um
+ * registro próprio, com as baixas guardadas dentro dela.
+ */
+export type AccountRecord = {
+  id: string;
+  kind: "receber" | "pagar";
+  /** Cliente, fornecedor ou favorecido. */
+  person: string;
+  personId?: string;
+  description: string;
+  category: string;
+  /** Valor original desta parcela. */
+  amount: number;
+  /** Vencimento no formato brasileiro. */
+  dueDate: string;
+  settlements: AccountSettlement[];
+  notes?: string;
+  /** De onde a conta veio: "Manual", "Venda", "Ordem de serviço". */
+  origin: string;
+  /** Venda ou OS que gerou a conta, quando não é lançamento manual. */
+  sourceId?: string;
+  /** Número desta parcela e total de parcelas. Lançamento avulso é 1 de 1. */
+  installment: number;
+  installments: number;
+  /** Liga as parcelas do mesmo lançamento. */
+  groupId?: string;
+};
+
+export type CartItem = {
+  id: string;
+  code: string;
+  name: string;
+  unit: number;
+  quantity: number;
+  stock: number;
+  /** Custo unitário no momento da venda, para o cálculo de lucro não mudar quando o cadastro do produto mudar. */
+  cost: number;
+};
+
+/**
+ * Venda concluída — no balcão (PDV) ou como serviço rápido. É o registro de
+ * entrada de dinheiro da oficina: o financeiro soma daqui o que foi recebido.
+ */
+export type SaleRecord = {
+  id: string;
+  origin: "PDV" | "Serviço rápido";
+  items: ServiceOrderItem[];
+  /** Soma dos itens, antes do desconto. */
+  subtotal?: number;
+  /** Desconto concedido na venda, em reais. */
+  discount?: number;
+  /** O que o cliente pagou de fato: subtotal menos desconto. */
+  total: number;
+  paymentMethod: string;
+  /** Taxa da maquininha, quando a venda foi no cartão. */
+  fee?: number;
+  /** Valor líquido depois da taxa. */
+  net?: number;
+  machineName?: string;
+  /** Caixa ou conta bancária que recebeu o valor. */
+  account?: string;
+  installments?: number;
+  customer?: string;
+  clientId?: string;
+  mechanicId?: string;
+  mechanicName?: string;
+  /** Quem operou a venda. */
+  operatorUid?: string;
+  operatorName?: string;
+  /** Data no formato brasileiro, para exibição direta nas listas. */
+  date: string;
+  /** ISO 8601, para ordenar e filtrar por período sem depender do formato local. */
+  soldAt: string;
+};
+
+/** Uma compra de peças que entrou no estoque. */
+export type StockEntryRecord = {
+  id: string;
+  supplierId?: string;
+  supplierName?: string;
+  /** Data no formato brasileiro. */
+  date: string;
+  /** ISO 8601, para ordenar e filtrar por período. */
+  entryAt: string;
+  payment: string;
+  /** Como o custo foi tratado nesta entrada: "Custo médio" ou "Último preço". */
+  costMode: string;
+  total: number;
+  items: Array<{ productId: string; name: string; quantity: number; unitCost: number; total: number }>;
+  operatorUid?: string;
+  operatorName?: string;
+};
+
+export const serviceOrderStatuses = ["Recepção", "Avaliação", "Aprovação", "Em serviço", "Entrega"] as const;
+
+export type ServiceOrderStatus = (typeof serviceOrderStatuses)[number];
+
+/**
+ * Cor do selo de situação. Fonte única: antes a tela do diálogo calculava a
+ * dela em uma expressão solta e as listagens liam um campo `tone` gravado no
+ * banco, então uma OS criada com o tone errado ficava com a cor errada para
+ * sempre.
+ */
+export function statusTone(status: string): string {
+  if (status === "Entrega") return "green";
+  if (status === "Em serviço") return "amber";
+  if (status === "Aprovação") return "red";
+  if (status === "Avaliação") return "violet";
+  return "blue";
+}
 
 export type ProductRecord = {
   id: string;
