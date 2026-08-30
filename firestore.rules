@@ -124,6 +124,14 @@ service cloud.firestore {
       allow create, update, delete: if can('finance.manage');
     }
 
+    // Movimentações de dinheiro lançadas à mão (sucata, aporte, frete pago na
+    // hora). Mexem no saldo e no caixa, então são do financeiro.
+    match /movements/{documentId} {
+      allow read: if can('finance.view');
+      allow create, update: if can('finance.manage');
+      allow delete: if isSuperAdmin();
+    }
+
     // Sessões de caixa: abertura, suprimento, sangria e fechamento.
     // É o dinheiro físico da gaveta, então quem cuida do financeiro é quem
     // abre, movimenta e fecha. Quem opera o PDV consegue ler para saber se o

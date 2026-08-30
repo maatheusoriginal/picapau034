@@ -47,10 +47,16 @@ const sale: SaleRecord = {
 
 const osDoc = buildOrderDocument({ order, settings, mechanics: "João + Ana" });
 const saleDoc = buildSaleDocument(sale, settings);
+const saleComDesconto = buildSaleDocument({ ...sale, subtotal: 100, discount: 10, total: 90 }, settings);
 const uma = buildOrderDocument({ order, settings: { ...settings, printThreeCopies: false }, mechanics: "" });
 const a4 = buildOrderDocument({ order, settings: { ...settings, printFormat: "A4" }, mechanics: "" });
 
 const casos: Array<[string, unknown, unknown]> = [
+  // Desconto no cupom
+  ["cupom sem desconto não mostra subtotal", saleDoc.includes("Subtotal"), false],
+  ["cupom com desconto mostra o subtotal", saleComDesconto.includes("Subtotal"), true],
+  ["e mostra o desconto abatido", saleComDesconto.includes("Desconto"), true],
+  ["e o total já é o valor com desconto", saleComDesconto.includes((90).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })), true],
   // Marcadores
   ["marcador é substituído", fillTemplate("Olá {cliente}!", { cliente: "Ana" }), "Olá Ana!"],
   ["marcador sem valor não vaza para a mensagem", fillTemplate("Olá {cliente}!", {}), "Olá !"],

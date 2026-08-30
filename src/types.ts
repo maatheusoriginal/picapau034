@@ -303,6 +303,10 @@ export type SystemLists = {
   orderPriorities: string[];
   /** Níveis de combustível registrados na entrada da moto. */
   fuelLevels: string[];
+  /** Motivos de entrada de dinheiro que não são venda. */
+  movementIncomeCategories: string[];
+  /** Motivos de saída de dinheiro que não são conta agendada. */
+  movementExpenseCategories: string[];
 };
 
 export const systemListLabels: Record<keyof SystemLists, { title: string; hint: string; placeholder: string }> = {
@@ -311,6 +315,8 @@ export const systemListLabels: Record<keyof SystemLists, { title: string; hint: 
   cashAccounts: { title: "Caixas e contas", hint: "Contas de entrada e saída de dinheiro.", placeholder: "Ex.: Caixa balcão" },
   orderPriorities: { title: "Prioridades da OS", hint: "Escolhidas na recepção da motocicleta.", placeholder: "Ex.: Urgente" },
   fuelLevels: { title: "Níveis de combustível", hint: "Registrados na entrada da moto.", placeholder: "Ex.: 1/2 tanque" },
+  movementIncomeCategories: { title: "Motivos de entrada", hint: "Dinheiro que entra sem ser venda nem OS.", placeholder: "Ex.: Venda de sucata" },
+  movementExpenseCategories: { title: "Motivos de saída", hint: "Dinheiro que sai sem ser conta agendada.", placeholder: "Ex.: Manutenção da oficina" },
 };
 
 export const defaultSystemLists: SystemLists = {
@@ -319,6 +325,9 @@ export const defaultSystemLists: SystemLists = {
   cashAccounts: ["Caixa balcão", "Banco Inter"],
   orderPriorities: ["Normal", "Urgente", "Baixa"],
   fuelLevels: ["Reserva", "1/4", "1/2 tanque", "3/4", "Cheio"],
+  // Sangria e suprimento não estão aqui de propósito: quem faz isso é o caixa.
+  movementIncomeCategories: ["Venda de sucata", "Devolução de fornecedor", "Aporte do dono", "Reembolso recebido", "Outra entrada"],
+  movementExpenseCategories: ["Manutenção da oficina", "Frete e entrega", "Material de limpeza", "Retirada do dono", "Outra saída"],
 };
 
 /** Devolve a lista configurada ou o padrão, quando ainda não houve ajuste. */
@@ -329,6 +338,29 @@ export function systemList(lists: Partial<SystemLists> | null | undefined, key: 
 
 /** Item no carrinho do PDV. Carrega o id do produto no Firestore para a baixa de estoque. */
 /** Uma baixa: parte (ou todo) do valor de uma conta que foi paga ou recebida. */
+/**
+ * Uma entrada ou saída de dinheiro lançada à mão.
+ *
+ * É o que não é venda nem conta agendada: venda de sucata, devolução de
+ * fornecedor, aporte do dono, conserto pago na hora. Sangria e suprimento NÃO
+ * entram aqui — quem faz isso é o caixa, e ter dois caminhos para a mesma
+ * coisa faria a conferência da gaveta contar o mesmo dinheiro duas vezes.
+ */
+export type MovementRecord = {
+  id: string;
+  kind: "entrada" | "saida";
+  amount: number;
+  category: string;
+  method: string;
+  description: string;
+  /** Data brasileira, para exibição direta. */
+  date: string;
+  /** ISO 8601, para ordenar e para prender a movimentação à sessão de caixa certa. */
+  at: string;
+  operatorUid?: string;
+  operatorName?: string;
+};
+
 /**
  * Uma sessão de caixa: da abertura ao fechamento.
  *
@@ -440,6 +472,11 @@ export type SaleRecord = {
   id: string;
   origin: "PDV" | "Serviço rápido";
   items: ServiceOrderItem[];
+  /** Soma dos itens, antes do desconto. */
+  subtotal?: number;
+  /** Desconto concedido na venda, em reais. */
+  discount?: number;
+  /** O que o cliente pagou de fato: subtotal menos desconto. */
   total: number;
   paymentMethod: string;
   /** Taxa da maquininha, quando a venda foi no cartão. */

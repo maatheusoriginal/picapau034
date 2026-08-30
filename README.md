@@ -345,6 +345,49 @@ Admin: quem causou a falta é exatamente quem teria motivo para apagá-la.
 - Abrir, movimentar e fechar exige permissão de gerenciar o financeiro. Quem
   opera o PDV consegue ver se o caixa está aberto, mas não mexe na conferência.
 
+## Movimentação avulsa e desconto na venda
+
+### Desconto no PDV
+
+O campo **Desconto** no resumo da venda abatia nada: o botão abria o diálogo de
+movimentação financeira, que nunca teve relação com o carrinho, e o total
+continuava cheio. Agora o valor é digitado ali mesmo e desce por todo o caminho:
+o pagamento cobra o valor com desconto, a venda grava `subtotal` e `discount`
+separados, e o cupom impresso mostra as três linhas (subtotal, desconto, total).
+
+Desconto maior que o subtotal é **recusado**, não aparado em silêncio: se alguém
+digitou 500 num carrinho de 50, o certo é a pessoa ver o erro — e não a venda
+sair por zero.
+
+### Movimentação lançada à mão
+
+**Financeiro → Nova movimentação** registra o dinheiro que não é venda nem conta
+agendada: venda de sucata, devolução de fornecedor, aporte do dono, frete pago na
+hora.
+
+O que ela **não** faz, de propósito:
+
+| Isso | Vai aqui |
+| --- | --- |
+| Sangria e suprimento | No **caixa** |
+| Conta com vencimento | Em **Contas a pagar** |
+| Venda de peça ou serviço | No **PDV** ou na **OS** |
+
+Ter dois caminhos para a mesma coisa faria a conferência da gaveta contar o mesmo
+dinheiro duas vezes, e ninguém entenderia a diferença no fim do dia.
+
+Os motivos saem de **Configurações → Listas do sistema** (Motivos de entrada e
+Motivos de saída), então a oficina ajusta os seus sem mexer no código.
+
+Uma movimentação **em dinheiro** entra na conferência do caixa aberto. Em PIX ou
+cartão, só no saldo do negócio.
+
+**Movimentação manual mexe no dinheiro, não no faturamento.** Aporte do dono e
+venda de sucata não são serviço prestado: somá-los ao faturamento estragaria o
+ticket médio e a leitura de como a oficina está vendendo. Elas entram em saldo em
+caixa, recebido do dia e lucro; ficam fora de faturamento, ticket médio e
+contagem de vendas.
+
 ## Modelo de segurança
 
 Esconder um botão na tela não é segurança. O bloqueio real está em três camadas:

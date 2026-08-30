@@ -808,6 +808,29 @@ export async function saveAccounts(prefix: string, startNumber: number, accounts
 }
 
 /**
+ * Grava uma movimentação de dinheiro lançada à mão.
+ *
+ * Numeração pela busca do próximo número livre, como nas contas e na OS: a
+ * lista carregada na tela pode estar velha, e `set` sobrescreveria o
+ * lançamento de outra pessoa sem reclamar.
+ */
+export async function recordMovement(data: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    for (let number = 1; number < 100000; number += 1) {
+      const id = `MOV-${String(number).padStart(4, "0")}`;
+      const reference = doc(db, "movements", id);
+      if ((await getDoc(reference)).exists()) continue;
+      await setDoc(reference, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      return id;
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "movements");
+  }
+  throw new Error("Não foi possível gerar o número da movimentação. Tente novamente.");
+}
+
+/**
  * Abre o caixa do dia.
  *
  * Antes de gravar, confere no servidor se já não existe uma sessão aberta —
