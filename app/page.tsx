@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { accountOpen, accountStatus, financeSummary, isCreditPayment, payableEntries, receivableAccountEntries, splitInstallments } from "../src/finance";
 import { mergeParts, shouldReserveStock, stockDeltas, type ReservedPart } from "../src/inventory";
+import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
 import { openWhatsapp, printDocument } from "./printing";
 import type { SettingsTab } from "../src/components/SettingsWorkspace";
@@ -32,6 +33,7 @@ import {
   saveAccounts,
   settleAccount,
   recordStockEntry,
+  saveImportedProducts,
   saveOrderWithStock,
   defaultFirebasePermissions,
   deleteManagedUser,
@@ -272,7 +274,10 @@ const initialMotorcycles: MotorcycleRecord[] = [];
 function downloadStockTemplate() {
   const rows = [
     ["Nome", "Código de barras", "Código da peça (opcional)", "Quantidade", "Categoria", "Marca", "Unidade", "Preço de custo", "Preço de venda", "Estoque mínimo", "Compatibilidade", "Localização", "Fornecedor"],
-    ["Óleo 20W50", "7890000000000", "", "10", "Óleos", "Exemplo", "UN", "25,00", "39,90", "5", "CG 125 / CG 150", "Prateleira A1", "Fornecedor exemplo"],
+    // A linha de exemplo fica marcada com "EXEMPLO" no nome: ela mostra o
+    // formato de cada coluna e a importação a ignora, para ninguém acabar com
+    // um óleo fantasma no estoque por ter esquecido de apagá-la.
+    ["EXEMPLO - Óleo 20W50 (pode apagar esta linha)", "7890000000000", "", "10", "Óleos", "Marca", "UN", "25,00", "39,90", "5", "CG 125 / CG 150", "Prateleira A1", "Fornecedor"],
   ];
   const csv = "\uFEFF" + rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(";")).join("\n");
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -1906,6 +1911,11 @@ function AppDialog({
   const [newVehicleYear, setNewVehicleYear] = useState("");
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState("");
+  // Importação de planilha: a prévia fica em pé até a pessoa confirmar, para
+  // ela conferir o que vai entrar antes de mexer no estoque.
+  const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
+  const [importFileName, setImportFileName] = useState("");
+  const [importReading, setImportReading] = useState(false);
 
   const currentOrder = orders.find((order) => order.id === selectedRecordId) ?? orders[0];
   // O botão de baixa passa o id da conta pelo mesmo caminho que o detalhe da OS.
@@ -1922,6 +1932,16 @@ function AppDialog({
     setExtraOrderItem(false);
     setDialogError("");
   }, [dialog, currentOrder?.id]);
+
+  // O AppDialog fica montado o tempo todo. Sem isto, reabrir a importação
+  // mostraria a prévia da planilha anterior e o botão ofereceria importar de
+  // novo peças que já entraram.
+  useEffect(() => {
+    if (dialog === "import") return;
+    setImportPlan(null);
+    setImportFileName("");
+    setImportReading(false);
+  }, [dialog]);
 
   if (!dialog) return null;
   const activeMechanics = users.filter((user) => user.active !== false && isMechanicUser(user));
@@ -2342,10 +2362,61 @@ function AppDialog({
     }, deltas);
   };
 
+  /**
+   * Lê a planilha escolhida e monta a prévia.
+   *
+   * Nada é gravado aqui: a pessoa vê quantas peças entram, quantas são
+   * atualizadas e quais linhas têm problema antes de confirmar. Estoque errado
+   * só aparece na hora de vender, e aí já é tarde.
+   */
+  const readImportFile = (file: File | null | undefined) => {
+    if (!file) return;
+    setDialogError("");
+    setImportPlan(null);
+    setImportFileName(file.name);
+    if (file.size > 5 * 1024 * 1024) {
+      setImportFileName("");
+      return setDialogError("A planilha passa de 5 MB. Exporte só a aba do estoque.");
+    }
+    setImportReading(true);
+    const reader = new FileReader();
+    reader.onerror = () => { setImportReading(false); setDialogError("Não foi possível ler o arquivo escolhido."); };
+    reader.onload = () => {
+      setImportReading(false);
+      // Lido como bytes, e não como texto, para dar conta da planilha salva em
+      // ANSI pelo Excel em português (ver decodeSheetBytes).
+      const sheet = parseStockSheet(decodeSheetBytes(reader.result as ArrayBuffer));
+      setImportPlan(planStockImport(sheet.rows, products, sheet.issues));
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
   const submit = async () => {
     if (saving) return;
     setDialogError("");
     if (dialog === "os" && step < 5) return setStep(step + 1);
+
+    if (dialog === "import") {
+      if (!importPlan) return setDialogError("Escolha a planilha preenchida antes de importar.");
+      const total = importPlan.create.length + importPlan.update.length;
+      if (!total) return setDialogError("Nenhuma linha desta planilha pode ser importada. Corrija os problemas apontados e tente de novo.");
+      setSaving(true);
+      try {
+        const result = await saveImportedProducts(
+          importPlan.create.map((row) => newProductPayload(row, settings)),
+          importPlan.update.map(({ row, product }) => ({ id: product.id, data: updatedProductPayload(row, product) })),
+        );
+        const created = result?.created.length ?? 0;
+        const updated = result?.updated.length ?? 0;
+        setImportPlan(null);
+        setImportFileName("");
+        return finish(`Importação concluída: ${created} peça(s) cadastrada(s) e ${updated} atualizada(s).`);
+      } catch (error) {
+        return setDialogError(error instanceof Error ? error.message : "Não foi possível importar a planilha.");
+      } finally {
+        setSaving(false);
+      }
+    }
 
     if (dialog === "os") {
       setSaving(true);
@@ -2672,7 +2743,9 @@ function AppDialog({
   };
   const primaryLabels: Partial<Record<Exclude<DialogKind, null>, string>> = {
     quick: "Finalizar e receber",
-    import: "Importar e conferir",
+    // Depois da prévia o botão diz o que vai acontecer, e não "conferir" —
+    // a conferência já é a tela que está na frente da pessoa.
+    import: importPlan ? `Importar ${importPlan.create.length + importPlan.update.length} peça(s)` : "Escolher planilha",
     payment: "Confirmar recebimento",
     catalog: "Adicionar selecionado",
     client: showQuickCustomer ? "Salvar cliente" : "Usar selecionado",
@@ -2827,12 +2900,58 @@ function AppDialog({
           <div className="dialog-body form-section">
             <div className="upload-zone">
               <span className="upload-icon"><Icon name="file"/></span>
-              <strong>Selecione a planilha preenchida</strong>
-              <p>Formato CSV exportado pelo Google Sheets, até 5 MB.</p>
-              <label className="outline-button large file-picker">Escolher arquivo<input type="file" accept=".csv,text/csv"/></label>
+              <strong>{importFileName || "Selecione a planilha preenchida"}</strong>
+              <p>{importReading ? "Lendo a planilha…" : "Formato CSV exportado pelo Google Sheets ou pelo Excel, até 5 MB."}</p>
+              <label className="outline-button large file-picker">{importPlan ? "Trocar arquivo" : "Escolher arquivo"}<input type="file" accept=".csv,text/csv" onChange={(event) => { readImportFile(event.target.files?.[0]); event.target.value = ""; }}/></label>
             </div>
             <button className="template-link" onClick={downloadStockTemplate}><Icon name="arrow" size={16}/>Ainda não tem o modelo? Baixar planilha de exemplo</button>
-            <div className="info-strip"><Icon name="check" size={18}/><span>Antes de cadastrar, o sistema mostrará os itens com erro ou dados duplicados para você conferir.</span></div>
+
+            {importPlan ? (
+              <>
+                <div className="module-summary">
+                  <article><span>Peças novas</span><strong>{importPlan.create.length}</strong><small>Serão cadastradas</small></article>
+                  <article><span>Já cadastradas</span><strong>{importPlan.update.length}</strong><small>Quantidade e dados atualizados</small></article>
+                  <article className={importPlan.issues.length ? "summary-danger" : ""}><span>Linhas com problema</span><strong>{importPlan.issues.length}</strong><small>{importPlan.issues.length ? "Não serão importadas" : "Planilha sem erros"}</small></article>
+                </div>
+
+                {importPlan.issues.length ? (
+                  <div className="table-scroll">
+                    <table>
+                      <thead><tr><th>Linha</th><th>Peça</th><th>O que precisa corrigir</th></tr></thead>
+                      <tbody>{importPlan.issues.map((issue, index) => (
+                        <tr key={`${issue.line}-${index}`}>
+                          <td className="mono"><strong>{issue.line || "—"}</strong></td>
+                          <td>{issue.name || "—"}</td>
+                          <td><span className="status red"><i/>{issue.message}</span></td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                ) : null}
+
+                {importPlan.create.length + importPlan.update.length ? (
+                  <div className="table-scroll">
+                    <table>
+                      <thead><tr><th>Linha</th><th>Peça</th><th>Situação</th><th>Qtd.</th><th>Custo</th><th>Venda</th></tr></thead>
+                      <tbody>{[...importPlan.create.map((row) => ({ row, product: null })), ...importPlan.update].map(({ row, product }) => (
+                        <tr key={row.line}>
+                          <td className="mono">{row.line}</td>
+                          <td><strong className="order-id">{row.name}</strong><span>{row.barcode || row.partNumber || "sem código"}</span></td>
+                          <td><span className={product ? "status blue" : "status green"}><i/>{product ? `Atualiza ${product.id}` : "Nova"}</span></td>
+                          <td className="mono"><strong>{row.stock}</strong></td>
+                          <td className="mono">{formatBRL(row.cost)}</td>
+                          <td className="mono">{formatBRL(row.price)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
+            <div className="info-strip"><Icon name="check" size={18}/><span>{importPlan
+              ? "A quantidade da planilha substitui a do sistema — ela é uma contagem, não uma entrada de mercadoria. Coluna em branco não apaga o que já está cadastrado."
+              : "Antes de cadastrar, o sistema mostra o que vai entrar, o que vai ser atualizado e quais linhas têm problema, para você conferir."}</span></div>
           </div>
         ) : null}
 

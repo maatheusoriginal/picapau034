@@ -228,9 +228,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         brand: productData.brand,
         unit: productData.unit,
         location: productData.location,
-        cost: cost,
+        // Texto em reais, não o número cru: o tipo ProductRecord declara
+        // cost/price como string, a tabela de estoque imprime o valor direto
+        // ("R$ 45,00") e a entrada de mercadoria grava no mesmo formato.
+        // Gravando número, o produto voltava do Firestore como "45".
+        cost: productData.cost,
         markup: productData.markup,
-        price: price,
+        price: productData.price,
         stock: productData.stock,
         minimum: productData.minimum,
         maximum: productData.maximum,
