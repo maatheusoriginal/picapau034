@@ -7,11 +7,36 @@
  *
  * Rode com: npm run check:inventory
  */
-import { costAfterEntry, markupFromPrice, mergeParts, priceFromMarkup, shouldReserveStock, stockDeltas, toAmount, weightedAverageCost } from "../src/inventory";
+import { costAfterEntry, markupFromPrice, mergeParts, movementTotals, priceFromMarkup, productMovements, shouldReserveStock, stockDeltas, toAmount, weightedAverageCost } from "../src/inventory";
 import { serviceOrderStatuses } from "../src/types";
 
 const st = serviceOrderStatuses;
 const json = (value: unknown) => JSON.stringify(value);
+
+const fontes = {
+  stockEntries: [
+    { id: "ENT-0001", date: "01/03/2026", entryAt: "2026-03-01T10:00:00.000Z", supplierName: "Distribuidora XYZ",
+      items: [{ productId: "PRD-001", quantity: 10, unitCost: 40, total: 400 }, { productId: "PRD-002", quantity: 5, unitCost: 10, total: 50 }] },
+  ],
+  sales: [
+    { id: "VEN-0002", date: "05/03/2026", soldAt: "2026-03-05T14:00:00.000Z", origin: "PDV", customer: "Rayane",
+      items: [{ productId: "PRD-001", quantity: 2, price: 120, name: "Óleo" }] },
+    { id: "VEN-0009", date: "06/03/2026", soldAt: "2026-03-06T09:00:00.000Z", origin: "PDV", customer: "Outro",
+      items: [{ productId: "PRD-002", quantity: 1, price: 30, name: "Outra peça" }] },
+  ],
+  orders: [
+    // Encerrada e com baixa registrada: entra no histórico.
+    { id: "OS-0001", customer: "João", closedAt: "03/03/2026",
+      deductedItems: [{ productId: "PRD-001", quantity: 3 }],
+      items: [{ productId: "PRD-001", quantity: 3, price: 180 }] },
+    // Ainda em orçamento: lista a peça mas não baixou nada.
+    { id: "OS-0002", customer: "Ana", time: "07/03 09:00",
+      deductedItems: [],
+      items: [{ productId: "PRD-001", quantity: 1, price: 60 }] },
+  ],
+};
+const mov = productMovements("PRD-001", fontes);
+const totais = movementTotals(mov);
 
 const casos: Array<[string, unknown, unknown]> = [
   // Preço a partir do markup
@@ -61,6 +86,19 @@ const casos: Array<[string, unknown, unknown]> = [
   ["com a trava ligada, serviço iniciado reserva", shouldReserveStock("Em serviço", true, st), true],
   ["com a trava ligada, entrega segue reservada", shouldReserveStock("Entrega", true, st), true],
   ["com a trava desligada, a recepção já reserva", shouldReserveStock("Recepção", false, st), true],
+  // --- Histórico de movimentação da peça ---
+  ["a peça mostra entradas e saídas", mov.length, 3],
+  ["a mais recente vem primeiro", mov[0]!.documentId, "VEN-0002"],
+  ["a compra entra com quantidade positiva", mov.find((m) => m.documentId === "ENT-0001")!.quantity, 10],
+  ["a venda sai com quantidade negativa", mov.find((m) => m.documentId === "VEN-0002")!.quantity, -2],
+  ["a OS aparece pelo que baixou de verdade", mov.find((m) => m.documentId === "OS-0001")!.quantity, -3],
+  ["OS ainda em orçamento não aparece", mov.some((m) => m.documentId === "OS-0002"), false],
+  ["venda de outra peça não entra no histórico", mov.some((m) => m.documentId === "VEN-0009"), false],
+  ["o unitário da venda sai do preço da linha", mov.find((m) => m.documentId === "VEN-0002")!.unitValue, 60],
+  ["peça sem id não devolve histórico", productMovements("", fontes).length, 0],
+  ["total que entrou", totais.inboundQuantity, 10],
+  ["total que saiu", totais.outboundQuantity, 5],
+  ["valor comprado", totais.inboundValue, 400],
 ];
 
 let falhas = 0;

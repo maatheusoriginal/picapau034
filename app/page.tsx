@@ -1573,7 +1573,7 @@ function ModuleWorkspace({
                   <td><strong className={product.stock <= product.minimum ? "danger-text" : ""}>{product.stock} un.</strong><span>Mín. {product.minimum}</span></td>
                   <td className="mono">{product.cost}</td><td><strong className="mono">{product.price}</strong></td>
                   <td><span className={`status ${product.status === "Normal" ? "green" : product.status === "Crítico" ? "amber" : "red"}`}><i/>{product.status}</span></td>
-                  <td><button className="row-button" aria-label={`Abrir ${product.name}`} onClick={() => canOperate ? openDialog("product") : notify("Seu perfil pode consultar o estoque, mas não alterar produtos.")}><Icon name="arrow" size={17}/></button></td>
+                  <td><button className="row-button" aria-label={`Abrir ${product.name}`} onClick={() => canOperate ? openDialog("product", product.id) : notify("Seu perfil pode consultar o estoque, mas não alterar produtos.")}><Icon name="arrow" size={17}/></button></td>
                 </tr>
               )) : (
                 <tr>
@@ -1600,17 +1600,18 @@ function ModuleWorkspace({
   };
   const config = configs[active] ?? configs.Clientes;
 
-  const defaultRecords = clients.map((client) => ({ name: client.name, sub: client.phone || "Sem telefone", meta: client.detail || "Cliente cadastrado", initials: (client.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "CL").toUpperCase() }));
+  const defaultRecords = clients.map((client) => ({ id: client.id, name: client.name, sub: client.phone || "Sem telefone", meta: client.detail || "Cliente cadastrado", initials: (client.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "CL").toUpperCase() }));
   const motorcycleRecords = motorcycles.map((moto) => {
     const owner = clients.find((c) => c.id === moto.ownerId);
     return {
+      id: moto.id,
       name: `${moto.brand} ${moto.model}`,
       sub: `${owner ? owner.name : "Proprietário não vinculado"} · ${moto.plate}`,
       meta: `${moto.year} · ${moto.color}`,
       initials: (moto.model.slice(0, 2) || "MT").toUpperCase(),
     };
   });
-  const supplierRecords = suppliers.map((supplier) => ({ name: supplier.name, sub: `${supplier.phone || "Sem telefone"} · ${supplier.deliveryDays === 0 ? "Entrega no dia" : `Entrega em ${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}`, meta: supplier.categories, initials: (supplier.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "FN").toUpperCase() }));
+  const supplierRecords = suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name, sub: `${supplier.phone || "Sem telefone"} · ${supplier.deliveryDays === 0 ? "Entrega no dia" : `Entrega em ${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}`, meta: supplier.categories, initials: (supplier.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "FN").toUpperCase() }));
   
   const records = active === "Fornecedores" ? supplierRecords : active === "Motocicletas" ? motorcycleRecords : active === "Clientes" ? defaultRecords : [];
   
@@ -1649,7 +1650,7 @@ function ModuleWorkspace({
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Buscar em ${active.toLowerCase()}...`}/></label><button className="outline-button large" onClick={() => setListFilter(listFilter === "Todos" ? "Recentes" : "Todos")}>{listFilter === "Todos" ? "Mais recentes" : "Mostrar todos"}</button></div>
         {filteredRecords.length > 0 ? (
           filteredRecords.map((record) => (
-            <button className="registry-row" key={`${record.name}-${record.sub}`} onClick={() => canOperate ? openDialog(active === "Fornecedores" ? "supplier" : active === "Compras e entradas" ? "purchase" : active === "Financeiro" ? "finance" : active === "Motocicletas" ? "motorcycle" : active === "Clientes" ? "client" : "record") : notify("Seu perfil possui acesso de consulta a este cadastro.")}>
+            <button className="registry-row" key={record.id} onClick={() => canOperate ? openDialog(active === "Fornecedores" ? "supplier" : active === "Compras e entradas" ? "purchase" : active === "Financeiro" ? "finance" : active === "Motocicletas" ? "motorcycle" : active === "Clientes" ? "client" : "record", record.id) : notify("Seu perfil possui acesso de consulta a este cadastro.")}>
               <span className="registry-avatar">{record.initials}</span>
               <span><strong>{record.name}</strong><small>{record.sub}</small></span>
               <span className="registry-meta">{record.meta}</span><Icon name="arrow" size={17}/>
@@ -1687,7 +1688,7 @@ function AppDialog({
   orders,
   expenses,
   notify,
-  selectedOrderId,
+  selectedRecordId,
   osPrefix,
   canManageCustomers,
   cart,
@@ -1720,7 +1721,7 @@ function AppDialog({
   orders: OrderRecord[];
   expenses: ExpenseRecord[];
   notify: (message: string) => void;
-  selectedOrderId: string;
+  selectedRecordId: string;
   osPrefix: string;
   canManageCustomers: boolean;
   cart: CartItem[];
@@ -1732,12 +1733,21 @@ function AppDialog({
   settings: Partial<SettingsConfig> | null;
   currentUser: FirebaseUserSummary | null;
 }) {
+  // Os modais de cadastro já sabiam editar; o que faltava era receber o
+  // registro. Sem isto, clicar numa linha da lista abria um formulário em
+  // branco e o "salvar" criava um registro novo em vez de atualizar.
+  const editingProduct = products.find((product) => product.id === selectedRecordId) ?? null;
+  const editingClient = clients.find((client) => client.id === selectedRecordId) ?? null;
+  const editingMotorcycle = motorcycles.find((motorcycle) => motorcycle.id === selectedRecordId) ?? null;
+  const editingSupplier = suppliers.find((supplier) => supplier.id === selectedRecordId) ?? null;
+
   if (dialog === "product") {
     return (
       <Suspense fallback={<LazyFallback />}>
         <ProductFormModal
           isOpen={true}
           onClose={close}
+          editingProduct={editingProduct}
           onSaved={(prod) => finish(`Produto "${prod.name}" salvo com sucesso no Firestore!`)}
           categories={categories}
           suppliers={suppliers}
@@ -1745,6 +1755,7 @@ function AppDialog({
           allProducts={products}
           units={systemList(lists, "units")}
           settings={settings}
+          movementSources={{ stockEntries, sales, orders }}
         />
       </Suspense>
     );
@@ -1756,6 +1767,7 @@ function AppDialog({
         <SupplierFormModal
           isOpen={true}
           onClose={close}
+          editingSupplier={editingSupplier}
           onSaved={(sup) => finish(`Fornecedor "${sup.name}" salvo com sucesso no Firestore!`)}
           notify={notify || finish}
           allSuppliers={suppliers}
@@ -1770,6 +1782,7 @@ function AppDialog({
         <MotorcycleFormModal
           isOpen={true}
           onClose={close}
+          editingMotorcycle={editingMotorcycle}
           onSaved={(moto) => finish(`Motocicleta placa ${moto.plate} salva com sucesso no Firestore!`)}
           clients={clients}
           notify={notify || finish}
@@ -1786,6 +1799,7 @@ function AppDialog({
         <ClientFormModal
           isOpen={true}
           onClose={close}
+          editingClient={editingClient}
           onSaved={(cli) => finish(`Cliente "${cli.name}" salvo com sucesso no Firestore!`)}
           notify={notify || finish}
           allClients={clients}
@@ -1893,9 +1907,9 @@ function AppDialog({
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState("");
 
-  const currentOrder = orders.find((order) => order.id === selectedOrderId) ?? orders[0];
+  const currentOrder = orders.find((order) => order.id === selectedRecordId) ?? orders[0];
   // O botão de baixa passa o id da conta pelo mesmo caminho que o detalhe da OS.
-  const currentAccount = accounts.find((account) => account.id === selectedOrderId);
+  const currentAccount = accounts.find((account) => account.id === selectedRecordId);
   const currentAccountOpen = currentAccount ? accountOpen(currentAccount) : 0;
 
   // Ao abrir o detalhe, o diálogo assume a situação e a equipe da OS clicada.
@@ -3267,8 +3281,9 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   // isso em um efeito faria o endereço piscar /admin -> / -> /admin.
   const [active, setActive] = useState(() => (canManageSettings && isAdminPath() ? "Administração" : "Visão geral"));
   const [dialog, setDialog] = useState<DialogKind>(null);
-  // Qual OS o diálogo de detalhe deve abrir. Vazio = nenhuma selecionada.
-  const [selectedOrderId, setSelectedOrderId] = useState("");
+  // Qual registro o diálogo deve abrir: OS, conta ou cadastro.
+  // Vazio = nenhum selecionado, e o diálogo abre em branco.
+  const [selectedRecordId, setSelectedRecordId] = useState("");
   // Carrinho do PDV: mora aqui porque a tela do balcão monta a venda e o
   // diálogo de pagamento a recebe.
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -3379,7 +3394,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
 
   const openDialog = (next: Exclude<DialogKind, null>, recordId?: string) => {
     setOsStep(1);
-    setSelectedOrderId(recordId ?? "");
+    setSelectedRecordId(recordId ?? "");
     setDialog(next);
   };
   const notify = (message: string) => {
@@ -3603,7 +3618,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} stockEntries={stockEntries} accounts={accounts} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedOrderId={selectedOrderId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} stockEntries={stockEntries} accounts={accounts} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );
