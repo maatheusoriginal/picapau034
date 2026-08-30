@@ -1,4 +1,4 @@
-import type { AccountRecord, AccountSettlement, ExpenseRecord, OrderRecord, SaleRecord, ServiceOrderItem } from "./types";
+import type { AccountRecord, AccountSettlement, ExpenseRecord, MovementRecord, OrderRecord, SaleRecord, ServiceOrderItem } from "./types";
 
 /**
  * Cálculos do financeiro da oficina, em um lugar só.
@@ -74,6 +74,62 @@ export type FinanceEntry = {
   /** Custo das peças desta entrada. */
   cost: number;
 };
+
+/**
+ * Desconto que cabe na venda.
+ *
+ * Desconto maior que o subtotal deixaria o total negativo — a oficina pagando
+ * para vender. É recusado, não aparado em silêncio: se alguém digitou 500 num
+ * carrinho de 50, o certo é a pessoa ver o erro, e não a venda sair por zero.
+ */
+export function discountProblem(subtotal: number, discount: number): string {
+  if (discount < 0) return "O desconto não pode ser negativo.";
+  if (discount > subtotal) return `O desconto não pode passar do subtotal de ${brl(subtotal)}.`;
+  return "";
+}
+
+/** Total que o cliente paga: o subtotal menos o desconto, nunca negativo. */
+export function totalAfterDiscount(subtotal: number, discount: number): number {
+  return round2(Math.max(0, subtotal - Math.max(0, discount)));
+}
+
+/** Quanto o desconto representa do subtotal, para a tela mostrar. */
+export function discountPercent(subtotal: number, discount: number): number {
+  if (!(subtotal > 0)) return 0;
+  return Math.round((discount / subtotal) * 1000) / 10;
+}
+
+// ---------------------------------------------------------------------------
+// Movimentações lançadas à mão
+// ---------------------------------------------------------------------------
+
+export function movementIsIncome(movement: Pick<MovementRecord, "kind">): boolean {
+  return movement.kind === "entrada";
+}
+
+/** Soma das entradas manuais, opcionalmente só as de hoje. */
+export function movementIncome(movements: MovementRecord[], onlyToday = false): number {
+  const today = todayBR();
+  return round2(movements
+    .filter((movement) => movementIsIncome(movement) && (!onlyToday || movement.date === today))
+    .reduce((total, movement) => total + movement.amount, 0));
+}
+
+/** Soma das saídas manuais, opcionalmente só as de hoje. */
+export function movementExpense(movements: MovementRecord[], onlyToday = false): number {
+  const today = todayBR();
+  return round2(movements
+    .filter((movement) => !movementIsIncome(movement) && (!onlyToday || movement.date === today))
+    .reduce((total, movement) => total + movement.amount, 0));
+}
+
+/** O que impede a movimentação de ser lançada. */
+export function movementProblem(amount: number, category: string, description: string): string {
+  if (!(amount > 0)) return "Informe um valor maior que zero.";
+  if (!category.trim()) return "Escolha o motivo da movimentação.";
+  if (!description.trim()) return "Descreva a movimentação. Sem isso ninguém entende o lançamento depois.";
+  return "";
+}
 
 /** Custo das peças de uma venda ou OS, conforme gravado no momento em que ela foi fechada. */
 function itemsCost(items: ServiceOrderItem[] | undefined): number {
@@ -295,6 +351,12 @@ export type FinanceSummary = {
   netProfit: number;
   /** OS encerradas. */
   closedOrders: number;
+  /** Entradas lançadas à mão (sucata, aporte, reembolso). */
+  manualIncome: number;
+  /** Saídas lançadas à mão. */
+  manualExpense: number;
+  /** Desconto concedido nas vendas. */
+  discountGiven: number;
 };
 
 export function financeSummary(
@@ -302,6 +364,7 @@ export function financeSummary(
   orders: OrderRecord[],
   expenses: ExpenseRecord[],
   accounts: AccountRecord[] = [],
+  movements: MovementRecord[] = [],
 ): FinanceSummary {
   const today = todayBR();
   const revenue = revenueEntries(sales, orders);
@@ -330,13 +393,19 @@ export function financeSummary(
   const payables = payableEntries(expenses, accounts);
   const overdue = payables.filter((entry) => entry.status === "Atrasado");
 
-  const receivedToday = sum(revenueToday, "net") + settlementTotal(receivedSettlements, true);
+  // Movimentações manuais mexem no dinheiro, mas NÃO no faturamento: aporte do
+  // dono e venda de sucata não são serviço prestado, e somá-los ao faturamento
+  // estragaria o ticket médio e a leitura de como a oficina está vendendo.
+  const manualIncome = movementIncome(movements);
+  const manualExpense = movementExpense(movements);
+
+  const receivedToday = sum(revenueToday, "net") + settlementTotal(receivedSettlements, true) + movementIncome(movements, true);
 
   const receivedFromAccounts = settlementTotal(receivedSettlements, false);
   const paidFromAccounts = settlementTotal(paidSettlements, false);
-  const totalReceived = receivedTotal + receivedFromAccounts;
-  const totalPaid = paidExpenses + paidFromAccounts;
-  const totalPaidToday = paidExpensesToday + settlementTotal(paidSettlements, true);
+  const totalReceived = receivedTotal + receivedFromAccounts + manualIncome;
+  const totalPaid = paidExpenses + paidFromAccounts + manualExpense;
+  const totalPaidToday = paidExpensesToday + settlementTotal(paidSettlements, true) + movementExpense(movements, true);
 
   return {
     receivedToday,
@@ -360,9 +429,18 @@ export function financeSummary(
     dayBalance: receivedToday - totalPaidToday,
     netProfit: totalReceived - totalPaid - partsCost,
     closedOrders: orders.filter((order) => order.closed).length,
+    manualIncome,
+    manualExpense,
+    // O desconto sai do que foi gravado na venda: recalcular pelos itens daria
+    // outro número se o preço da peça mudar no cadastro depois.
+    discountGiven: round2(sales.reduce((total, sale) => total + (sale.discount ?? 0), 0)),
   };
 }
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function brl(value: number): string {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }

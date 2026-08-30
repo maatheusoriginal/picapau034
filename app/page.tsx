@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
-import { accountOpen, accountStatus, financeSummary, isCreditPayment, payableEntries, receivableAccountEntries, splitInstallments } from "../src/finance";
+import { accountOpen, accountStatus, discountPercent, discountProblem, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, receivableAccountEntries, splitInstallments, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
@@ -36,6 +36,7 @@ import {
   addCashMovement,
   closeCashSession,
   openCashSession,
+  recordMovement,
   recordStockEntry,
   saveImportedProducts,
   saveOrderWithStock,
@@ -80,6 +81,7 @@ import type {
   ExpenseRecord,
   IconName,
   MotorcycleRecord,
+  MovementRecord,
   OpenDialog,
   OrderRecord,
   PartnerConfig,
@@ -164,6 +166,7 @@ const initialStockEntries: StockEntryRecord[] = [];
 
 const initialAccounts: AccountRecord[] = [];
 const initialCashSessions: CashSession[] = [];
+const initialMovements: MovementRecord[] = [];
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -542,6 +545,8 @@ function PdvWorkspace({
   openDialog,
   cart,
   setCart,
+  discount,
+  setDiscount,
   products = [],
   clients = [],
   blockZeroStockSale = true,
@@ -550,11 +555,17 @@ function PdvWorkspace({
   openDialog: OpenDialog;
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
+  discount: number;
+  setDiscount: (value: number) => void;
   products?: ProductRecord[];
   clients?: ClientRecord[];
   blockZeroStockSale?: boolean;
 }) {
   const [pdvSearch, setPdvSearch] = useState("");
+  // O texto digitado fica separado do número para a pessoa poder apagar tudo e
+  // recomeçar sem o campo pular para "0" a cada tecla.
+  const [showDiscount, setShowDiscount] = useState(false);
+  const [discountText, setDiscountText] = useState("");
   // Antes recalculado em toda renderização (inclusive a cada tecla digitada em
   // qualquer outro campo da tela), mesmo quando `products`/`cart` não mudaram.
   const total = useMemo(() => cart.reduce((sum, item) => sum + item.unit * item.quantity, 0), [cart]);
@@ -638,10 +649,18 @@ function PdvWorkspace({
           <div className="summary-title"><span>Resumo da venda</span><b>VENDA NO BALCÃO</b></div>
           <button className="pdv-client" onClick={() => openDialog("client")}><span className="registry-avatar">CF</span><div><strong>Consumidor final</strong><small>Adicionar cliente ou usar crediário</small></div><Icon name="arrow" size={17}/></button>
           <div className="summary-lines">
-            <div><span>Subtotal</span><b>R$ {total.toFixed(2).replace(".", ",")}</b></div>
-            <div><span>Desconto</span><button onClick={() => openDialog("finance")}>Adicionar</button></div>
+            <div><span>Subtotal</span><b>{formatBRL(total)}</b></div>
+            {/* O botão de desconto abria o diálogo de movimentação financeira,
+                que nunca teve nada a ver com a venda: o desconto não era
+                aplicado em lugar nenhum e o total nunca mudava. Agora o valor
+                é digitado aqui e desce até o pagamento e a venda gravada. */}
+            <div><span>Desconto</span>{showDiscount || discount > 0
+              ? <input className="summary-discount-input" inputMode="decimal" autoFocus value={discountText} onChange={(event) => { setDiscountText(event.target.value); setDiscount(toAmount(event.target.value)); }} placeholder="R$ 0,00"/>
+              : <button onClick={() => setShowDiscount(true)}>Adicionar</button>}</div>
+            {discount > 0 ? <div><span>{discountProblem(total, discount) ? "Desconto inválido" : `Desconto de ${discountPercent(total, discount).toString().replace(".", ",")}%`}</span><b>− {formatBRL(discount)}</b></div> : null}
           </div>
-          <div className="grand-total"><span>Total a receber</span><strong>R$ {total.toFixed(2).replace(".", ",")}</strong></div>
+          {discountProblem(total, discount) ? <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>{discountProblem(total, discount)}</span></div> : null}
+          <div className="grand-total"><span>Total a receber</span><strong>{formatBRL(totalAfterDiscount(total, discount))}</strong></div>
           <button className="payment-button" disabled={!cart.length} onClick={() => openDialog("payment")}><Icon name="wallet"/>Receber pagamento<span>F10</span></button>
           <div className="payment-hints"><span>PIX</span><span>Dinheiro</span><span>Cartão</span><span>Pagamento dividido</span></div>
           <button className="hold-sale" onClick={() => notify("Venda guardada para continuar depois.")}><Icon name="clock" size={17}/>Guardar venda</button>
@@ -683,6 +702,7 @@ function FinanceWorkspace({
   orders,
   accounts,
   cashSessions,
+  movements,
 }: {
   openDialog: OpenDialog;
   navigate: (destination: string) => void;
@@ -692,10 +712,11 @@ function FinanceWorkspace({
   orders: OrderRecord[];
   accounts: AccountRecord[];
   cashSessions: CashSession[];
+  movements: MovementRecord[];
 }) {
   // grossRevenue, partsCost e cardRevenue eram constantes 0 escritas no código,
   // então o lucro líquido era sempre o negativo dos gastos.
-  const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
+  const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts, movements), [sales, orders, expenses, accounts, movements]);
   const { grossTotal: grossRevenue, cardFees, paidExpenses, pendingExpenses, netProfit } = summary;
   // O botão precisa dizer a verdade: com o caixa aberto, o que se faz é
   // movimentar e fechar, não "abrir" de novo.
@@ -1434,9 +1455,12 @@ function ModuleWorkspace({
   clients,
   cart,
   setCart,
+  discount,
+  setDiscount,
   sales,
   accounts,
   cashSessions,
+  movements,
   openSettings,
   settingsTab,
   settings,
@@ -1471,9 +1495,12 @@ function ModuleWorkspace({
   clients: ClientRecord[];
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
+  discount: number;
+  setDiscount: (value: number) => void;
   sales: SaleRecord[];
   accounts: AccountRecord[];
   cashSessions: CashSession[];
+  movements: MovementRecord[];
   openSettings: (tab: SettingsTab) => void;
   settingsTab: SettingsTab;
   settings: Partial<SettingsConfig> | null;
@@ -1482,9 +1509,9 @@ function ModuleWorkspace({
   const [query, setQuery] = useState("");
   const [listFilter, setListFilter] = useState("Todos");
 
-  if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} products={products} clients={clients} blockZeroStockSale={settings?.blockZeroStockSale !== false} />;
+  if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} discount={discount} setDiscount={setDiscount} products={products} clients={clients} blockZeroStockSale={settings?.blockZeroStockSale !== false} />;
   if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
-  if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions}/>;
+  if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} />;
@@ -1636,7 +1663,7 @@ function ModuleWorkspace({
   
   // Os KPIs de Financeiro, Relatórios e Vendas do balcão eram "R$ 0,00" e "0"
   // escritos direto no ternário.
-  const moduleSummary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
+  const moduleSummary = useMemo(() => financeSummary(sales, orders, expenses, accounts, movements), [sales, orders, expenses, accounts, movements]);
   const salesToday = useMemo(() => sales.filter((sale) => sale.date === new Date().toLocaleDateString("pt-BR")), [sales]);
   const firstValue = active === "Financeiro" ? formatBRL(moduleSummary.dayBalance) : active === "Relatórios" ? formatBRL(moduleSummary.grossMonth) : active === "Motocicletas" ? String(motorcycles.length) : active === "Vendas do balcão" ? String(salesToday.length) : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((supplier) => supplier.active).length) : String(clients.length);
   const secondValue = active === "Financeiro" ? formatBRL(moduleSummary.receivableTotal) : active === "Relatórios" ? formatBRL(moduleSummary.averageTicket) : active === "Motocicletas" ? String(new Set(motorcycles.map((m) => m.brand)).size) : active === "Vendas do balcão" ? formatBRL(salesToday.reduce((total, sale) => total + sale.total, 0)) : active === "Compras e entradas" ? "R$ 0,00" : active === "Fornecedores" ? (suppliers.length > 0 ? `${Math.round(suppliers.reduce((sum, s) => sum + s.deliveryDays, 0) / suppliers.length)} dias` : "0 dias") : String(clients.filter((c) => Boolean(c.phone)).length);
@@ -1712,10 +1739,13 @@ function AppDialog({
   canManageCustomers,
   cart,
   setCart,
+  discount,
+  setDiscount,
   sales,
   stockEntries,
   accounts,
   cashSessions,
+  movements,
   lists,
   settings,
   currentUser,
@@ -1746,10 +1776,13 @@ function AppDialog({
   canManageCustomers: boolean;
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
+  discount: number;
+  setDiscount: (value: number) => void;
   sales: SaleRecord[];
   stockEntries: StockEntryRecord[];
   accounts: AccountRecord[];
   cashSessions: CashSession[];
+  movements: MovementRecord[];
   lists: Partial<SystemLists> | null;
   settings: Partial<SettingsConfig> | null;
   currentUser: FirebaseUserSummary | null;
@@ -1929,6 +1962,13 @@ function AppDialog({
   const [dialogError, setDialogError] = useState("");
   // Importação de planilha: a prévia fica em pé até a pessoa confirmar, para
   // ela conferir o que vai entrar antes de mexer no estoque.
+  // Movimentação de dinheiro lançada à mão.
+  const [movementKind, setMovementKind] = useState<"entrada" | "saida">("entrada");
+  const [movementAmount, setMovementAmount] = useState("");
+  const [movementCategory, setMovementCategory] = useState("");
+  const [movementMethod, setMovementMethod] = useState("Dinheiro");
+  const [movementDate, setMovementDate] = useState(() => new Date().toISOString().split("T")[0] ?? "");
+  const [movementDescription, setMovementDescription] = useState("");
   // Caixa: valor e motivo da movimentação, e o contado no fechamento.
   const [cashAmount, setCashAmount] = useState("");
   const [cashReason, setCashReason] = useState("");
@@ -1965,6 +2005,13 @@ function AppDialog({
 
   // Mesmo motivo no caixa: reabrir o diálogo com o valor da sangria anterior
   // ainda digitado é o tipo de coisa que faz sair dinheiro duas vezes.
+  useEffect(() => {
+    if (dialog === "finance") return;
+    setMovementAmount("");
+    setMovementCategory("");
+    setMovementDescription("");
+  }, [dialog]);
+
   useEffect(() => {
     if (dialog === "cash") return;
     setCashAmount("");
@@ -2037,8 +2084,11 @@ function AppDialog({
     ...behaviourExpenseCategories,
     ...(expenseCategoryNames.length ? expenseCategoryNames : fallbackExpenseCategories).filter((name) => !behaviourExpenseCategories.includes(name)),
   ];
-  const cartTotal = cart.reduce((sum, item) => sum + item.unit * item.quantity, 0);
-  const dialogSummary = financeSummary(sales, orders, expenses, accounts);
+  const cartSubtotal = cart.reduce((sum, item) => sum + item.unit * item.quantity, 0);
+  // O que o cliente paga já é com desconto. Antes o diálogo de pagamento
+  // cobrava o subtotal cheio porque o desconto não existia em lugar nenhum.
+  const cartTotal = totalAfterDiscount(cartSubtotal, discount);
+  const dialogSummary = financeSummary(sales, orders, expenses, accounts, movements);
   // Caixa: a sessão aberta e o que o sistema espera encontrar na gaveta.
   const cashOpen = openSession(cashSessions);
   const cashSources = { sales, orders, expenses, accounts };
@@ -2046,6 +2096,19 @@ function AppDialog({
   const drawerMoves = drawerEntries(cashOpen, cashSources);
   const cashAmountValue = toAmount(cashAmount);
   const cashCountedValue = toAmount(cashCounted);
+  // As "últimas atualizações" eram uma linha fixa dizendo que não havia nada.
+  // Agora saem do que realmente aconteceu, do mais recente para o mais antigo.
+  const recentActivity = [
+    ...sales.map((sale) => ({ id: sale.id, at: sale.soldAt, date: sale.date, text: `${sale.id} · ${sale.origin} de ${formatBRL(sale.total)}` })),
+    ...orders.filter((order) => order.closed).map((order) => ({ id: order.id, at: order.closedAtISO ?? "", date: order.closedAt ?? "", text: `${order.id} · OS encerrada de ${formatBRL(order.total ?? 0)}` })),
+    ...movements.map((movement) => ({ id: movement.id, at: movement.at, date: movement.date, text: `${movement.id} · ${movement.kind === "entrada" ? "Entrada" : "Saída"} de ${formatBRL(movement.amount)} (${movement.category})` })),
+  ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 6);
+
+  // Os motivos vêm das listas do sistema, então a oficina ajusta os seus em
+  // Configurações → Listas do sistema sem mexer no código.
+  const movementCategories = systemList(lists, movementKind === "entrada" ? "movementIncomeCategories" : "movementExpenseCategories");
+  const movementAmountValue = toAmount(movementAmount);
+  const movementIssue = manualMovementProblem(movementAmountValue, movementCategory, movementDescription);
   const cashProblem = cashAction === "Fechar caixa" ? "" : movementProblem(cashAction === "Sangria" ? "Sangria" : "Suprimento", cashAmountValue, drawer.expected);
   const cashGap = cashDifference(cashCountedValue, drawer.expected);
   const paymentGross = dialog === "orderCheckout" ? checkoutTotal : cartTotal;
@@ -2136,7 +2199,7 @@ function AppDialog({
     employee: "Dados pessoais, função, pagamento e acesso ao sistema.",
     supplier: "Contato, condições e categorias fornecidas.",
     purchase: "Entrada simples de produtos, sem rotina fiscal.",
-    finance: "Registre entrada, saída, sangria ou suprimento.",
+    finance: "Dinheiro que entra ou sai sem ser venda nem conta agendada.",
     order: currentOrder ? `Cliente: ${currentOrder.customer} · Placa ${currentOrder.plate}` : "Detalhes da ordem de serviço",
     orderCheckout: "Confira os itens executados, receba e encerre a ordem de serviço.",
     settings: "Tudo que pode ser alterado, concentrado em uma tela.",
@@ -2319,6 +2382,8 @@ function AppDialog({
   const registerSale = async (input: {
     origin: "PDV" | "Serviço rápido";
     items: ServiceOrderItem[];
+    subtotal?: number;
+    discount?: number;
     total: number;
     stockUpdates: Array<{ productId: string; quantity: number }>;
     mechanicId?: string;
@@ -2338,6 +2403,9 @@ function AppDialog({
     await recordSale(saleId, {
       origin: input.origin,
       items: input.items,
+      // Só grava o desconto quando houve um: o campo ausente já quer dizer
+      // "venda sem desconto" e não polui os registros antigos.
+      ...(input.discount ? { subtotal: input.subtotal ?? input.total + input.discount, discount: input.discount } : {}),
       total: input.total,
       paymentMethod: input.method,
       ...(usesMachine ? {
@@ -2374,6 +2442,7 @@ function AppDialog({
       id: saleId,
       origin: input.origin,
       items: input.items,
+      ...(input.discount ? { subtotal: input.subtotal ?? input.total + input.discount, discount: input.discount } : {}),
       total: input.total,
       paymentMethod: input.method,
       ...(usesMachine ? { machineName: selectedMachine?.name ?? "" } : {}),
@@ -2433,6 +2502,37 @@ function AppDialog({
     if (saving) return;
     setDialogError("");
     if (dialog === "os" && step < 5) return setStep(step + 1);
+
+    // O relatório não grava nada; dizer "registro atualizado com sucesso" era
+    // avisar de uma gravação que nunca aconteceu.
+    if (dialog === "record") return close();
+
+    if (dialog === "finance") {
+      if (movementIssue) return setDialogError(movementIssue);
+      setSaving(true);
+      try {
+        // A data escolhida pode ser passada; a hora é a de agora, que é o que
+        // liga a movimentação à sessão de caixa aberta.
+        const chosen = movementDate ? new Date(`${movementDate}T${new Date().toTimeString().slice(0, 8)}`) : new Date();
+        const id = await recordMovement({
+          kind: movementKind,
+          amount: movementAmountValue,
+          category: movementCategory,
+          method: movementMethod,
+          description: movementDescription.trim(),
+          date: chosen.toLocaleDateString("pt-BR"),
+          at: chosen.toISOString(),
+          operatorUid: currentUser?.uid ?? "",
+          operatorName: currentUser?.displayName || currentUser?.email || "",
+        });
+        setMovementAmount(""); setMovementCategory(""); setMovementDescription("");
+        return finish(`${movementKind === "entrada" ? "Entrada" : "Saída"} ${id} de ${formatBRL(movementAmountValue)} registrada.`);
+      } catch (error) {
+        return setDialogError(error instanceof Error ? error.message : "Não foi possível registrar a movimentação.");
+      } finally {
+        setSaving(false);
+      }
+    }
 
     if (dialog === "cash") {
       const operator = { uid: currentUser?.uid, name: currentUser?.displayName || currentUser?.email || "" };
@@ -2732,9 +2832,12 @@ function AppDialog({
       if (semEstoque) return setDialogError(`${semEstoque.name} tem apenas ${semEstoque.stock} em estoque.`);
       setSaving(true);
       try {
+        if (discountProblem(cartSubtotal, discount)) return setDialogError(discountProblem(cartSubtotal, discount));
         const saleId = await registerSale({
           origin: "PDV",
           method: paymentMethod,
+          subtotal: cartSubtotal,
+          discount,
           total: cartTotal,
           items: cart.map((item) => ({
             id: item.id,
@@ -2747,7 +2850,10 @@ function AppDialog({
           stockUpdates: cart.map((item) => ({ productId: item.id, quantity: item.quantity })),
         });
         setCart([]);
-        return finish(`Venda ${saleId} de ${formatBRL(cartTotal)} registrada e estoque baixado.`);
+        setDiscount(0);
+        return finish(discount > 0
+          ? `Venda ${saleId} de ${formatBRL(cartTotal)} registrada com ${formatBRL(discount)} de desconto e estoque baixado.`
+          : `Venda ${saleId} de ${formatBRL(cartTotal)} registrada e estoque baixado.`);
       } catch (error) {
         return setDialogError(error instanceof Error ? error.message : "Não foi possível registrar a venda.");
       } finally {
@@ -2825,7 +2931,9 @@ function AppDialog({
       employee: "Funcionário salvo e acesso atualizado.",
       supplier: "Fornecedor salvo com sucesso.",
       purchase: "Entrada registrada e estoque atualizado.",
-      finance: "Movimentação registrada no caixa.",
+      finance: "Movimentação registrada.",
+      // Nunca usada: o relatório fecha sem gravar (ver o early return acima).
+      record: "",
       order: "Alterações da ordem de serviço salvas.",
       orderCheckout: "Ordem de serviço finalizada e recebimento confirmado.",
       settings: "Configurações salvas para a oficina.",
@@ -2835,7 +2943,6 @@ function AppDialog({
       payable: "Conta a pagar adicionada com sucesso.",
       settleReceivable: "Recebimento confirmado e saldo atualizado.",
       settlePayable: "Pagamento confirmado e conta atualizada.",
-      record: "Registro atualizado com sucesso.",
     };
     finish(messages[dialog]);
   };
@@ -2851,7 +2958,7 @@ function AppDialog({
     employee: "Salvar funcionário",
     supplier: "Salvar fornecedor",
     purchase: "Confirmar entrada",
-    finance: "Salvar movimentação",
+    finance: movementKind === "entrada" ? "Registrar entrada" : "Registrar saída",
     order: "Salvar alterações",
     orderCheckout: "Receber e finalizar OS",
     settings: "Salvar configurações",
@@ -2862,7 +2969,8 @@ function AppDialog({
     payable: "Criar conta a pagar",
     settleReceivable: "Confirmar recebimento",
     settlePayable: "Confirmar pagamento",
-    record: "Concluir",
+    // O relatório só mostra números; não há nada a "concluir".
+    record: "Fechar",
   };
 
   return (
@@ -3121,14 +3229,23 @@ function AppDialog({
         {dialog === "finance" ? (
           <div className="dialog-body form-section">
             <div className="choice-grid">
-              <label className="choice-card selected"><input type="radio" name="movement" defaultChecked/><span className="choice-radio"/><div><strong>Entrada</strong><small>Dinheiro recebido</small></div></label>
-              <label className="choice-card"><input type="radio" name="movement"/><span className="choice-radio"/><div><strong>Saída</strong><small>Despesa ou retirada</small></div></label>
+              <label className={movementKind === "entrada" ? "choice-card selected" : "choice-card"}><input type="radio" name="movement" checked={movementKind === "entrada"} onChange={() => { setMovementKind("entrada"); setMovementCategory(""); }}/><span className="choice-radio"/><div><strong>Entrada</strong><small>Dinheiro recebido</small></div></label>
+              <label className={movementKind === "saida" ? "choice-card selected" : "choice-card"}><input type="radio" name="movement" checked={movementKind === "saida"} onChange={() => { setMovementKind("saida"); setMovementCategory(""); }}/><span className="choice-radio"/><div><strong>Saída</strong><small>Despesa ou retirada</small></div></label>
             </div>
             <div className="form-grid">
-              <label className="field"><span>Valor</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Categoria</span><select><option>Venda balcão</option><option>Serviço</option><option>Compra de peças</option><option>Sangria</option><option>Suprimento</option></select></label>
-              <label className="field"><span>Forma</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Crédito</option><option>Transferência</option></select></label><label className="field"><span>Data</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label>
-              <label className="field field-full"><span>Descrição</span><textarea placeholder="Motivo ou observação da movimentação"/></label>
+              <label className="field"><span>Valor</span><input autoFocus inputMode="decimal" value={movementAmount} onChange={(event) => setMovementAmount(event.target.value)} placeholder="R$ 0,00"/></label>
+              <label className="field"><span>Motivo</span><select value={movementCategory} onChange={(event) => setMovementCategory(event.target.value)}><option value="">Escolha o motivo</option>{movementCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
+              <label className="field"><span>Forma</span><select value={movementMethod} onChange={(event) => setMovementMethod(event.target.value)}>{activePaymentMethods.map((method) => <option key={method.name}>{method.name}</option>)}</select></label>
+              <label className="field"><span>Data</span><input type="date" value={movementDate} onChange={(event) => setMovementDate(event.target.value)}/></label>
+              <label className="field field-full"><span>Descrição</span><textarea value={movementDescription} onChange={(event) => setMovementDescription(event.target.value)} placeholder="Motivo ou observação da movimentação"/></label>
             </div>
+            {/* Sangria e suprimento saíram da lista de motivos de propósito:
+                quem faz isso é o caixa. Ter dois caminhos para a mesma coisa
+                faria a conferência da gaveta contar o mesmo dinheiro duas
+                vezes — e ninguém entenderia a diferença no fim do dia. */}
+            <div className="info-strip"><Icon name="check" size={18}/><span>{cashOpen && movementMethod === "Dinheiro"
+              ? `Em dinheiro, esta movimentação entra na conferência do caixa ${cashOpen.id}. Para tirar ou pôr troco na gaveta, use Sangria e Suprimento no caixa.`
+              : "Use aqui o dinheiro que não é venda nem conta agendada. Sangria e suprimento ficam no caixa; conta com vencimento, em Contas a pagar."}</span></div>
           </div>
         ) : null}
 
@@ -3373,9 +3490,26 @@ function AppDialog({
 
         {dialog === "record" ? (
           <div className="dialog-body record-detail">
-            <div className="record-header"><span className="registry-avatar">FR</span><div><strong>Faturamento e resultado</strong><small>Relatório consolidado</small></div><span className="status green"><i/>Atualizado</span></div>
-            <div className="record-metrics"><article><span>Faturamento</span><strong>{formatBRL(orders ? orders.reduce((sum, o) => sum + (o.total ?? 0), 0) : 0)}</strong></article><article><span>Custos e gastos</span><strong>{formatBRL(expenses ? expenses.reduce((sum, e) => sum + e.amount, 0) : 0)}</strong></article><article><span>Lucro líquido</span><strong>{formatBRL((orders ? orders.reduce((sum, o) => sum + (o.total ?? 0), 0) : 0) - (expenses ? expenses.reduce((sum, e) => sum + e.amount, 0) : 0))}</strong></article></div><div className="net-profit-note"><Icon name="check" size={17}/><span>O resultado desconta peças, despesas, pagamentos de funcionários e taxas de cartão configuradas.</span></div>
-            <div className="history-list"><strong>Últimas atualizações</strong><div><i/><span><b>Hoje</b>Nenhuma movimentação anterior registrada.</span></div></div>
+            {/* Os três números eram calculados aqui na marra e estavam errados:
+                somavam TODA OS (inclusive orçamento que nunca foi fechado),
+                ignoravam as vendas do PDV e contavam como gasto pago até a
+                conta ainda agendada. Agora saem do mesmo financeSummary que o
+                resto do sistema usa, então as telas concordam entre si. */}
+            <div className="record-header"><span className="registry-avatar">FR</span><div><strong>Faturamento e resultado</strong><small>Vendas do balcão, serviços rápidos e OS encerradas</small></div><span className="status green"><i/>{dialogSummary.closedOrders} OS encerrada(s)</span></div>
+            <div className="record-metrics">
+              <article><span>Faturamento</span><strong>{formatBRL(dialogSummary.grossTotal)}</strong></article>
+              <article><span>Custos e gastos</span><strong>{formatBRL(dialogSummary.paidExpenses + dialogSummary.partsCost)}</strong></article>
+              <article><span>Lucro líquido</span><strong>{formatBRL(dialogSummary.netProfit)}</strong></article>
+            </div>
+            <div className="net-profit-note"><Icon name="check" size={17}/><span>O resultado desconta o custo das peças ({formatBRL(dialogSummary.partsCost)}), os gastos já pagos ({formatBRL(dialogSummary.paidExpenses)}) e as taxas de maquininha ({formatBRL(dialogSummary.cardFees)}). Contas ainda em aberto ({formatBRL(dialogSummary.pendingExpenses)}) não entram: não saíram do caixa.</span></div>
+            <div className="module-summary">
+              <article><span>Faturamento do mês</span><strong>{formatBRL(dialogSummary.grossMonth)}</strong><small>Mês corrente</small></article>
+              <article><span>Ticket médio</span><strong>{formatBRL(dialogSummary.averageTicket)}</strong><small>Por venda ou OS</small></article>
+              <article className={dialogSummary.overdueCount > 0 ? "summary-danger" : ""}><span>Contas vencidas</span><strong>{formatBRL(dialogSummary.overdueExpenses)}</strong><small>{dialogSummary.overdueCount} conta(s)</small></article>
+            </div>
+            <div className="history-list"><strong>Últimas movimentações</strong>{recentActivity.length
+              ? recentActivity.map((item) => <div key={item.id}><i/><span><b>{item.date}</b>{item.text}</span></div>)
+              : <div><i/><span><b>Hoje</b>Nenhuma movimentação registrada ainda.</span></div>}</div>
           </div>
         ) : null}
 
@@ -3587,6 +3721,9 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   // Carrinho do PDV: mora aqui porque a tela do balcão monta a venda e o
   // diálogo de pagamento a recebe.
   const [cart, setCart] = useState<CartItem[]>([]);
+  // O desconto mora aqui junto do carrinho: o painel do PDV oferece, o diálogo
+  // de pagamento cobra o valor já com ele, e a venda grava os dois.
+  const [cartDiscount, setCartDiscount] = useState(0);
   // Aba de Configurações a abrir. O painel /admin usa isto para levar direto
   // ao grupo escolhido em vez de sempre cair na primeira aba.
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
@@ -3631,6 +3768,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [stockEntries] = useFirebaseSyncedCollection<StockEntryRecord>("stockEntries", initialStockEntries, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
   const [accounts] = useFirebaseSyncedCollection<AccountRecord>("accounts", initialAccounts, firebaseEnabled && canSeeFinance, false, firebaseSession.reportSyncError);
   const [cashSessions] = useFirebaseSyncedCollection<CashSession>("cashSessions", initialCashSessions, firebaseEnabled && (canSeeFinance || canUsePdv), false, firebaseSession.reportSyncError);
+  const [movements] = useFirebaseSyncedCollection<MovementRecord>("movements", initialMovements, firebaseEnabled && canSeeFinance, false, firebaseSession.reportSyncError);
   const [workshopSettings, setWorkshopSettings] = useState<Partial<SettingsConfig> | null>(null);
   useEffect(() => {
     if (!firebaseEnabled) return setWorkshopSettings(null);
@@ -3664,7 +3802,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   }, [active, firebaseAdmin, firebaseEnabled, firebasePermissions]);
 
   // Os cartões de dinheiro da Visão geral eram "R$ 0,00" escritos no código.
-  const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
+  const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts, movements), [sales, orders, expenses, accounts, movements]);
   // O cartão da Visão geral mostra a gaveta quando há caixa aberto: é o número
   // que a pessoa vai conferir, e não o saldo acumulado do negócio.
   const dashboardCash = openSession(cashSessions);
@@ -3919,11 +4057,11 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} sales={sales} accounts={accounts} cashSessions={cashSessions} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
+            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} stockEntries={stockEntries} accounts={accounts} cashSessions={cashSessions} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );

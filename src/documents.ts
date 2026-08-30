@@ -159,6 +159,8 @@ export function buildSaleDocument(sale: SaleRecord, settings: Partial<SettingsCo
     <div class="rule"></div>
     <table>${itemRows(sale.items)}</table>
     <div class="rule"></div>
+    ${sale.discount ? `<div class="row"><span class="label">Subtotal</span><span>${money(sale.subtotal ?? sale.total + sale.discount)}</span></div>
+    <div class="row"><span class="label">Desconto</span><span>- ${money(sale.discount)}</span></div>` : ""}
     <div class="row total"><span>Total</span><span>${money(sale.total)}</span></div>
     <div class="row"><span class="label">Pagamento</span><span>${escapeHtml(sale.paymentMethod)}</span></div>
     ${sale.machineName ? `<div class="row"><span class="label">Maquininha</span><span>${escapeHtml(sale.machineName)}</span></div>` : ""}

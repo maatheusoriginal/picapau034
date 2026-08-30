@@ -10,7 +10,7 @@
  * Rode com: npm run check:cash
  */
 import { buildMovement, canOpenSession, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, isDrawerPayment, movementProblem, nonDrawerTotal, openSession, sessionIsStale, withdrawnTotal } from "../src/cash";
-import type { AccountRecord, CashSession, ExpenseRecord, OrderRecord, SaleRecord } from "../src/types";
+import type { AccountRecord, CashSession, ExpenseRecord, MovementRecord, OrderRecord, SaleRecord } from "../src/types";
 
 const json = (value: unknown) => JSON.stringify(value);
 
@@ -65,7 +65,18 @@ const accounts = [
                   { date: "10/03/2026", settledAt: "2026-03-10T16:25:00.000Z", amount: 250, method: "PIX" }] },
 ] as unknown as AccountRecord[];
 
+const movements = [
+  // Sucata vendida em dinheiro: passa pela gaveta.
+  { id: "MOV-0001", kind: "entrada", amount: 40, category: "Venda de sucata", method: "Dinheiro", description: "Ferro velho", date: "10/03/2026", at: "2026-03-10T15:45:00.000Z" },
+  // Frete pago em dinheiro: sai da gaveta.
+  { id: "MOV-0002", kind: "saida", amount: 25, category: "Frete e entrega", method: "Dinheiro", description: "Motoboy", date: "10/03/2026", at: "2026-03-10T15:50:00.000Z" },
+  // Aporte por PIX: entra no negócio, não na gaveta.
+  { id: "MOV-0003", kind: "entrada", amount: 1000, category: "Aporte do dono", method: "PIX", description: "Capital de giro", date: "10/03/2026", at: "2026-03-10T15:55:00.000Z" },
+] as unknown as MovementRecord[];
+
 const fontes = { sales, orders, expenses, accounts };
+const comMovimentacoes = { ...fontes, movements };
+const resumoComMov = cashSummary(sessao, comMovimentacoes);
 const extrato = drawerEntries(sessao, fontes);
 const resumo = cashSummary(sessao, fontes);
 
@@ -154,6 +165,16 @@ const casos: Array<[string, unknown, unknown]> = [
   // 400 do PIX + 200 do crédito. Fiado fica de fora: não virou dinheiro.
   ["o que entrou fora da gaveta é somado à parte", nonDrawerTotal(sessao, sales, orders), 850],
   ["sem sessão, nada a somar", nonDrawerTotal(null, sales, orders), 0],
+
+  // --- Movimentação manual na gaveta ---
+  ["entrada manual em dinheiro entra na gaveta", drawerEntries(sessao, comMovimentacoes).some((e) => e.id === "MOV-0001" && e.amount === 40), true],
+  ["saída manual em dinheiro sai da gaveta", drawerEntries(sessao, comMovimentacoes).some((e) => e.id === "MOV-0002" && e.amount === -25), true],
+  ["entrada manual por PIX não passa pela gaveta", drawerEntries(sessao, comMovimentacoes).some((e) => e.id === "MOV-0003"), false],
+  ["a entrada manual soma no que entrou", resumoComMov.received, 130],
+  ["a saída manual soma no que saiu", resumoComMov.expenses, 235],
+  // 350 do cenário base + 40 de entrada − 25 de saída.
+  ["o esperado na gaveta considera as duas", resumoComMov.expected, 365],
+  ["sem movimentação manual, o esperado não muda", cashSummary(sessao, fontes).expected, esperado],
 
   // --- Caixa esquecido aberto ---
   ["caixa aberto há 10h ainda é do dia", sessionIsStale(sessao, new Date("2026-03-10T21:00:00.000Z")), false],

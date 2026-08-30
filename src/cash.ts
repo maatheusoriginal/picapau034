@@ -1,5 +1,5 @@
 import { accountDescription, isCashPayment, parseBRDate } from "./finance";
-import type { AccountRecord, CashMovement, CashSession, ExpenseRecord, OrderRecord, SaleRecord } from "./types";
+import type { AccountRecord, CashMovement, CashSession, ExpenseRecord, MovementRecord, OrderRecord, SaleRecord } from "./types";
 
 /**
  * O caixa da oficina: o dinheiro que está de verdade dentro da gaveta.
@@ -38,7 +38,7 @@ export function closedSessions(sessions: CashSession[]): CashSession[] {
 /** Uma linha do extrato da gaveta. */
 export type DrawerEntry = {
   id: string;
-  kind: "Abertura" | "Venda" | "Ordem de serviço" | "Recebimento" | "Suprimento" | "Sangria" | "Gasto";
+  kind: "Abertura" | "Venda" | "Ordem de serviço" | "Recebimento" | "Suprimento" | "Sangria" | "Gasto" | "Movimentação";
   description: string;
   /** ISO 8601 do momento em que o dinheiro entrou ou saiu. */
   at: string;
@@ -77,6 +77,7 @@ export type DrawerSources = {
   orders?: OrderRecord[];
   expenses?: ExpenseRecord[];
   accounts?: AccountRecord[];
+  movements?: MovementRecord[];
 };
 
 /**
@@ -148,6 +149,20 @@ export function drawerEntries(session: CashSession | null, sources: DrawerSource
     });
   });
 
+  // Movimentação manual em dinheiro também passa pela gaveta: uma venda de
+  // sucata recebida em espécie tem que aparecer na conferência, senão o caixa
+  // fecha com sobra e ninguém sabe explicar de onde veio.
+  (sources.movements ?? []).forEach((movement) => {
+    if (!isDrawerPayment(movement.method) || !withinSession(session, movement.at)) return;
+    entries.push({
+      id: movement.id,
+      kind: "Movimentação",
+      description: `${movement.category} · ${movement.description}`,
+      at: movement.at,
+      amount: movement.kind === "entrada" ? movement.amount : -movement.amount,
+    });
+  });
+
   (session.movements ?? []).forEach((movement, index) => {
     entries.push({
       id: `${session.id}-mov-${index}`,
@@ -186,10 +201,15 @@ export function cashSummary(session: CashSession | null, sources: DrawerSources 
 
   const opening = total(["Abertura"]);
   const sales = total(["Venda", "Ordem de serviço"]);
-  const received = total(["Recebimento"]);
+  // A movimentação manual entra junto do recebimento quando é entrada, e junto
+  // do gasto quando é saída. Somar o líquido das duas daria o mesmo esperado no
+  // fim, mas mostraria "entrou" e "saiu" errados nos cartões da tela.
+  const manualIn = entries.filter((entry) => entry.kind === "Movimentação" && entry.amount > 0).reduce((sum, entry) => sum + entry.amount, 0);
+  const manualOut = entries.filter((entry) => entry.kind === "Movimentação" && entry.amount < 0).reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
+  const received = total(["Recebimento"]) + manualIn;
   const supplies = total(["Suprimento"]);
   const withdrawals = Math.abs(total(["Sangria"]));
-  const expenses = Math.abs(total(["Gasto"]));
+  const expenses = Math.abs(total(["Gasto"])) + manualOut;
 
   return {
     opening,

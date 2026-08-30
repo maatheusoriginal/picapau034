@@ -11,15 +11,21 @@ import {
   accountOpen,
   accountPaid,
   accountStatus,
+  discountPercent,
+  discountProblem,
   financeSummary,
+  movementExpense,
+  movementIncome,
+  movementProblem,
   openAccounts,
   payableEntries,
   payableStatus,
   receivableEntries,
   receivableAccountEntries,
   splitInstallments,
+  totalAfterDiscount,
 } from "../src/finance";
-import type { AccountRecord, ExpenseRecord, OrderRecord, SaleRecord } from "../src/types";
+import type { AccountRecord, ExpenseRecord, MovementRecord, OrderRecord, SaleRecord } from "../src/types";
 
 const hoje = new Date().toLocaleDateString("pt-BR");
 const ontem = new Date(Date.now() - 86400000).toLocaleDateString("pt-BR");
@@ -76,7 +82,16 @@ const accounts: AccountRecord[] = [
     settlements: [{ date: hoje, settledAt: new Date().toISOString(), amount: 100, method: "Transferência" }] },
 ];
 
+// Movimentações lançadas à mão, para conferir que mexem no dinheiro sem
+// mexer no faturamento.
+const movimentacoes = [
+  { id: "MOV-0001", kind: "entrada", amount: 40, category: "Venda de sucata", method: "Dinheiro", description: "Ferro velho", date: hoje, at: new Date().toISOString() },
+  { id: "MOV-0002", kind: "saida", amount: 25, category: "Frete", method: "Dinheiro", description: "Motoboy", date: hoje, at: new Date().toISOString() },
+  { id: "MOV-0003", kind: "entrada", amount: 100, category: "Aporte do dono", method: "PIX", description: "Capital", date: ontem, at: new Date(Date.now() - 86400000).toISOString() },
+] as unknown as MovementRecord[];
+
 const s = financeSummary(sales, orders, expenses, accounts);
+const sm = financeSummary(sales, orders, expenses, accounts, movimentacoes);
 const conta = accounts[1]!;
 const parcelas = splitInstallments(100, 3, hoje);
 const esperado = {
@@ -129,6 +144,38 @@ const esperado = {
   "as demais ficam iguais": [`${parcelas[1]!.amount}-${parcelas[2]!.amount}`, "33.33-33.33"],
   "parcela única não quebra": [splitInstallments(50, 1, hoje).length, 1],
   "as parcelas são numeradas em ordem": [parcelas.map((p) => p.installment).join(""), "123"],
+
+  // --- Desconto na venda ---
+  "desconto abate do subtotal": [totalAfterDiscount(100, 15), 85],
+  "sem desconto, o total é o subtotal": [totalAfterDiscount(100, 0), 100],
+  "desconto igual ao subtotal zera a venda": [totalAfterDiscount(100, 100), 0],
+  "desconto maior que o subtotal é recusado": [discountProblem(100, 150).includes("não pode passar"), true],
+  "e não vira venda negativa": [totalAfterDiscount(100, 150), 0],
+  "desconto negativo é recusado": [discountProblem(100, -5), "O desconto não pode ser negativo."],
+  "desconto que cabe passa": [discountProblem(100, 30), ""],
+  "desconto igual ao subtotal ainda passa": [discountProblem(100, 100), ""],
+  "o percentual do desconto é mostrado": [discountPercent(200, 30), 15],
+  "desconto sobre subtotal zero não divide por zero": [discountPercent(0, 30), 0],
+
+  // --- Movimentação lançada à mão ---
+  "entradas manuais somam": [movementIncome(movimentacoes), 140],
+  "só as de hoje, quando pedido": [movementIncome(movimentacoes, true), 40],
+  "saídas manuais somam": [movementExpense(movimentacoes), 25],
+  "movimentação sem valor é recusada": [movementProblem(0, "Sucata", "x"), "Informe um valor maior que zero."],
+  "movimentação sem motivo é recusada": [movementProblem(10, "", "x"), "Escolha o motivo da movimentação."],
+  "movimentação sem descrição é recusada": [movementProblem(10, "Sucata", "  ").includes("Descreva"), true],
+  "movimentação completa passa": [movementProblem(10, "Sucata", "Ferro velho"), ""],
+
+  // Entra no dinheiro, não no faturamento: aporte do dono não é serviço prestado.
+  "entrada manual entra no saldo em caixa": [sm.cashBalance - s.cashBalance, 115],
+  "e no recebido de hoje": [sm.receivedToday - s.receivedToday, 40],
+  "saída manual entra nos gastos pagos": [sm.paidExpenses - s.paidExpenses, 25],
+  "mas o faturamento não muda": [sm.grossTotal, s.grossTotal],
+  "nem o ticket médio": [sm.averageTicket, s.averageTicket],
+  "nem a contagem de vendas do dia": [sm.salesTodayCount, s.salesTodayCount],
+  "as entradas manuais aparecem no resumo": [sm.manualIncome, 140],
+  "e as saídas também": [sm.manualExpense, 25],
+  "sem movimentação, o resumo fica zerado": [s.manualIncome, 0],
 };
 
 let falhas = 0;

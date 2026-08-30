@@ -299,6 +299,8 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .summary-lines > div { display: flex; align-items: center; justify-content: space-between; color: #747579; font-size: 9px; }
 .summary-lines b { color: #45464a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .summary-lines button { padding: 0; border: 0; background: transparent; color: var(--red); font-size: 8px; font-weight: 750; }
+/* Campo do desconto no resumo da venda. Mesmos valores do input compacto de .config-record, para não destoar do resto. */
+.summary-discount-input { width: 92px; height: 26px; padding: 0 7px; border: 1px solid #deddda; border-radius: 7px; outline: 0; background: white; color: #55565a; font: inherit; font-size: 8px; text-align: right; }
 .grand-total { padding: 18px 0; }
 .grand-total span, .grand-total strong { display: block; }
 .grand-total span { color: #6f7074; font-size: 9px; }
