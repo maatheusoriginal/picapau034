@@ -34,6 +34,7 @@ npm run dev             # http://localhost:3000
 | --- | --- |
 | `npm run dev` | Sobe a API e a interface em modo desenvolvimento com hot reload |
 | `npm run typecheck` | Verifica os tipos (`tsc --noEmit`) — deve terminar sem nenhum erro |
+| `npm run check:finance` | Confere as contas do financeiro contra um cenário montado à mão |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -80,13 +81,33 @@ server/
   firebase-admin.ts  Credencial do Admin SDK
 src/
   types.ts           Fonte única dos tipos de domínio e das permissões
+  finance.ts         Cálculos do financeiro (funções puras, sem Firebase)
   components/        Modais de cadastro e a área de Configurações
+scripts/
+  check-finance.ts   Confere as contas do financeiro
 firestore.rules      Regras de segurança do banco
 ```
 
 `src/types.ts` é a fonte única de verdade: a lista de permissões e os padrões por
 cargo são importados de lá pela interface **e** pelo servidor. Adicionar uma
 permissão em um lugar só não deixa mais front e back fora de sincronia.
+
+## Como o dinheiro é contado
+
+Todos os números do financeiro saem de `src/finance.ts`, para as telas não
+discordarem entre si. As regras que valem a pena saber:
+
+- **Entra em caixa** o que foi pago à vista: dinheiro, PIX, débito e crédito.
+- **Não entra em caixa** a *troca de serviços* (compensa a dívida sem dinheiro)
+  nem a *nota a prazo* — esta vira conta a receber.
+- **Faturamento** conta vendas do balcão, serviços rápidos e **OS encerradas**.
+  Uma OS ainda aberta não é faturamento.
+- **Recebido líquido** já desconta a taxa da maquininha, gravada em cada venda.
+- **Custo das peças** é gravado no item no momento da venda, então o lucro de
+  ontem não muda quando o preço de custo do produto for reajustado hoje.
+- **Saldo do caixa** é o recebido líquido menos os gastos já pagos.
+
+`npm run check:finance` confere essas regras com um cenário montado à mão.
 
 ## Modelo de segurança
 
@@ -116,6 +137,7 @@ sessões anteriores daquele usuário.
 ## Checklist de entrega
 
 - [ ] `npm run typecheck` sem erros
+- [ ] `npm run check:finance` com todas as contas batendo
 - [ ] `npm run build` conclui sem erros
 - [ ] Variáveis `VITE_FIREBASE_*` configuradas no ambiente de produção
 - [ ] `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` e `INITIAL_SUPER_ADMIN_EMAIL` cadastradas

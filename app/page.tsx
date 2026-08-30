@@ -2,6 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMechanicUser, serviceOrderStatuses, statusTone } from "../src/types";
+import { financeSummary, payableEntries, receivableEntries } from "../src/finance";
 
 // Carregados sob demanda: cada um só é montado quando o diálogo/aba
 // correspondente é aberto (ver DialogRouter e a aba "Configurações" mais
@@ -538,6 +539,7 @@ function PdvWorkspace({
     name: p.name,
     unit: parseBRL(p.price),
     stock: p.stock,
+    cost: parseBRL(p.cost),
   })), [products]);
   const pdvSuggestions = useMemo(() => (
     pdvSearch ? pdvCatalog.filter((product) => `${product.name} ${product.code} ${product.barcode}`.toLowerCase().includes(pdvSearch.toLowerCase())).slice(0, 8) : []
@@ -632,24 +634,21 @@ function FinanceWorkspace({
   navigate,
   expenses,
   users,
-  paymentMachines,
+  sales,
+  orders,
 }: {
   openDialog: OpenDialog;
   navigate: (destination: string) => void;
   expenses: ExpenseRecord[];
   users: UserConfig[];
-  paymentMachines: PaymentMachineConfig[];
+  sales: SaleRecord[];
+  orders: OrderRecord[];
 }) {
-  const grossRevenue = 0;
-  const partsCost = 0;
-  const cardRevenue = 0;
-  const primaryMachine = paymentMachines.find((machine) => machine.primary && machine.active) ?? paymentMachines.find((machine) => machine.active);
-  const averageCardFee = primaryMachine ? (primaryMachine.debitFee + primaryMachine.credit1xFee) / 2 : 0;
-  const cardFees = cardRevenue * (averageCardFee / 100);
-  const paidExpenses = expenses.filter((expense) => expense.status === "Pago").reduce((sum, expense) => sum + expense.amount, 0);
-  const pendingExpenses = expenses.filter((expense) => expense.status === "Agendado").reduce((sum, expense) => sum + expense.amount, 0);
+  // grossRevenue, partsCost e cardRevenue eram constantes 0 escritas no código,
+  // então o lucro líquido era sempre o negativo dos gastos.
+  const summary = useMemo(() => financeSummary(sales, orders, expenses), [sales, orders, expenses]);
+  const { grossTotal: grossRevenue, cardFees, paidExpenses, pendingExpenses, netProfit } = summary;
   const payrollPaid = expenses.filter((expense) => expense.status === "Pago" && expense.category === "Pagamento de funcionário").reduce((sum, expense) => sum + expense.amount, 0);
-  const netProfit = grossRevenue - partsCost - paidExpenses - cardFees;
   return (
     <>
       <div className="module-heading">
@@ -657,11 +656,11 @@ function FinanceWorkspace({
         <div className="heading-actions"><button className="outline-button large" onClick={() => openDialog("cash")}>Abrir caixa</button><button className="primary-button" onClick={() => openDialog("expense")}><Icon name="plus" size={18}/>Adicionar gasto</button></div>
       </div>
       <div className="finance-kpi-grid">
-        <button className="finance-kpi receive" onClick={() => navigate("Contas a receber")}><span className="finance-kpi-icon"><Icon name="arrow"/></span><div><small>Total a receber</small><strong>R$ 0,00</strong><em>Nenhum valor em aberto</em></div><Icon name="arrow" size={18}/></button>
+        <button className="finance-kpi receive" onClick={() => navigate("Contas a receber")}><span className="finance-kpi-icon"><Icon name="arrow"/></span><div><small>Total a receber</small><strong>{formatBRL(summary.receivableTotal)}</strong><em>{summary.receivableTotal ? "Vendas e OS a prazo" : "Nenhum valor em aberto"}</em></div><Icon name="arrow" size={18}/></button>
         <button className="finance-kpi pay" onClick={() => navigate("Contas a pagar")}><span className="finance-kpi-icon"><Icon name="file"/></span><div><small>Total a pagar</small><strong>{formatBRL(pendingExpenses)}</strong><em>{expenses.filter((e) => e.status === "Agendado").length} contas agendadas</em></div><Icon name="arrow" size={18}/></button>
-        <button className="finance-kpi balance" onClick={() => openDialog("cash")}><span className="finance-kpi-icon"><Icon name="wallet"/></span><div><small>Saldo disponível hoje</small><strong>R$ 0,00</strong><em>Caixa + contas bancárias</em></div><Icon name="arrow" size={18}/></button>
+        <button className="finance-kpi balance" onClick={() => openDialog("cash")}><span className="finance-kpi-icon"><Icon name="wallet"/></span><div><small>Saldo disponível hoje</small><strong>{formatBRL(summary.cashBalance)}</strong><em>Recebido menos gastos pagos</em></div><Icon name="arrow" size={18}/></button>
       </div>
-      <section className="finance-result-strip panel"><div className="result-strip-head"><div><small>Resultado real da oficina</small><h2>Lucro líquido estimado</h2></div><strong>{formatBRL(netProfit)}</strong></div><div className="result-breakdown"><span><small>Faturamento</small><b>{formatBRL(grossRevenue)}</b></span><span><small>Custo das peças</small><b>− {formatBRL(partsCost)}</b></span><span><small>Gastos pagos</small><b>− {formatBRL(paidExpenses)}</b></span><span><small>Taxas de maquininha</small><b>− {formatBRL(cardFees)}</b></span></div><p>Considera vendas, custo das peças, gastos lançados, pagamentos de funcionários ({formatBRL(payrollPaid)}) e a taxa média da {primaryMachine?.name ?? "maquininha configurada"}.</p></section>
+      <section className="finance-result-strip panel"><div className="result-strip-head"><div><small>Resultado real da oficina</small><h2>Lucro líquido estimado</h2></div><strong>{formatBRL(netProfit)}</strong></div><div className="result-breakdown"><span><small>Faturamento</small><b>{formatBRL(grossRevenue)}</b></span><span><small>Custo das peças</small><b>− {formatBRL(summary.partsCost)}</b></span><span><small>Gastos pagos</small><b>− {formatBRL(paidExpenses)}</b></span><span><small>Taxas de maquininha</small><b>− {formatBRL(cardFees)}</b></span></div><p>Considera vendas, custo das peças, gastos lançados, pagamentos de funcionários ({formatBRL(payrollPaid)}) e as taxas de maquininha já descontadas das vendas no cartão.</p></section>
       <div className="finance-body-grid">
         <section className="panel finance-movements">
           <div className="panel-header"><div><h2>Últimos gastos</h2><p>Lançamentos manuais e despesas agendadas</p></div><button className="outline-button" onClick={() => openDialog("expense")}>Novo gasto</button></div>
@@ -682,18 +681,32 @@ function AccountsWorkspace({
   kind,
   openDialog,
   expenses,
+  sales,
+  orders,
 }: {
   kind: "receber" | "pagar";
   openDialog: OpenDialog;
   expenses: ExpenseRecord[];
+  sales: SaleRecord[];
+  orders: OrderRecord[];
 }) {
   const [accountSearch, setAccountSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("Todos");
   const isReceivable = kind === "receber";
   const records = useMemo(() => {
-    if (isReceivable) return [] as Array<{ id: string; person: string; description: string; dueDate: string; original: number; open: number; status: string }>;
-    return expenses.filter((expense) => expense.status === "Agendado").map((expense) => ({ id: expense.id, person: "Despesa manual", description: expense.description, dueDate: expense.dueDate, original: expense.amount, open: expense.amount, status: "A vencer" }));
-  }, [isReceivable, expenses]);
+    // A receber saía sempre vazio; a pagar marcava tudo como "A vencer", então
+    // uma conta vencida nunca aparecia como atrasada.
+    if (isReceivable) return receivableEntries(sales, orders).map((entry) => ({
+      id: entry.id,
+      person: entry.person,
+      description: `${entry.source} · ${entry.description}`,
+      dueDate: entry.date,
+      original: entry.total,
+      open: entry.total,
+      status: "A vencer",
+    }));
+    return payableEntries(expenses);
+  }, [isReceivable, expenses, sales, orders]);
   const filteredRecords = useMemo(() => records.filter((record) => {
     const matchesSearch = `${record.id} ${record.person} ${record.description}`.toLowerCase().includes(accountSearch.toLowerCase());
     const matchesStatus = accountFilter === "Todos" || record.status === accountFilter;
@@ -712,7 +725,7 @@ function AccountsWorkspace({
       <div className="module-summary account-summary">
         <article><span>Total em aberto</span><strong>{formatBRL(total)}</strong><small>{records.length} {records.length === 1 ? "lançamento" : "lançamentos"}</small></article>
         <article className={overdue ? "summary-danger" : ""}><span>Vencido</span><strong>{formatBRL(overdue)}</strong><small>{overdue ? "Precisa de atenção" : "Nenhuma conta atrasada"}</small></article>
-        <article><span>Vence hoje</span><strong>{formatBRL(dueToday)}</strong><small>{formatBRL(dueToday)}</small></article>
+        <article><span>Vence hoje</span><strong>{formatBRL(dueToday)}</strong><small>{records.filter((record) => record.status === "Vence hoje").length} {records.filter((record) => record.status === "Vence hoje").length === 1 ? "lançamento" : "lançamentos"}</small></article>
       </div>
       <section className="panel module-panel">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder={`Buscar ${isReceivable ? "cliente" : "fornecedor"}, descrição ou código`}/></label><div className="filter-pills">{["Todos", "A vencer", "Vence hoje", "Atrasado"].map((filter) => <button className={accountFilter === filter ? "selected" : ""} key={filter} onClick={() => setAccountFilter(filter)}>{filter}</button>)}</div></div>
@@ -1212,6 +1225,7 @@ function ModuleWorkspace({
   clients,
   cart,
   setCart,
+  sales,
   motorcycles,
 }: {
   active: string;
@@ -1243,6 +1257,7 @@ function ModuleWorkspace({
   clients: ClientRecord[];
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
+  sales: SaleRecord[];
   motorcycles: MotorcycleRecord[];
 }) {
   const [query, setQuery] = useState("");
@@ -1250,9 +1265,9 @@ function ModuleWorkspace({
 
   if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} products={products} clients={clients} />;
   if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
-  if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} paymentMachines={paymentMachines}/>;
-  if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses}/>;
-  if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses}/>;
+  if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders}/>;
+  if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} sales={sales} orders={orders}/>;
+  if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} sales={sales} orders={orders}/>;
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} />;
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
   if (active === "Configurações") return (
@@ -1399,9 +1414,13 @@ function ModuleWorkspace({
   
   const records = active === "Fornecedores" ? supplierRecords : active === "Motocicletas" ? motorcycleRecords : active === "Clientes" ? defaultRecords : [];
   
-  const firstValue = active === "Financeiro" ? "R$ 0,00" : active === "Relatórios" ? "R$ 0,00" : active === "Motocicletas" ? String(motorcycles.length) : active === "Vendas do balcão" ? "0" : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((supplier) => supplier.active).length) : String(clients.length);
-  const secondValue = active === "Financeiro" ? "R$ 0,00" : active === "Relatórios" ? "R$ 0,00" : active === "Motocicletas" ? String(new Set(motorcycles.map((m) => m.brand)).size) : active === "Vendas do balcão" ? "R$ 0,00" : active === "Compras e entradas" ? "R$ 0,00" : active === "Fornecedores" ? (suppliers.length > 0 ? `${Math.round(suppliers.reduce((sum, s) => sum + s.deliveryDays, 0) / suppliers.length)} dias` : "0 dias") : String(clients.filter((c) => Boolean(c.phone)).length);
-  const thirdValue = active === "Financeiro" ? "0" : active === "Relatórios" ? "0" : active === "Motocicletas" ? String(motorcycles.filter((m) => m.plate.length === 8).length) : active === "Vendas do balcão" ? "R$ 0,00" : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((s) => s.deliveryDays <= 1).length) : String(clients.filter((c) => c.motorcycleIds && c.motorcycleIds.length > 0).length);
+  // Os KPIs de Financeiro, Relatórios e Vendas do balcão eram "R$ 0,00" e "0"
+  // escritos direto no ternário.
+  const moduleSummary = useMemo(() => financeSummary(sales, orders, expenses), [sales, orders, expenses]);
+  const salesToday = useMemo(() => sales.filter((sale) => sale.date === new Date().toLocaleDateString("pt-BR")), [sales]);
+  const firstValue = active === "Financeiro" ? formatBRL(moduleSummary.dayBalance) : active === "Relatórios" ? formatBRL(moduleSummary.grossMonth) : active === "Motocicletas" ? String(motorcycles.length) : active === "Vendas do balcão" ? String(salesToday.length) : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((supplier) => supplier.active).length) : String(clients.length);
+  const secondValue = active === "Financeiro" ? formatBRL(moduleSummary.receivableTotal) : active === "Relatórios" ? formatBRL(moduleSummary.averageTicket) : active === "Motocicletas" ? String(new Set(motorcycles.map((m) => m.brand)).size) : active === "Vendas do balcão" ? formatBRL(salesToday.reduce((total, sale) => total + sale.total, 0)) : active === "Compras e entradas" ? "R$ 0,00" : active === "Fornecedores" ? (suppliers.length > 0 ? `${Math.round(suppliers.reduce((sum, s) => sum + s.deliveryDays, 0) / suppliers.length)} dias` : "0 dias") : String(clients.filter((c) => Boolean(c.phone)).length);
+  const thirdValue = active === "Financeiro" ? String(moduleSummary.overdueCount) : active === "Relatórios" ? String(moduleSummary.closedOrders) : active === "Motocicletas" ? String(motorcycles.filter((m) => m.plate.length === 8).length) : active === "Vendas do balcão" ? formatBRL(salesToday.length ? salesToday.reduce((total, sale) => total + sale.total, 0) / salesToday.length : 0) : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((s) => s.deliveryDays <= 1).length) : String(clients.filter((c) => c.motorcycleIds && c.motorcycleIds.length > 0).length);
 
   const primaryAction = () => {
     if (active === "Clientes") return openDialog("client");
@@ -1687,6 +1706,7 @@ function AppDialog({
   const tradeRemaining = Math.max(checkoutTotal - tradeCompensated, 0);
   const tradeCreditRemaining = Math.max((Number(tradeValue) || 0) - checkoutTotal, 0);
   const cartTotal = cart.reduce((sum, item) => sum + item.unit * item.quantity, 0);
+  const dialogSummary = financeSummary(sales, orders, expenses);
   const paymentGross = dialog === "orderCheckout" ? checkoutTotal : cartTotal;
   const paymentFeeRate = paymentMethod === "Débito" ? selectedMachine?.debitFee ?? 0 : paymentMethod === "Crédito" ? paymentInstallments === 1 ? selectedMachine?.credit1xFee ?? 0 : paymentInstallments <= 6 ? selectedMachine?.credit2to6Fee ?? 0 : selectedMachine?.credit7to12Fee ?? 0 : 0;
   const paymentFeeAmount = paymentGross * (paymentFeeRate / 100);
@@ -1991,7 +2011,7 @@ function AppDialog({
       if (alreadyInCart && alreadyInCart.quantity >= chosen.stock) return setDialogError(`${chosen.name} tem apenas ${chosen.stock} em estoque.`);
       setCart((current) => alreadyInCart
         ? current.map((item) => item.code === chosen.code ? { ...item, quantity: item.quantity + 1 } : item)
-        : [...current, { id: chosen.id, code: chosen.code, name: chosen.name, unit: parseBRL(chosen.price), quantity: 1, stock: chosen.stock }]);
+        : [...current, { id: chosen.id, code: chosen.code, name: chosen.name, unit: parseBRL(chosen.price), quantity: 1, stock: chosen.stock, cost: parseBRL(chosen.cost) }]);
       setCatalogSelection("");
       setCatalogSearch("");
       return finish(`${chosen.name} adicionado à venda.`);
@@ -2013,6 +2033,7 @@ function AppDialog({
             name: item.name,
             price: item.unit * item.quantity,
             quantity: item.quantity,
+            cost: item.cost * item.quantity,
           })),
           stockUpdates: cart.map((item) => ({ productId: item.id, quantity: item.quantity })),
         });
@@ -2048,6 +2069,7 @@ function AppDialog({
               name: part.name,
               price: Number(quickPartValue || 0) * quickQuantity,
               quantity: quickQuantity,
+              cost: parseBRL(part.cost) * quickQuantity,
             }] : []),
           ],
           stockUpdates: part ? [{ productId: part.id, quantity: quickQuantity }] : [],
@@ -2213,7 +2235,7 @@ function AppDialog({
                 <div className="form-section">
                   <div className="form-intro"><span className="form-icon"><Icon name="box"/></span><div><h3>Peças e mão de obra</h3><p>Peças usam o preço fixo do cadastro. A mão de obra é informada manualmente.</p></div></div>
                   <div className="os-items-builder">
-                    <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{products.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{products.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, type: "Peça", name: product.name, price: parseBRL(product.price) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
+                    <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{products.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{products.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
                     <section className="os-labor-panel"><div className="os-builder-title"><div><strong>Adicionar mão de obra</strong><small>Descrição e valor digitados para esta OS</small></div></div><div className="form-grid"><label className="field field-full"><span>Descrição</span><input value={laborDescription} onChange={(event) => setLaborDescription(event.target.value)} placeholder="Ex.: Troca do kit relação"/></label><label className="field"><span>Valor da mão de obra</span><input type="number" value={laborValue} onChange={(event) => setLaborValue(event.target.value)}/></label><button className="primary-button labor-add-button" onClick={() => { if (!laborDescription.trim() || Number(laborValue) <= 0) return; setOsItems((current) => [...current, { id: `LAB-${Date.now()}`, type: "Mão de obra", name: laborDescription.trim(), price: Number(laborValue) }]); setLaborDescription(""); setLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar mão de obra</button></div><div className="labor-rule"><Icon name="check" size={17}/><span>O valor vale somente para esta OS e não altera o cadastro de serviços.</span></div></section>
                   </div>
                   <div className="selected-os-items"><div className="os-builder-title"><div><strong>Itens incluídos</strong><small>{osItems.length ? `${osItems.length} item${osItems.length === 1 ? "" : "s"} nesta OS` : "Nenhum item adicionado ainda"}</small></div></div>{osItems.length ? osItems.map((item) => <div className="selected-os-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do cadastro" : "Valor manual desta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setOsItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>×</button></div>) : <div className="empty-os-items"><Icon name="box"/><span>Adicione as peças e a mão de obra que já souber. Você poderá completar depois.</span></div>}<div className="os-items-total"><span>Peças <b>{formatBRL(partsTotal)}</b></span><span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>{partnerDiscount > 0 ? <span className="discount">Desconto parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}<strong>Total inicial {formatBRL(osTotal)}</strong></div></div>
@@ -2382,7 +2404,7 @@ function AppDialog({
 
         {dialog === "cash" ? (
           <div className="dialog-body form-section">
-            <div className="cash-balance"><span>Saldo atual do caixa</span><strong>R$ 0,00</strong><small>Caixa operacional</small></div>
+            <div className="cash-balance"><span>Saldo atual do caixa</span><strong>{formatBRL(dialogSummary.cashBalance)}</strong><small>Recebido menos gastos pagos</small></div>
             <div className="cash-actions">{[{name:"Suprimento", detail:"Adicionar dinheiro", icon:"plus" as IconName},{name:"Sangria", detail:"Retirar dinheiro", icon:"arrow" as IconName},{name:"Fechar caixa", detail:"Conferir o dia", icon:"check" as IconName}].map((action) => <button className={cashAction === action.name ? "selected" : ""} key={action.name} onClick={() => setCashAction(action.name)}><Icon name={action.icon}/><strong>{action.name}</strong><small>{action.detail}</small></button>)}</div>
             <div className="form-grid form-top-gap"><label className="field"><span>Valor</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Motivo</span><input placeholder="Ex.: Troco para o caixa"/></label></div>
           </div>
@@ -2415,7 +2437,7 @@ function AppDialog({
                     )}
                   </div>
                 ) : null}
-                <div className="order-section"><div className="order-section-title"><div><strong>Peças e serviços aprovados</strong><small>A baixa ocorre somente quando a peça for usada</small></div>{canOperate ? <button onClick={() => setExtraOrderItem(true)}><Icon name="plus" size={15}/>Adicionar item</button> : <span className="status blue"><i/>Somente leitura</span>}</div><div className="order-item"><span className="catalog-code">01</span><div><strong>{currentOrder.service}</strong><small>Mão de obra · {currentOrder.mechanic}</small></div><b>{currentOrder.total}</b></div>{extraOrderItem ? <div className="order-item"><span className="catalog-code">02</span><div><strong>Ajuste complementar</strong><small>Serviço adicional</small></div><b>R$ 0,00</b></div> : null}<div className="order-total"><span>Total aprovado</span><strong>{currentOrder.total}</strong></div></div>
+                <div className="order-section"><div className="order-section-title"><div><strong>Peças e serviços aprovados</strong><small>A baixa ocorre somente quando a peça for usada</small></div>{canOperate ? <button onClick={() => setExtraOrderItem(true)}><Icon name="plus" size={15}/>Adicionar item</button> : <span className="status blue"><i/>Somente leitura</span>}</div><div className="order-item"><span className="catalog-code">01</span><div><strong>{currentOrder.service}</strong><small>Mão de obra · {currentOrder.mechanic}</small></div><b>{formatBRL(currentOrder.total ?? 0)}</b></div>{extraOrderItem ? <div className="order-item"><span className="catalog-code">02</span><div><strong>Ajuste complementar</strong><small>Serviço adicional</small></div><b>R$ 0,00</b></div> : null}<div className="order-total"><span>Total aprovado</span><strong>{currentOrder.total}</strong></div></div>
                 <div className="order-progress interactive">{serviceOrderStatuses.map((item, index) => { const currentIndex = serviceOrderStatuses.indexOf(orderStatus); return <button className={index <= currentIndex ? "done" : ""} key={item} onClick={() => setOrderStatus(item)}><i>{index < currentIndex ? "✓" : index + 1}</i><span>{item}</span></button>; })}</div>
               </>
             ) : (
@@ -2738,6 +2760,9 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
     }
   }, [active, firebaseAdmin, firebaseEnabled, firebasePermissions]);
 
+  // Os cartões de dinheiro da Visão geral eram "R$ 0,00" escritos no código.
+  const summary = useMemo(() => financeSummary(sales, orders, expenses), [sales, orders, expenses]);
+
   // A topbar sempre anunciou o atalho no badge "Ctrl K", mas nada o escutava.
   // Esc fecha a busca sem precisar do mouse.
   useEffect(() => {
@@ -2901,14 +2926,14 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
             </> : <div className="stat-card access-stat"><div className="stat-icon red"><Icon name="shield"/></div><div className="stat-info"><span>Seu perfil de acesso</span><strong>{firebaseSession.profile?.role ?? "Usuário"}</strong><small>{firebasePermissions.length} permissões liberadas pelo Super Admin</small></div></div>}
             {canSeeFinance ? <button className="stat-card" onClick={() => setActive("Financeiro")}>
               <div className="stat-icon blue"><Icon name="wallet" /></div>
-              <div className="stat-info"><span>Recebido hoje</span><strong className="money">R$ 0,00</strong><small>Movimentações do dia</small></div>
+              <div className="stat-info"><span>Recebido hoje</span><strong className="money">{formatBRL(summary.receivedToday)}</strong><small>{summary.salesTodayCount} {summary.salesTodayCount === 1 ? "movimentação" : "movimentações"} do dia</small></div>
             </button> : null}
           </section>
 
           {canSeeFinance ? <section className="dashboard-finance-grid" aria-label="Valores financeiros">
-            <button className="dashboard-money-card receive" onClick={() => setActive("Contas a receber")}><span className="money-card-icon"><Icon name="arrow"/></span><div><small>A receber</small><strong>R$ 0,00</strong><em>Nenhum valor em aberto</em></div><Icon name="arrow" size={18}/></button>
+            <button className="dashboard-money-card receive" onClick={() => setActive("Contas a receber")}><span className="money-card-icon"><Icon name="arrow"/></span><div><small>A receber</small><strong>{formatBRL(summary.receivableTotal)}</strong><em>{summary.receivableTotal ? "Vendas e OS a prazo" : "Nenhum valor em aberto"}</em></div><Icon name="arrow" size={18}/></button>
             <button className="dashboard-money-card pay" onClick={() => setActive("Contas a pagar")}><span className="money-card-icon"><Icon name="file"/></span><div><small>A pagar</small><strong>{formatBRL(expenses.filter((e) => e.status === "Agendado").reduce((sum, e) => sum + e.amount, 0))}</strong><em>{expenses.filter((e) => e.status === "Agendado").length} conta(s) agendada(s)</em></div><Icon name="arrow" size={18}/></button>
-            <button className="dashboard-money-card cash" onClick={() => openDialog("cash")}><span className="money-card-icon"><Icon name="wallet"/></span><div><small>Saldo do caixa</small><strong>R$ 0,00</strong><em>Caixa atual</em></div><Icon name="arrow" size={18}/></button>
+            <button className="dashboard-money-card cash" onClick={() => openDialog("cash")}><span className="money-card-icon"><Icon name="wallet"/></span><div><small>Saldo do caixa</small><strong>{formatBRL(summary.cashBalance)}</strong><em>Recebido menos gastos pagos</em></div><Icon name="arrow" size={18}/></button>
           </section> : null}
 
           {canViewOrders ? <section className="flow-section">
@@ -2972,14 +2997,14 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
               {canSeeFinance ? <section className="panel quick-panel">
                 <div className="panel-header"><div><h2>Financeiro rápido</h2><p>Sem sair do painel</p></div></div>
                 <button onClick={() => openDialog("expense")}><span className="quick-icon red"><Icon name="file" /></span><div><strong>Adicionar gasto</strong><small>Peça, frete ou despesa</small></div><Icon name="arrow" size={17} /></button>
-                <button onClick={() => setActive("Contas a receber")}><span className="quick-icon green"><Icon name="arrow" /></span><div><strong>Contas a receber</strong><small>R$ 0,00 em aberto</small></div><Icon name="arrow" size={17} /></button>
+                <button onClick={() => setActive("Contas a receber")}><span className="quick-icon green"><Icon name="arrow" /></span><div><strong>Contas a receber</strong><small>{formatBRL(summary.receivableTotal)} em aberto</small></div><Icon name="arrow" size={17} /></button>
                 <button onClick={() => setActive("Contas a pagar")}><span className="quick-icon dark"><Icon name="wallet" /></span><div><strong>Contas a pagar</strong><small>{formatBRL(expenses.filter((e) => e.status === "Agendado").reduce((sum, e) => sum + e.amount, 0))} em aberto</small></div><Icon name="arrow" size={17} /></button>
               </section> : null}
             </aside>
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart}/>
+            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} sales={sales}/>
           )}
         </div>
       </section>

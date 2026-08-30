@@ -266,6 +266,8 @@ export type CartItem = {
   unit: number;
   quantity: number;
   stock: number;
+  /** Custo unitário no momento da venda, para o cálculo de lucro não mudar quando o cadastro do produto mudar. */
+  cost: number;
 };
 
 /**
