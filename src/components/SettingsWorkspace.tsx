@@ -67,6 +67,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
     blockZeroStockSale: false,
     deductStockOnlyWhenUsed: true,
     useAverageCost: false,
+    pricingMode: "fixed",
     thermalPrinter: "Elgin i9 / Não Fiscal",
     printFormat: "Cupom 80mm",
     printThreeCopies: true,
@@ -971,6 +972,40 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                   className="settings-input bold-val"
                 />
                 <span className="settings-hint">Aplicada automaticamente sobre o custo de novos produtos</span>
+              </label>
+
+              <label className="settings-field">
+                <span className="settings-field-label">Modo de Precificação</span>
+                <select
+                  value={generalSettings.pricingMode ?? "fixed"}
+                  onChange={(e) => setGeneralSettings({ ...generalSettings, pricingMode: e.target.value as "markup" | "fixed" })}
+                  className="settings-select"
+                >
+                  <option value="fixed">Preço digitado à mão</option>
+                  <option value="markup">Preço calculado pela margem</option>
+                </select>
+                <span className="settings-hint">
+                  {generalSettings.pricingMode === "markup"
+                    ? "O preço de venda fica travado em custo + margem, sem risco de vender abaixo do custo."
+                    : "O preço é digitado no cadastro da peça e a margem apenas acompanha."}
+                </span>
+              </label>
+
+              <label className="settings-field">
+                <span className="settings-field-label">Custo das Peças</span>
+                <select
+                  value={generalSettings.useAverageCost ? "average" : "last"}
+                  onChange={(e) => setGeneralSettings({ ...generalSettings, useAverageCost: e.target.value === "average" })}
+                  className="settings-select"
+                >
+                  <option value="last">Último preço pago</option>
+                  <option value="average">Custo médio ponderado</option>
+                </select>
+                <span className="settings-hint">
+                  {generalSettings.useAverageCost
+                    ? "Cada entrada de estoque faz a média com o que já havia na prateleira: 10 peças a R$ 10 mais 10 a R$ 20 dão custo de R$ 15."
+                    : "Cada entrada de estoque substitui o custo da peça pelo preço da compra mais recente."}
+                </span>
               </label>
 
               <label className="settings-field">

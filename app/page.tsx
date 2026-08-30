@@ -3,6 +3,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { financeSummary, payableEntries, receivableEntries } from "../src/finance";
+import { mergeParts, shouldReserveStock, stockDeltas, type ReservedPart } from "../src/inventory";
+import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
+import { openWhatsapp, printDocument } from "./printing";
 import type { SettingsTab } from "../src/components/SettingsWorkspace";
 
 // Carregados sob demanda: cada um só é montado quando o diálogo/aba
@@ -26,6 +29,8 @@ import {
   createManagedUser,
   createServiceOrder,
   recordSale,
+  recordStockEntry,
+  saveOrderWithStock,
   defaultFirebasePermissions,
   deleteManagedUser,
   firebaseErrorMessage,
@@ -74,6 +79,7 @@ import type {
   QuickServiceConfig,
   SaleRecord,
   ServiceOrderStatus,
+  StockEntryRecord,
   SystemLists,
   ServiceOrderItem,
   SettingsConfig,
@@ -84,7 +90,12 @@ import type {
 type FirebaseConnectionState = "checking" | "signed-out" | "needs-profile" | "connected" | "disabled" | "error";
 
 const formatBRL = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const parseBRL = (value: string) => Number(value.replace(/[^\d,]/g, "").replace(",", ".")) || 0;
+// Aceita número além de texto: o custo do produto é gravado como "R$ 12,50",
+// mas registros antigos podem ter vindo numéricos, e `.replace` em número
+// derruba a tela inteira.
+const parseBRL = (value: string | number) => typeof value === "number"
+  ? (Number.isFinite(value) ? value : 0)
+  : Number(String(value ?? "").replace(/[^\d,]/g, "").replace(",", ".")) || 0;
 const onlyDigits = (value: string) => value.replace(/\D/g, "");
 const normalizePlate = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7);
 /**
@@ -138,6 +149,8 @@ const initialCategories: CategoryConfig[] = [];
 const initialSuppliers: SupplierConfig[] = [];
 
 const initialSales: SaleRecord[] = [];
+
+const initialStockEntries: StockEntryRecord[] = [];
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -515,6 +528,7 @@ function PdvWorkspace({
   setCart,
   products = [],
   clients = [],
+  blockZeroStockSale = true,
 }: {
   notify: (message: string) => void;
   openDialog: OpenDialog;
@@ -522,17 +536,20 @@ function PdvWorkspace({
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   products?: ProductRecord[];
   clients?: ClientRecord[];
+  blockZeroStockSale?: boolean;
 }) {
   const [pdvSearch, setPdvSearch] = useState("");
   // Antes recalculado em toda renderização (inclusive a cada tecla digitada em
   // qualquer outro campo da tela), mesmo quando `products`/`cart` não mudaram.
   const total = useMemo(() => cart.reduce((sum, item) => sum + item.unit * item.quantity, 0), [cart]);
   const addToCart = useCallback((product: Omit<CartItem, "quantity">) => {
-    if (product.stock === 0) return notify(`${product.name} está sem estoque.`);
+    // "Bloquear venda sem estoque" (Configurações → Estoque & Reposição).
+    // Desligado, a oficina consegue vender a peça que está chegando e acertar o
+    // estoque depois.
+    if (blockZeroStockSale && product.stock <= 0) return notify(`${product.name} está sem estoque.`);
     setCart((current) => {
       const inCart = current.find((item) => item.code === product.code);
-      // Não deixa vender mais do que existe na prateleira.
-      if (inCart && inCart.quantity >= product.stock) {
+      if (blockZeroStockSale && inCart && inCart.quantity >= product.stock) {
         notify(`${product.name} tem apenas ${product.stock} em estoque.`);
         return current;
       }
@@ -541,7 +558,7 @@ function PdvWorkspace({
         : [...current, { ...product, quantity: 1 }];
     });
     setPdvSearch("");
-  }, [notify, setCart]);
+  }, [notify, setCart, blockZeroStockSale]);
   const pdvCatalog = useMemo(() => products.map((p) => ({
     id: p.id,
     code: p.code,
@@ -556,9 +573,11 @@ function PdvWorkspace({
   ), [pdvCatalog, pdvSearch]);
   const changeQuantity = useCallback((code: string, difference: number) => {
     setCart((current) => current
-      .map((item) => item.code === code ? { ...item, quantity: Math.min(item.stock, Math.max(0, item.quantity + difference)) } : item)
+      .map((item) => item.code === code
+        ? { ...item, quantity: Math.max(0, blockZeroStockSale ? Math.min(item.stock, item.quantity + difference) : item.quantity + difference) }
+        : item)
       .filter((item) => item.quantity > 0));
-  }, [setCart]);
+  }, [setCart, blockZeroStockSale]);
 
   return (
     <>
@@ -1443,7 +1462,7 @@ function ModuleWorkspace({
   const [query, setQuery] = useState("");
   const [listFilter, setListFilter] = useState("Todos");
 
-  if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} products={products} clients={clients} />;
+  if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} products={products} clients={clients} blockZeroStockSale={settings?.blockZeroStockSale !== false} />;
   if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} sales={sales} orders={orders}/>;
@@ -1673,7 +1692,9 @@ function AppDialog({
   cart,
   setCart,
   sales,
+  stockEntries,
   lists,
+  settings,
   currentUser,
 }: {
   dialog: DialogKind;
@@ -1703,7 +1724,9 @@ function AppDialog({
   cart: CartItem[];
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
   sales: SaleRecord[];
+  stockEntries: StockEntryRecord[];
   lists: Partial<SystemLists> | null;
+  settings: Partial<SettingsConfig> | null;
   currentUser: FirebaseUserSummary | null;
 }) {
   if (dialog === "product") {
@@ -1718,6 +1741,7 @@ function AppDialog({
           notify={notify || finish}
           allProducts={products}
           units={systemList(lists, "units")}
+          settings={settings}
         />
       </Suspense>
     );
@@ -1789,7 +1813,13 @@ function AppDialog({
   const [showQuickCustomer, setShowQuickCustomer] = useState(false);
   const [cashAction, setCashAction] = useState("Suprimento");
   const [settingsTab, setSettingsTab] = useState("Oficina");
-  const [extraPurchaseItem, setExtraPurchaseItem] = useState(false);
+  // Entrada de estoque: o diálogo já existia com os campos, mas nenhum deles
+  // tinha estado e nada era gravado — o texto "o custo médio será recalculado"
+  // era só uma promessa.
+  const [purchaseSupplierId, setPurchaseSupplierId] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [purchasePayment, setPurchasePayment] = useState("À vista");
+  const [purchaseItems, setPurchaseItems] = useState<Array<{ productId: string; quantity: number; unitCost: number }>>([]);
   const [extraOrderItem, setExtraOrderItem] = useState(false);
   const [quickService, setQuickService] = useState(quickServices[0]?.name ?? "Serviço rápido");
   const [quickProduct, setQuickProduct] = useState("Sem produto");
@@ -1962,6 +1992,9 @@ function AppDialog({
   const toggleMechanic = (id: string, target: "new" | "existing") => {
     const selected = target === "new" ? selectedMechanicIds : orderMechanicIds;
     const update = target === "new" ? setSelectedMechanicIds : setOrderMechanicIds;
+    // "Permitir vários mecânicos na mesma OS" (Configurações → Oficina & OS).
+    // Desligado, escolher um mecânico substitui o anterior em vez de somar.
+    if (!allowMultipleMechanics) return update([id]);
     update(selected.includes(id) ? (selected.length > 1 ? selected.filter((currentId) => currentId !== id) : selected) : [...selected, id]);
   };
   const titles: Record<Exclude<DialogKind, null>, string> = {
@@ -2068,6 +2101,9 @@ function AppDialog({
       });
     }
 
+    // Com a trava desligada, a peça já sai do estoque na abertura; com ela
+    // ligada, a OS nasce sem reservar nada e a baixa espera o serviço começar.
+    const reservedOnCreate = shouldReserveStock("Recepção", deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(osItems) : [];
     const orderId = await createServiceOrder(osPrefix, nextOrderNumber, {
       customer: customerName,
       bike: bike || "Motocicleta",
@@ -2085,10 +2121,67 @@ function AppDialog({
       delivery: osDelivery ? osDelivery.split("-").reverse().join("/") : "",
       origin: osOrigin === "partner" ? `Encaminhado por ${selectedPartner?.name ?? "parceiro"}` : "Cliente direto",
       total: osTotal,
+      deductedItems: [],
       ...(clientId ? { clientId } : {}),
       ...(motorcycleId ? { motorcycleId } : {}),
     });
+    if (reservedOnCreate.length) {
+      // A OS nasce marcada como "nada baixado" e a reserva vai num lote só,
+      // junto da marcação. Assim, se a baixa falhar, a OS fica coerente (sem
+      // reserva e sem marca) em vez de dizer que baixou peça que continua na
+      // prateleira.
+      await saveOrderWithStock(orderId, { deductedItems: reservedOnCreate }, stockDeltas(reservedOnCreate, []));
+    }
     return orderId;
+  };
+
+  const useAverageCost = settings?.useAverageCost === true;
+  // "Baixar peça do estoque somente quando a OS for iniciada": durante recepção,
+  // avaliação e aprovação a OS ainda é orçamento, e reservar peça de orçamento
+  // some com o estoque de quem está vendendo no balcão.
+  const deductStockOnlyWhenStarted = settings?.deductStockOnlyWhenUsed !== false;
+  const partsOf = (items: ServiceOrderItem[] | undefined) => mergeParts((items ?? [])
+    .filter((item) => item.type === "Peça" && item.productId)
+    .map((item) => ({ productId: item.productId!, quantity: item.quantity ?? 1 })));
+  const allowMultipleMechanics = settings?.allowMultipleMechanics !== false;
+  // "Mostrar carga de trabalho": a contagem de OS ao lado de cada mecânico.
+  const showWorkload = settings?.showWorkload !== false;
+  const purchaseTotal = purchaseItems.reduce((total, item) => total + item.quantity * item.unitCost, 0);
+
+  const addPurchaseItem = () => {
+    const first = products[0];
+    if (!first) return;
+    setPurchaseItems((current) => [...current, { productId: first.id, quantity: 1, unitCost: parseBRL(first.cost) }]);
+  };
+
+  const changePurchaseItem = (index: number, patch: Partial<{ productId: string; quantity: number; unitCost: number }>) => {
+    setPurchaseItems((current) => current.map((item, position) => {
+      if (position !== index) return item;
+      const next = { ...item, ...patch };
+      // Ao trocar o produto, o custo sugerido passa a ser o da peça escolhida.
+      if (patch.productId) {
+        const chosen = products.find((product) => product.id === patch.productId);
+        if (chosen) next.unitCost = parseBRL(chosen.cost);
+      }
+      return next;
+    }));
+  };
+
+  const removePurchaseItem = (index: number) => {
+    setPurchaseItems((current) => current.filter((_, position) => position !== index));
+  };
+
+  const printOrder = (order: OrderRecord) => {
+    const names = activeMechanics.filter((mechanic) => (order.mechanicIds ?? []).includes(mechanic.id)).map((mechanic) => mechanic.name);
+    printDocument(buildOrderDocument({ order, settings, mechanics: names.join(" + ") || order.mechanic }));
+  };
+
+  const sendOrderWhatsapp = (order: OrderRecord) => {
+    // O telefone vem do cadastro do cliente; a OS guarda só o nome. Sem cliente
+    // vinculado, o WhatsApp abre para escolher o contato na hora.
+    const client = clients.find((item) => item.id === order.clientId)
+      ?? clients.find((item) => item.name.trim().toLowerCase() === order.customer.trim().toLowerCase());
+    openWhatsapp(whatsappUrl(client?.phone ?? "", buildOrderWhatsappMessage(order, settings)));
   };
 
   const registerSale = async (input: {
@@ -2128,17 +2221,34 @@ function AppDialog({
       date: new Date().toLocaleDateString("pt-BR"),
       soldAt: new Date().toISOString(),
     }, input.stockUpdates);
+    printDocument(buildSaleDocument({
+      id: saleId,
+      origin: input.origin,
+      items: input.items,
+      total: input.total,
+      paymentMethod: input.method,
+      ...(usesMachine ? { machineName: selectedMachine?.name ?? "" } : {}),
+      ...(input.mechanicName ? { mechanicName: input.mechanicName } : {}),
+      date: new Date().toLocaleDateString("pt-BR"),
+      soldAt: new Date().toISOString(),
+    }, settings));
     return saleId;
   };
 
   const saveOrderChanges = async () => {
     if (!currentOrder) throw new Error("Nenhuma ordem de serviço selecionada.");
-    await saveFirestoreDoc("serviceOrders", currentOrder.id, {
+    // Mudar a situação pode disparar a baixa (ao iniciar o serviço) ou a
+    // devolução (se a OS voltar para orçamento).
+    const reserved = (currentOrder.deductedItems ?? []) as ReservedPart[];
+    const target = shouldReserveStock(orderStatus, deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(currentOrder.items) : [];
+    const deltas = stockDeltas(target, reserved);
+    await saveOrderWithStock(currentOrder.id, {
       status: orderStatus,
       tone: statusTone(orderStatus),
       mechanicIds: orderMechanicIds,
       mechanic: activeMechanics.find((mechanic) => mechanic.id === orderMechanicIds[0])?.name ?? currentOrder.mechanic,
-    });
+      deductedItems: target,
+    }, deltas);
   };
 
   const submit = async () => {
@@ -2199,7 +2309,12 @@ function AppDialog({
         // O encerramento grava o que foi realmente executado e marca a OS como
         // concluída, para ela sair da fila de motos prontas aguardando retirada.
         if (currentOrder) {
-          await saveFirestoreDoc("serviceOrders", currentOrder.id, {
+          // No encerramento os itens revisados são os que de fato foram usados,
+          // então o estoque é acertado pela diferença: peça retirada da OS na
+          // conferência volta para a prateleira.
+          const reserved = (currentOrder.deductedItems ?? []) as ReservedPart[];
+          const target = partsOf(checkoutItems);
+          await saveOrderWithStock(currentOrder.id, {
             items: checkoutItems,
             total: checkoutTotal,
             status: "Entrega",
@@ -2207,7 +2322,11 @@ function AppDialog({
             paymentMethod,
             closed: true,
             closedAt: new Date().toLocaleDateString("pt-BR"),
-          });
+            deductedItems: target,
+          }, stockDeltas(target, reserved));
+          // Imprime já com o que foi conferido no checkout, e não com os itens
+          // antigos que ainda estão no `currentOrder` desta renderização.
+          printOrder({ ...currentOrder, items: checkoutItems, total: checkoutTotal, status: "Entrega", paymentMethod });
         }
       } catch (error) {
         setSaving(false);
@@ -2218,6 +2337,41 @@ function AppDialog({
         ? `Troca registrada, saldo da OS compensado em ${formatBRL(tradeCompensated)} e 3 vias preparadas: mecânico, caixa e cliente.`
         : `Pagamento de ${formatBRL(checkoutTotal)} registrado, ordem de serviço encerrada e 3 vias preparadas: mecânico, caixa e cliente.`);
     }
+    if (dialog === "purchase") {
+      if (!purchaseItems.length) return setDialogError("Adicione ao menos um produto à entrada.");
+      const semQuantidade = purchaseItems.find((item) => item.quantity <= 0);
+      if (semQuantidade) return setDialogError("Informe a quantidade de cada produto.");
+      setSaving(true);
+      try {
+        const supplier = activeSuppliers.find((item) => item.id === purchaseSupplierId) ?? activeSuppliers[0];
+        const entryId = `ENT-${String(highestSequence(stockEntries, "ENT") + 1).padStart(4, "0")}`;
+        await recordStockEntry(entryId, {
+          supplierId: supplier?.id ?? "",
+          supplierName: supplier?.name ?? "",
+          date: purchaseDate ? purchaseDate.split("-").reverse().join("/") : new Date().toLocaleDateString("pt-BR"),
+          entryAt: new Date().toISOString(),
+          payment: purchasePayment,
+          costMode: useAverageCost ? "Custo médio" : "Último preço",
+          total: purchaseTotal,
+          items: purchaseItems.map((item) => ({
+            productId: item.productId,
+            name: products.find((product) => product.id === item.productId)?.name ?? "",
+            quantity: item.quantity,
+            unitCost: item.unitCost,
+            total: item.quantity * item.unitCost,
+          })),
+          operatorUid: currentUser?.uid ?? "",
+          operatorName: currentUser?.displayName ?? "",
+        }, purchaseItems, useAverageCost);
+        setPurchaseItems([]);
+        return finish(`Entrada ${entryId} registrada: ${purchaseItems.length} produto(s) e ${formatBRL(purchaseTotal)} em estoque.`);
+      } catch (error) {
+        return setDialogError(error instanceof Error ? error.message : "Não foi possível registrar a entrada.");
+      } finally {
+        setSaving(false);
+      }
+    }
+
     if (dialog === "catalog") {
       const chosen = products.find((product) => product.code === catalogSelection);
       if (!chosen) return setDialogError("Escolha um produto da lista.");
@@ -2423,7 +2577,7 @@ function AppDialog({
                     <label className="field"><span>Nível de combustível</span><select value={currentFuel} onChange={(event) => setOsFuel(event.target.value)}>{fuelLevels.map((level) => <option key={level}>{level}</option>)}</select></label>
                     <label className="field field-full"><span>Problema relatado pelo cliente</span><textarea value={osProblem} onChange={(event) => setOsProblem(event.target.value)} placeholder="Descreva o problema relatado ou serviço solicitado"/></label>
                     <label className="field"><span>Prioridade</span><select value={currentPriority} onChange={(event) => setOsPriority(event.target.value)}>{orderPriorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-                    <label className="field"><span>Previsão de entrega</span><input type="date" value={osDelivery} onChange={(event) => setOsDelivery(event.target.value)}/></label>
+                    <label className="field"><span>Previsão de entrega</span><input type="date" value={osDelivery} onChange={(event) => setOsDelivery(event.target.value)}/>{settings?.defaultDeliveryDays ? <small className="field-help">Prazo padrão da oficina: {settings.defaultDeliveryDays}</small> : null}</label>
                     <label className="field"><span>Odômetro conferido?</span><select><option>Sim</option><option>Não</option></select></label>
                   </div>
                   <div className="mechanic-assignment">
@@ -2433,7 +2587,7 @@ function AppDialog({
                         {activeMechanics.map((mechanic) => (
                           <button className={selectedMechanicIds.includes(mechanic.id) ? "selected" : ""} key={mechanic.id} onClick={() => toggleMechanic(mechanic.id, "new")}>
                             <span className="mechanic-avatar">{mechanic.name[0]}</span>
-                            <div><strong>{mechanic.name}</strong><small>{mechanic.position} · {mechanic.currentOrders || 0} OS</small></div>
+                            <div><strong>{mechanic.name}</strong><small>{mechanic.position}{showWorkload ? ` · ${mechanic.currentOrders || 0} OS` : ""}</small></div>
                             <i>{selectedMechanicIds.includes(mechanic.id) ? "✓" : "+"}</i>
                           </button>
                         ))}
@@ -2451,7 +2605,7 @@ function AppDialog({
                 <div className="form-section">
                   <div className="form-intro"><span className="form-icon"><Icon name="box"/></span><div><h3>Peças e mão de obra</h3><p>Peças usam o preço fixo do cadastro. A mão de obra é informada manualmente.</p></div></div>
                   <div className="os-items-builder">
-                    <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{products.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{products.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
+                    <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{products.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{products.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
                     <section className="os-labor-panel"><div className="os-builder-title"><div><strong>Adicionar mão de obra</strong><small>Descrição e valor digitados para esta OS</small></div></div><div className="form-grid"><label className="field field-full"><span>Descrição</span><input value={laborDescription} onChange={(event) => setLaborDescription(event.target.value)} placeholder="Ex.: Troca do kit relação"/></label><label className="field"><span>Valor da mão de obra</span><input type="number" value={laborValue} onChange={(event) => setLaborValue(event.target.value)}/></label><button className="primary-button labor-add-button" onClick={() => { if (!laborDescription.trim() || Number(laborValue) <= 0) return; setOsItems((current) => [...current, { id: `LAB-${Date.now()}`, type: "Mão de obra", name: laborDescription.trim(), price: Number(laborValue) }]); setLaborDescription(""); setLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar mão de obra</button></div><div className="labor-rule"><Icon name="check" size={17}/><span>O valor vale somente para esta OS e não altera o cadastro de serviços.</span></div></section>
                   </div>
                   <div className="selected-os-items"><div className="os-builder-title"><div><strong>Itens incluídos</strong><small>{osItems.length ? `${osItems.length} item${osItems.length === 1 ? "" : "s"} nesta OS` : "Nenhum item adicionado ainda"}</small></div></div>{osItems.length ? osItems.map((item) => <div className="selected-os-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do cadastro" : "Valor manual desta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setOsItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>×</button></div>) : <div className="empty-os-items"><Icon name="box"/><span>Adicione as peças e a mão de obra que já souber. Você poderá completar depois.</span></div>}<div className="os-items-total"><span>Peças <b>{formatBRL(partsTotal)}</b></span><span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>{partnerDiscount > 0 ? <span className="discount">Desconto parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}<strong>Total inicial {formatBRL(osTotal)}</strong></div></div>
@@ -2543,12 +2697,32 @@ function AppDialog({
         {dialog === "purchase" ? (
           <div className="dialog-body form-section">
             <div className="form-grid">
-              <label className="field field-full"><span>Fornecedor</span><select>{activeSuppliers.length ? activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name} · {supplier.deliveryDays === 0 ? "entrega no dia" : `${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}</option>) : <option value="">Nenhum fornecedor cadastrado</option>}</select></label>
-              <label className="field"><span>Data da entrada</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label><label className="field"><span>Pagamento</span><select><option>À vista</option><option>A prazo</option><option>Parcial</option></select></label>
+              <label className="field field-full"><span>Fornecedor</span><select value={purchaseSupplierId} onChange={(event) => setPurchaseSupplierId(event.target.value)}>{activeSuppliers.length ? activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name} · {supplier.deliveryDays === 0 ? "entrega no dia" : `${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}</option>) : <option value="">Nenhum fornecedor cadastrado</option>}</select></label>
+              <label className="field"><span>Data da entrada</span><input type="date" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)}/></label><label className="field"><span>Pagamento</span><select value={purchasePayment} onChange={(event) => setPurchasePayment(event.target.value)}><option>À vista</option><option>A prazo</option><option>Parcial</option></select></label>
             </div>
-            <div className="purchase-items"><div className="purchase-head"><strong>Produtos da entrada</strong><button onClick={() => setExtraPurchaseItem(true)}><Icon name="plus" size={16}/>Adicionar produto</button></div><div className="purchase-row"><select>{products.length ? products.map((p) => <option key={p.id} value={p.name}>{p.name}</option>) : <option>Selecione um produto</option>}</select><input type="number" defaultValue="1" placeholder="Qtd"/><input placeholder="R$ Custo"/><strong>R$ 0,00</strong></div>{extraPurchaseItem ? <div className="purchase-row"><select>{products.length ? products.map((p) => <option key={p.id} value={p.name}>{p.name}</option>) : <option>Selecione um produto</option>}</select><input type="number" defaultValue="1" placeholder="Qtd"/><input placeholder="R$ Custo"/><strong>R$ 0,00</strong></div> : null}</div>
-            <div className="purchase-total"><span>Total da entrada</span><strong>R$ 0,00</strong></div>
-            <div className="info-strip"><Icon name="check" size={18}/><span>Ao salvar, a quantidade entra no estoque e o custo médio será recalculado. Nenhuma nota fiscal será emitida.</span></div>
+            <div className="purchase-items">
+              <div className="purchase-head"><strong>Produtos da entrada</strong><button onClick={addPurchaseItem} disabled={!products.length}><Icon name="plus" size={16}/>Adicionar produto</button></div>
+              {purchaseItems.length ? purchaseItems.map((item, index) => (
+                <div className="purchase-row" key={index}>
+                  <select value={item.productId} onChange={(event) => changePurchaseItem(index, { productId: event.target.value })}>
+                    {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+                  </select>
+                  <input type="number" min="1" value={item.quantity} onChange={(event) => changePurchaseItem(index, { quantity: Math.max(1, Number(event.target.value) || 1) })} placeholder="Qtd"/>
+                  <input type="number" min="0" step="0.01" value={item.unitCost || ""} onChange={(event) => changePurchaseItem(index, { unitCost: Math.max(0, Number(event.target.value) || 0) })} placeholder="R$ Custo"/>
+                  <strong>{formatBRL(item.quantity * item.unitCost)}</strong>
+                  <button className="remove-item" onClick={() => removePurchaseItem(index)} aria-label="Remover item">×</button>
+                </div>
+              )) : (
+                <div className="lookup-empty" style={{ padding: "12px" }}>
+                  <Icon name="box" size={18}/>
+                  <span>{products.length ? "Nenhum produto na entrada. Clique em \"Adicionar produto\"." : "Cadastre um produto no estoque antes de registrar uma entrada."}</span>
+                </div>
+              )}
+            </div>
+            <div className="purchase-total"><span>Total da entrada</span><strong>{formatBRL(purchaseTotal)}</strong></div>
+            <div className="info-strip"><Icon name="check" size={18}/><span>{useAverageCost
+              ? "Ao salvar, a quantidade entra no estoque e o custo de cada peça vira a média ponderada com o que já havia na prateleira."
+              : "Ao salvar, a quantidade entra no estoque e o custo de cada peça passa a ser o preço desta compra."} Nenhuma nota fiscal será emitida.</span></div>
           </div>
         ) : null}
 
@@ -2630,7 +2804,7 @@ function AppDialog({
           <div className="dialog-body order-detail">
             {currentOrder ? (
               <>
-                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><button onClick={() => finish(`3 vias da ${currentOrder.id} preparadas: mecânico, caixa e cliente.`)}><Icon name="file" size={16}/>Imprimir 3 vias</button><button onClick={() => finish(`Link da ${currentOrder.id} preparado para envio no WhatsApp.`)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
+                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><button onClick={() => printOrder(currentOrder)}><Icon name="printer" size={16}/>{settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"}</button><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
                 <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as ServiceOrderStatus)}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
                 <div className="order-info-grid"><div><span>Cliente / pagador</span><strong>{currentOrder.customer}</strong><small>{currentOrder.origin}</small></div><div><span>Motocicleta</span><strong>{currentOrder.bike}</strong><small>{currentOrder.plate}</small></div><div><span>Mecânicos</span><strong>{orderMechanics.map((mechanic) => mechanic.name).join(" + ") || currentOrder.mechanic}</strong><small>{orderMechanics.length || 1} responsável(is)</small></div><div><span>Previsão</span><strong>{currentOrder.delivery}</strong><small>Prioridade {currentOrder.priority}</small></div></div>
                 {canOperate ? (
@@ -2641,7 +2815,7 @@ function AppDialog({
                         {activeMechanics.map((mechanic) => (
                           <button className={orderMechanicIds.includes(mechanic.id) ? "selected" : ""} key={mechanic.id} onClick={() => toggleMechanic(mechanic.id, "existing")}>
                             <span className="mechanic-avatar">{mechanic.name[0]}</span>
-                            <div><strong>{mechanic.name}</strong><small>{mechanic.currentOrders || 0} OS agora</small></div>
+                            <div><strong>{mechanic.name}</strong><small>{showWorkload ? `${mechanic.currentOrders || 0} OS agora` : "Disponível"}</small></div>
                             <i>{orderMechanicIds.includes(mechanic.id) ? "✓" : "+"}</i>
                           </button>
                         ))}
@@ -2671,7 +2845,7 @@ function AppDialog({
                 <div className="checkout-item-list">{checkoutItems.length ? checkoutItems.map((item, index) => <div className="checkout-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do produto" : "Valor informado nesta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setCheckoutItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>) : <div className="empty-panel"><Icon name="box" size={20}/><span>Nenhum item adicionado ao fechamento.</span></div>}</div>
                 <div className="checkout-totals"><span>Peças <b>{formatBRL(checkoutPartsTotal)}</b></span><span>Mão de obra <b>{formatBRL(checkoutLaborTotal)}</b></span><strong>Total da OS <b>{formatBRL(checkoutTotal)}</b></strong></div>
 
-                <div className="checkout-add-block"><div className="checkout-add-title"><Icon name="box" size={17}/><div><strong>Adicionar outra peça</strong><small>O valor de venda vem bloqueado do cadastro.</small></div></div><label className="mini-search"><Icon name="search" size={16}/><input value={checkoutPieceSearch} onChange={(event) => setCheckoutPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="checkout-product-results">{products.filter((product) => product.stock > 0 && `${product.name} ${product.code}`.toLowerCase().includes(checkoutPieceSearch.toLowerCase())).slice(0, 3).map((product) => { const added = checkoutItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={added} onClick={() => setCheckoutItems((current) => [...current, { id: product.code, type: "Peça", name: product.name, price: parseBRL(product.price) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.stock} em estoque · preço fixo</small></div><b>{product.price}</b><i>{added ? "✓" : "+"}</i></button>; })}</div></div>
+                <div className="checkout-add-block"><div className="checkout-add-title"><Icon name="box" size={17}/><div><strong>Adicionar outra peça</strong><small>O valor de venda vem bloqueado do cadastro.</small></div></div><label className="mini-search"><Icon name="search" size={16}/><input value={checkoutPieceSearch} onChange={(event) => setCheckoutPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="checkout-product-results">{products.filter((product) => product.stock > 0 && `${product.name} ${product.code}`.toLowerCase().includes(checkoutPieceSearch.toLowerCase())).slice(0, 3).map((product) => { const added = checkoutItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={added} onClick={() => setCheckoutItems((current) => [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.stock} em estoque · preço fixo</small></div><b>{product.price}</b><i>{added ? "✓" : "+"}</i></button>; })}</div></div>
 
                 <div className="checkout-add-block labor"><div className="checkout-add-title"><Icon name="wrench" size={17}/><div><strong>Adicionar mão de obra</strong><small>Descrição e valor são manuais para esta OS.</small></div></div><div className="checkout-labor-row"><label className="field"><span>Descrição</span><input value={checkoutLaborDescription} onChange={(event) => setCheckoutLaborDescription(event.target.value)} placeholder="Ex.: Regulagem final"/></label><label className="field compact-field"><span>Valor</span><input type="number" min="0" value={checkoutLaborValue} onChange={(event) => setCheckoutLaborValue(event.target.value)}/></label><button className="outline-button large" onClick={() => { if (!checkoutLaborDescription.trim() || Number(checkoutLaborValue) <= 0) return; setCheckoutItems((current) => [...current, { id: `LAB-CHECKOUT-${Date.now()}`, type: "Mão de obra", name: checkoutLaborDescription.trim(), price: Number(checkoutLaborValue) }]); setCheckoutLaborDescription(""); setCheckoutLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar</button></div></div>
                 <div className="approval-note"><Icon name="alert" size={17}/><span>Qualquer item adicional deve estar aprovado pelo cliente antes do fechamento. Itens não executados ou não usados não devem ser cobrados.</span></div>
@@ -2949,6 +3123,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [paymentMachines, setPaymentMachines] = useFirebaseSyncedCollection("paymentMachines", initialPaymentMachines, firebaseEnabled && canSeeFinance, firebaseAdmin, firebaseSession.reportSyncError);
   const [paymentMethods, setPaymentMethods] = useFirebaseSyncedCollection("paymentMethods", initialPaymentMethods, firebaseEnabled && (canSeeFinance || canUsePdv), firebaseAdmin, firebaseSession.reportSyncError);
   const [sales] = useFirebaseSyncedCollection<SaleRecord>("sales", initialSales, firebaseEnabled && (canSeeFinance || canUsePdv || canUseQuickService), false, firebaseSession.reportSyncError);
+  const [stockEntries] = useFirebaseSyncedCollection<StockEntryRecord>("stockEntries", initialStockEntries, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
   const [workshopSettings, setWorkshopSettings] = useState<Partial<SettingsConfig> | null>(null);
   useEffect(() => {
     if (!firebaseEnabled) return setWorkshopSettings(null);
@@ -3237,7 +3412,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} lists={systemLists} currentUser={firebaseSession.user} selectedOrderId={selectedOrderId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} sales={sales} stockEntries={stockEntries} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedOrderId={selectedOrderId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );

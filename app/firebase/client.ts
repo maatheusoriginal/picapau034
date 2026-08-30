@@ -21,6 +21,7 @@ import {
   getFirestore,
   onSnapshot,
   increment,
+  runTransaction,
   serverTimestamp,
   setDoc,
   writeBatch,
@@ -28,6 +29,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { allFirebasePermissions, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../../src/types";
+import { costAfterEntry, toAmount } from "../../src/inventory";
 
 type FirebaseWebConfig = {
   apiKey: string;
@@ -626,6 +628,81 @@ export async function recordSale(
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, "sales");
+  }
+}
+
+/**
+ * Registra uma entrada de estoque: soma a quantidade e recalcula o custo de
+ * cada peça.
+ *
+ * Usa runTransaction, e não writeBatch, porque o custo médio depende do estoque
+ * e do custo que estão gravados AGORA — a transação lê e grava no mesmo passo
+ * atômico. Com um batch, duas entradas simultâneas da mesma peça leriam o mesmo
+ * custo antigo e a segunda apagaria a média da primeira.
+ */
+export async function recordStockEntry(
+  entryId: string,
+  entry: Record<string, unknown>,
+  items: Array<{ productId: string; quantity: number; unitCost: number }>,
+  useAverageCost: boolean,
+) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const references = items.map((item) => doc(db, "products", item.productId));
+      // Todas as leituras antes de qualquer escrita: é exigência do Firestore.
+      const snapshots = await Promise.all(references.map((reference) => transaction.get(reference)));
+
+      snapshots.forEach((snapshot, index) => {
+        const item = items[index]!;
+        const data = snapshot.data() ?? {};
+        const currentStock = toAmount(data.stock);
+        const currentCost = toAmount(data.cost);
+        const newCost = costAfterEntry(useAverageCost, currentStock, currentCost, item.quantity, item.unitCost);
+        transaction.set(references[index]!, {
+          stock: currentStock + item.quantity,
+          // O cadastro de produto grava o custo como texto em reais
+          // ("R$ 12,50"); gravar número aqui deixaria os dois formatos
+          // convivendo na mesma coleção e quebraria quem lê com parseBRL.
+          cost: newCost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      });
+
+      transaction.set(doc(db, "stockEntries", entryId), {
+        ...entry,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, "stockEntries");
+  }
+}
+
+/**
+ * Grava a OS e a baixa (ou devolução) das peças no mesmo lote.
+ *
+ * `deltas` positivos tiram do estoque, negativos devolvem — é o que acontece
+ * quando uma peça sai da ordem ou quando a OS volta para orçamento. Usa
+ * increment pelo mesmo motivo da venda no PDV: a quantidade lida na tela pode
+ * estar velha, e gravar valor absoluto faria uma operação apagar a outra.
+ */
+export async function saveOrderWithStock(
+  orderId: string,
+  order: Record<string, unknown>,
+  deltas: Array<{ productId: string; quantity: number }>,
+) {
+  const { db } = services();
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "serviceOrders", orderId), { ...order, updatedAt: serverTimestamp() }, { merge: true });
+    deltas.forEach(({ productId, quantity }) => {
+      batch.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `serviceOrders/${orderId}`);
   }
 }
 

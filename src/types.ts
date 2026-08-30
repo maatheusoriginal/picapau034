@@ -219,6 +219,11 @@ export type ServiceOrderItem = {
   price: number;
   quantity?: number;
   cost?: number;
+  /**
+   * Produto no Firestore, quando o item veio do estoque. `id` guarda o código
+   * da peça (visível para a oficina), que não serve para dar baixa.
+   */
+  productId?: string;
 };
 
 export type OrderRecord = {
@@ -258,6 +263,11 @@ export type OrderRecord = {
   closedAt?: string;
   /** Forma de pagamento usada no encerramento. */
   paymentMethod?: string;
+  /**
+   * Peças que esta OS já tirou do estoque. Comparar com os itens atuais é o que
+   * evita baixa dobrada e devolve a peça quando ela sai da ordem.
+   */
+  deductedItems?: Array<{ productId: string; quantity: number }>;
 };
 
 /**
@@ -345,6 +355,24 @@ export type SaleRecord = {
   date: string;
   /** ISO 8601, para ordenar e filtrar por período sem depender do formato local. */
   soldAt: string;
+};
+
+/** Uma compra de peças que entrou no estoque. */
+export type StockEntryRecord = {
+  id: string;
+  supplierId?: string;
+  supplierName?: string;
+  /** Data no formato brasileiro. */
+  date: string;
+  /** ISO 8601, para ordenar e filtrar por período. */
+  entryAt: string;
+  payment: string;
+  /** Como o custo foi tratado nesta entrada: "Custo médio" ou "Último preço". */
+  costMode: string;
+  total: number;
+  items: Array<{ productId: string; name: string; quantity: number; unitCost: number; total: number }>;
+  operatorUid?: string;
+  operatorName?: string;
 };
 
 export const serviceOrderStatuses = ["Recepção", "Avaliação", "Aprovação", "Em serviço", "Entrega"] as const;

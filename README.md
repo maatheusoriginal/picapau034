@@ -35,6 +35,8 @@ npm run dev             # http://localhost:3000
 | `npm run dev` | Sobe a API e a interface em modo desenvolvimento com hot reload |
 | `npm run typecheck` | Verifica os tipos (`tsc --noEmit`) — deve terminar sem nenhum erro |
 | `npm run check:finance` | Confere as contas do financeiro contra um cenário montado à mão |
+| `npm run check:inventory` | Confere as contas de estoque e precificação (markup e custo médio) |
+| `npm run check:documents` | Confere a OS impressa, o cupom e a mensagem de WhatsApp |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -74,6 +76,7 @@ app/
   page.tsx           Aplicação: navegação, painéis, diálogos e sessão
   globals.css        Estilos da aplicação
   firebase/client.ts Toda a conversa com o Firebase no navegador
+  printing.ts        Envia o documento para a impressora e abre o WhatsApp
 server/
   index.ts           Express: rotas da API e entrega da interface
   admin-users.ts     API administrativa de usuários (criar, editar, senha, apagar)
@@ -82,9 +85,13 @@ server/
 src/
   types.ts           Fonte única dos tipos de domínio e das permissões
   finance.ts         Cálculos do financeiro (funções puras, sem Firebase)
+  inventory.ts       Precificação e custo de estoque (funções puras)
+  documents.ts       OS impressa, cupom e mensagem de WhatsApp (funções puras)
   components/        Modais de cadastro e a área de Configurações
 scripts/
   check-finance.ts   Confere as contas do financeiro
+  check-inventory.ts Confere as contas de estoque e precificação
+  check-documents.ts Confere os documentos impressos e a mensagem
 firestore.rules      Regras de segurança do banco
 ```
 
@@ -126,6 +133,74 @@ funcionário" — porque disparam comportamento próprio no formulário.
 
 Toda lista tem um padrão de fábrica: enquanto a oficina não ajustar nada, o
 sistema usa a lista original, sem tela vazia.
+
+## Preço e custo das peças
+
+Duas escolhas em **Configurações → Estoque & Reposição** mudam como o sistema
+trata preço e custo. As contas ficam em `src/inventory.ts` e são conferidas por
+`npm run check:inventory`.
+
+**Modo de precificação**
+
+- *Preço digitado à mão* (padrão): o preço de venda é livre e a margem apenas
+  acompanha o que foi digitado.
+- *Preço calculado pela margem*: o preço fica travado em `custo + margem`. Não
+  há como vender abaixo do custo por um erro de digitação.
+
+**Custo das peças**, aplicado a cada entrada de estoque:
+
+- *Último preço pago* (padrão): o custo da peça vira o preço da compra mais
+  recente.
+- *Custo médio ponderado*: o custo vira a média pesada pela quantidade de cada
+  lote. Dez peças a R$ 10 mais dez a R$ 20 dão custo de R$ 15, não R$ 20 — sem
+  isso, o lucro das dez primeiras apareceria menor do que foi de verdade.
+
+A entrada de estoque (**Compras e entradas → Nova entrada**) soma a quantidade e
+recalcula o custo dentro de uma transação do Firestore, porque o custo médio
+depende do estoque e do custo gravados naquele instante.
+
+**Baixa de estoque pela OS.** As peças de uma ordem de serviço saem do estoque
+conforme a opção *"Baixar peça do estoque somente quando a OS for iniciada"*:
+
+- Ligada (padrão): a peça só sai da prateleira quando a OS chega em **Em
+  serviço**. Durante recepção, avaliação e aprovação a ordem ainda é orçamento,
+  e reservar peça de orçamento some com o estoque de quem vende no balcão.
+- Desligada: a peça sai já na abertura da OS.
+
+A ordem guarda o que já tirou do estoque, então salvar duas vezes não baixa duas
+vezes, tirar uma peça da OS devolve ela à prateleira, e voltar a ordem para
+orçamento desfaz a reserva. No encerramento, os itens conferidos são os que de
+fato foram usados e o estoque é acertado pela diferença.
+
+O cadastro de produto também passou a nascer com os padrões da oficina: markup
+sugerido, estoque mínimo e unidade de medida.
+
+## Impressão e WhatsApp
+
+O botão **Imprimir** na OS e o encerramento do serviço geram o documento e
+mandam para a impressora do navegador. A venda do balcão e o serviço rápido
+emitem o cupom ao concluir.
+
+Duas opções em **Configurações → Impressão & WhatsApp** valem aqui:
+
+- **Formato**: *Cupom 80mm* (impressora térmica, fonte monoespaçada) ou *A4*.
+- **Três vias**: ligado, sai uma via para o mecânico, uma para o caixa e uma
+  para o cliente; desligado, só a do cliente.
+
+A OS impressa traz os dados da oficina, cliente, moto, quilometragem, mecânicos,
+problema relatado, itens com valores, total, a **garantia padrão** e as
+**observações padrão** configuradas, além da linha de assinatura.
+
+O botão **WhatsApp** monta a mensagem a partir do modelo configurado e abre a
+conversa. Os marcadores disponíveis são `{cliente}`, `{moto}`, `{placa}`,
+`{os}`, `{status}`, `{total}`, `{oficina}` e `{previsao}`. O telefone vem do
+cadastro do cliente; sem cliente vinculado, o WhatsApp abre para escolher o
+contato na hora.
+
+O conteúdo é montado em `src/documents.ts` (funções puras) e conferido por
+`npm run check:documents` — num documento impresso, um marcador não substituído
+ou um nome com `&` quebrando o HTML só apareceria no papel, na frente do
+cliente.
 
 ## Como o dinheiro é contado
 
@@ -173,6 +248,8 @@ sessões anteriores daquele usuário.
 
 - [ ] `npm run typecheck` sem erros
 - [ ] `npm run check:finance` com todas as contas batendo
+- [ ] `npm run check:inventory` com todas as contas batendo
+- [ ] `npm run check:documents` sem falhas
 - [ ] `npm run build` conclui sem erros
 - [ ] Variáveis `VITE_FIREBASE_*` configuradas no ambiente de produção
 - [ ] `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` e `INITIAL_SUPER_ADMIN_EMAIL` cadastradas

@@ -108,6 +108,15 @@ service cloud.firestore {
       allow update, delete: if can('finance.manage');
     }
 
+    // Entradas de estoque (compras de peças). Quem gerencia o estoque registra;
+    // corrigir ou apagar uma entrada já registrada é do financeiro, porque ela
+    // mexeu no custo das peças.
+    match /stockEntries/{documentId} {
+      allow read: if can('inventory.view') || can('finance.view');
+      allow create: if can('inventory.manage');
+      allow update, delete: if can('finance.manage');
+    }
+
     match /expenses/{documentId} {
       allow read: if can('finance.view');
       allow create, update, delete: if can('finance.manage');
