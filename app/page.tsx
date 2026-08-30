@@ -1,7 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isMechanicUser, type UserConfig as UserConfigType } from "../src/types";
+import { isMechanicUser } from "../src/types";
 
 // Carregados sob demanda: cada um só é montado quando o diálogo/aba
 // correspondente é aberto (ver DialogRouter e a aba "Configurações" mais
@@ -20,11 +20,13 @@ function LazyFallback() {
 }
 import {
   bootstrapCurrentUserAsSuperAdmin,
+  changeOwnPassword,
   createManagedUser,
   defaultFirebasePermissions,
   deleteManagedUser,
   firebaseErrorMessage,
   listManagedUsers,
+  MIN_PASSWORD_LENGTH,
   observeAccessProfile,
   observeCollection,
   observeEmployees,
@@ -43,172 +45,30 @@ import {
   type ManagedUserInput,
 } from "./firebase/client";
 
-type IconName =
-  | "home"
-  | "wrench"
-  | "file"
-  | "box"
-  | "users"
-  | "bike"
-  | "wallet"
-  | "chart"
-  | "search"
-  | "bell"
-  | "plus"
-  | "arrow"
-  | "clock"
-  | "alert"
-  | "check"
-  | "menu"
-  | "settings"
-  | "shield";
-
-type DialogKind =
-  | "osChoice"
-  | "os"
-  | "quick"
-  | "product"
-  | "import"
-  | "payment"
-  | "catalog"
-  | "client"
-  | "motorcycle"
-  | "employee"
-  | "supplier"
-  | "purchase"
-  | "finance"
-  | "order"
-  | "orderCheckout"
-  | "settings"
-  | "cash"
-  | "expense"
-  | "receivable"
-  | "payable"
-  | "settleReceivable"
-  | "settlePayable"
-  | "record"
-  | null;
-
-type OpenDialog = (dialog: Exclude<DialogKind, null>) => void;
-
-type ExpenseRecord = {
-  id: string;
-  description: string;
-  category: string;
-  amount: number;
-  dueDate: string;
-  status: "Pago" | "Agendado";
-  method: string;
-  order?: string;
-  charged?: number;
-  employeeId?: string;
-};
-
-type UserConfig = UserConfigType;
-
-type PaymentMachineConfig = {
-  id: string;
-  name: string;
-  active: boolean;
-  primary: boolean;
-  debitFee: number;
-  credit1xFee: number;
-  credit2to6Fee: number;
-  credit7to12Fee: number;
-  settlementDays: number;
-};
-
-type PaymentMethodConfig = {
-  id: string;
-  name: string;
-  active: boolean;
-  usesMachine: boolean;
-};
-
-type PartnerConfig = {
-  id: string;
-  name: string;
-  phone: string;
-  laborDiscount: number;
-  billingCycle: string;
-  active: boolean;
-};
-
-type QuickServiceConfig = {
-  id: string;
-  name: string;
-  laborPrice: number;
-  duration: number;
-  productCategory: string;
-  productRequired: boolean;
-  active: boolean;
-};
-
-type CategoryConfig = {
-  id: string;
-  name: string;
-  group: "Serviços" | "Produtos" | "Despesas";
-  active: boolean;
-};
-
-type SupplierConfig = {
-  id: string;
-  name: string;
-  phone: string;
-  categories: string;
-  deliveryDays: number;
-  active: boolean;
-};
-
-type ServiceOrderItem = {
-  id: string;
-  type: "Peça" | "Mão de obra";
-  name: string;
-  price: number;
-};
-
-type OrderRecord = {
-  id: string;
-  customer: string;
-  bike: string;
-  plate: string;
-  mechanic: string;
-  mechanicIds: string[];
-  time: string;
-  status: string;
-  tone: string;
-};
-
-type ProductRecord = {
-  id: string;
-  code: string;
-  name: string;
-  category: string;
-  stock: number;
-  minimum: number;
-  cost: string;
-  price: string;
-  status: string;
-};
-
-type ClientRecord = {
-  id: string;
-  name: string;
-  phone: string;
-  detail: string;
-  meta: string;
-  condition: string;
-  motorcycleIds: string[];
-};
-
-type MotorcycleRecord = {
-  id: string;
-  ownerId: string;
-  plate: string;
-  model: string;
-  year: string;
-  color: string;
-};
+// Os tipos de domínio vivem em src/types.ts, que é a fonte única compartilhada
+// entre esta tela, os modais de cadastro e o backend administrativo. Antes este
+// arquivo redeclarava versões reduzidas dos mesmos tipos (OrderRecord sem
+// `total`, MotorcycleRecord sem `brand`, ...), o que fazia o TypeScript
+// reclamar de campos que a interface de fato usa e escondia divergências entre
+// o que o formulário grava e o que a tela lê.
+import type {
+  CategoryConfig,
+  ClientRecord,
+  DialogKind,
+  ExpenseRecord,
+  IconName,
+  MotorcycleRecord,
+  OpenDialog,
+  OrderRecord,
+  PartnerConfig,
+  PaymentMachineConfig,
+  PaymentMethodConfig,
+  ProductRecord,
+  QuickServiceConfig,
+  ServiceOrderItem,
+  SupplierConfig,
+  UserConfig,
+} from "../src/types";
 
 type FirebaseConnectionState = "checking" | "signed-out" | "needs-profile" | "connected" | "disabled" | "error";
 
@@ -269,6 +129,11 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
     menu: <path d="M4 7h16M4 12h16M4 17h16"/>,
     settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></>,
     shield: <><path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></>,
+    trash: <><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13M9 7V4h6v3"/></>,
+    edit: <><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></>,
+    lock: <><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></>,
+    printer: <><path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/></>,
+    refresh: <><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></>,
   };
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -280,7 +145,7 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 const navGroups: Array<{
   label: string;
   icon: IconName;
-  items: Array<{ label: string; icon: IconName }>;
+  items: Array<{ label: string; icon: IconName; badge?: string }>;
 }> = [
   {
     label: "Oficina",
@@ -448,6 +313,17 @@ function useFirebaseSession() {
     setError("");
   };
 
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    setError("");
+    try {
+      await changeOwnPassword(currentPassword, newPassword);
+    } catch (firebaseError) {
+      const message = firebaseErrorMessage(firebaseError);
+      setError(message);
+      throw new Error(message);
+    }
+  };
+
   const resetPassword = async (email: string) => {
     setError("");
     try {
@@ -474,7 +350,7 @@ function useFirebaseSession() {
     setError(firebaseErrorMessage(firebaseError));
   };
 
-  return { user, profile, state, error, login, logout, resetPassword, bootstrapAdmin, reportSyncError };
+  return { user, profile, state, error, login, logout, resetPassword, changePassword, bootstrapAdmin, reportSyncError };
 }
 
 function useFirebaseSyncedCollection<T extends { id: string }>(
@@ -1566,16 +1442,16 @@ function AppDialog({
   users: UserConfig[];
   partners: PartnerConfig[];
   quickServices: QuickServiceConfig[];
-  categories?: CategoryConfig[];
+  categories: CategoryConfig[];
   suppliers: SupplierConfig[];
   paymentMachines: PaymentMachineConfig[];
   paymentMethods: PaymentMethodConfig[];
   products: ProductRecord[];
   clients: ClientRecord[];
   motorcycles: MotorcycleRecord[];
-  orders?: OrderRecord[];
-  expenses?: ExpenseRecord[];
-  notify?: (message: string) => void;
+  orders: OrderRecord[];
+  expenses: ExpenseRecord[];
+  notify: (message: string) => void;
 }) {
   if (dialog === "product") {
     return (
@@ -1777,6 +1653,7 @@ function AppDialog({
     update(selected.includes(id) ? (selected.length > 1 ? selected.filter((currentId) => currentId !== id) : selected) : [...selected, id]);
   };
   const titles: Record<Exclude<DialogKind, null>, string> = {
+    changePassword: "Definir uma nova senha",
     osChoice: "Que tipo de atendimento é?",
     os: "Abrir nova ordem de serviço",
     quick: "Lançar serviço rápido",
@@ -1802,6 +1679,7 @@ function AppDialog({
     record: "Detalhes do registro",
   };
   const subtitles: Record<Exclude<DialogKind, null>, string> = {
+    changePassword: "Escolha a senha que você vai usar a partir de agora.",
     osChoice: "Escolha o fluxo certo antes de começar.",
     os: "Preencha somente o necessário. Você poderá completar depois.",
     quick: "Para trocas e ajustes sem cadastro completo.",
@@ -1860,6 +1738,7 @@ function AppDialog({
       return finish(expensePaymentMode === "Pagar depois" ? "Gasto agendado e incluído nas contas a pagar." : "Gasto registrado e descontado do saldo da oficina.");
     }
     const messages: Record<Exclude<DialogKind, null>, string> = {
+      changePassword: "Senha atualizada.",
       osChoice: "Atendimento selecionado.",
       os: "Nova ordem de serviço aberta com sucesso.",
       quick: "Serviço rápido lançado e pronto para recebimento.",
@@ -2039,22 +1918,6 @@ function AppDialog({
           </div>
         ) : null}
 
-        {dialog === "product" ? (
-          <div className="dialog-body form-section">
-            <div className="form-grid">
-              <label className="field field-full"><span>Nome do produto</span><input placeholder="Ex.: Óleo Motul 20W50"/></label>
-              <label className="field"><span>Código de barras</span><input placeholder="Leia ou digite o código"/></label>
-              <label className="field"><span>Código da peça (opcional)</span><input placeholder="Referência do fabricante"/></label>
-              <label className="field"><span>Categoria</span><select><option>Óleos e lubrificantes</option><option>Freios</option><option>Transmissão</option><option>Elétrica</option><option>Outros</option></select></label>
-              <label className="field"><span>Quantidade inicial</span><input type="number" defaultValue="1"/></label>
-              <label className="field"><span>Preço de custo</span><input placeholder="R$ 0,00"/></label>
-              <label className="field"><span>Preço de venda</span><input placeholder="R$ 0,00"/></label>
-              <label className="field"><span>Estoque mínimo</span><input type="number" defaultValue="2"/></label>
-              <label className="field"><span>Localização</span><input placeholder="Ex.: Prateleira A1"/></label>
-            </div>
-          </div>
-        ) : null}
-
         {dialog === "import" ? (
           <div className="dialog-body form-section">
             <div className="upload-zone">
@@ -2097,55 +1960,6 @@ function AppDialog({
             {paymentMethod === "Dinheiro" ? <div className="form-grid payment-extra"><label className="field"><span>Valor recebido</span><input placeholder="R$ 0,00"/></label><div className="change-box"><span>Troco</span><strong>R$ 0,00</strong></div></div> : null}
             {paymentMethod === "Nota a prazo" ? <div className="credit-warning"><Icon name="alert" size={18}/><div><strong>Venda a prazo</strong><small>Cliente obrigatório. Vencimento registrado no contas a receber.</small></div></div> : null}
             {paymentMethod === "Troca de serviços" ? <div className="trade-payment-card"><div className="trade-payment-head"><span><Icon name="users" size={18}/></span><div><strong>Compensar com trabalho ou serviço</strong><small>Quita o débito sem lançar entrada em dinheiro no caixa.</small></div></div><div className="form-grid"><label className="field field-full"><span>Serviço recebido do cliente</span><input value={tradeServiceDescription} onChange={(event) => setTradeServiceDescription(event.target.value)} placeholder="Ex.: Serviço combinado com o cliente"/></label><label className="field"><span>Valor acordado</span><input type="number" min="0" value={tradeValue} onChange={(event) => setTradeValue(event.target.value)}/></label><label className="field"><span>Valor compensado agora</span><input value={formatBRL(Math.min(Number(tradeValue) || 0, paymentGross))} readOnly/></label></div><div className="trade-cash-note"><Icon name="check" size={16}/><span>Entrada em caixa: <strong>R$ 0,00</strong>. A movimentação ficará no histórico financeiro como compensação.</span></div></div> : null}
-          </div>
-        ) : null}
-
-        {dialog === "client" ? (
-          <div className="dialog-body form-section">
-            <label className="pdv-search modal-search"><Icon name="search"/><input autoFocus placeholder="Nome, telefone, CPF ou CNPJ"/></label>
-            {!showQuickCustomer ? <div className="select-list">{clients.length ? clients.map((client, index) => (
-              <button key={client.name} onClick={() => finish(`${client.name} selecionado para o atendimento.`)}><span className="registry-avatar">{client.name.split(" ").slice(0, 2).map((word) => word[0]).join("")}</span><div><strong>{client.name}</strong><small>{client.phone} · {client.detail}</small></div><b className={client.condition === "Troca de serviços" ? "trade-client-badge" : ""}>{client.condition === "Pagamento normal" && index === 0 ? "Mais recente" : client.condition}</b><Icon name="arrow" size={17}/></button>
-            )) : <div className="empty-panel"><Icon name="users" size={24}/><span>Nenhum cliente cadastrado ainda.</span></div>}</div> : <div className="client-create-form form-top-gap"><div className="form-grid"><label className="field field-full"><span>Nome ou razão social</span><input placeholder="Nome completo"/></label><label className="field"><span>Tipo</span><select><option>Pessoa física</option><option>Empresa</option></select></label><label className="field"><span>WhatsApp</span><input placeholder="(34) 99999-9999"/></label><label className="field"><span>CPF/CNPJ</span><input placeholder="Opcional"/></label><label className="field"><span>Condição de pagamento / relacionamento</span><select value={clientPaymentCondition} onChange={(event) => setClientPaymentCondition(event.target.value)}><option>Pagamento normal</option><option>Cliente a prazo</option><option>Troca de serviços</option></select></label><label className="field"><span>Limite a prazo</span><input defaultValue="R$ 0,00"/></label></div>{clientPaymentCondition === "Troca de serviços" ? <div className="client-trade-fields"><div className="trade-payment-head"><span><Icon name="users" size={18}/></span><div><strong>Conta de troca de serviços</strong><small>Registre o combinado para compensar futuras peças e serviços da moto.</small></div></div><div className="form-grid"><label className="field field-full"><span>Trabalho ou serviço combinado</span><input value={tradeServiceDescription} onChange={(event) => setTradeServiceDescription(event.target.value)} placeholder="Ex.: Criação do sistema da oficina"/></label><label className="field"><span>Valor acordado / crédito inicial</span><input type="number" min="0" value={tradeValue} onChange={(event) => setTradeValue(event.target.value)}/></label><label className="field"><span>Saldo inicial</span><input value={formatBRL(Number(tradeValue) || 0)} readOnly/></label><label className="field field-full"><span>Observações da troca</span><textarea value={tradeNotes} onChange={(event) => setTradeNotes(event.target.value)} placeholder="Ex.: O crédito será usado para quitar peças da motocicleta do cliente."/></label></div><div className="trade-cash-note"><Icon name="check" size={16}/><span>A compensação reduz o saldo da dívida, mas não aumenta o dinheiro recebido nem o caixa da oficina.</span></div></div> : null}</div>}
-            <button className="soft-action" onClick={() => setShowQuickCustomer(!showQuickCustomer)}><Icon name="plus" size={17}/>{showQuickCustomer ? "Voltar para a busca" : "Cadastrar um novo cliente"}</button>
-          </div>
-        ) : null}
-
-        {dialog === "motorcycle" ? (
-          <div className="dialog-body form-section">
-            <div className="form-grid">
-              <label className="field field-full"><span>Proprietário real</span><div className="input-with-icon"><Icon name="search" size={17}/><input placeholder="Nome ou telefone do proprietário"/></div></label>
-              <label className="field"><span>Placa</span><input value={motorcyclePlate} onChange={(event) => setMotorcyclePlate(formatPlate(event.target.value))} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(motorcyclePlate)} · formatação automática</small></label><label className="field"><span>Marca</span><select><option>Honda</option><option>Yamaha</option><option>Suzuki</option><option>Outra</option></select></label>
-              <label className="field field-full"><span>Modelo e versão</span><input placeholder="Ex.: CG 160 Fan"/></label>
-              <label className="field"><span>Ano / modelo</span><input placeholder="2024 / 2025"/></label><label className="field"><span>Cor</span><input placeholder="Ex.: Vermelha"/></label>
-              <label className="field"><span>Chassi</span><input placeholder="Opcional"/></label><label className="field"><span>RENAVAM</span><input placeholder="Opcional"/></label>
-              <label className="field"><span>Quilometragem</span><input placeholder="0 km"/></label><label className="field"><span>Cilindrada</span><input placeholder="160 cc"/></label>
-            </div>
-            <div className="info-strip"><Icon name="check" size={18}/><span>O pagador não fica preso à moto. Ele será definido em cada ordem de serviço conforme a origem.</span></div>
-          </div>
-        ) : null}
-
-        {dialog === "employee" ? (
-          <div className="dialog-body form-section">
-            <div className="form-grid">
-              <label className="field field-full"><span>Nome completo</span><input placeholder="Nome do funcionário"/></label>
-              <label className="field"><span>Função</span><select><option>Mecânico</option><option>Responsável pela oficina</option><option>Atendente</option><option>Dono / Mecânico</option></select></label><label className="field"><span>WhatsApp</span><input placeholder="(34) 99999-9999"/></label>
-              <label className="field"><span>Tipo de vínculo</span><select><option>Fixo</option><option>Avulso</option></select></label><label className="field"><span>Salário padrão</span><input type="number" defaultValue="0"/></label><label className="field"><span>Dia de pagamento</span><select><option>Dia 05</option><option>Dia 10</option><option>Último dia útil</option></select></label>
-              <label className="field"><span>Comissão em serviços</span><input defaultValue="10%"/></label><label className="field"><span>Comissão em produtos</span><input defaultValue="0%"/></label>
-              <label className="field field-full"><span>Acesso ao sistema</span><select><option>Funcionário — somente minhas OS</option><option>Balcão — acesso operacional</option><option>Super Admin — acesso completo</option></select></label>
-            </div>
-            <label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Funcionário ativo</strong><small>Poderá acessar o sistema e receber permissões.</small></div></label><label className="toggle-row"><input type="checkbox" defaultChecked/><span/><div><strong>Pode receber e atualizar OS</strong><small>O mecânico poderá mudar a situação e marcar o serviço como pronto.</small></div></label>
-          </div>
-        ) : null}
-
-        {dialog === "supplier" ? (
-          <div className="dialog-body form-section">
-            <div className="form-grid">
-              <label className="field field-full"><span>Nome ou razão social</span><input placeholder="Nome do fornecedor"/></label>
-              <label className="field"><span>CNPJ/CPF</span><input placeholder="Opcional"/></label><label className="field"><span>WhatsApp</span><input placeholder="(34) 99999-9999"/></label>
-              <label className="field"><span>Representante</span><input placeholder="Nome do contato"/></label><label className="field"><span>Prazo médio</span><input placeholder="Ex.: 2 dias"/></label>
-              <label className="field field-full"><span>Categorias fornecidas</span><input placeholder="Ex.: Peças gerais, freios e transmissão"/></label>
-              <label className="field field-full"><span>Observações e condições</span><textarea placeholder="Prazo de pagamento, pedido mínimo e outras condições."/></label>
-            </div>
           </div>
         ) : null}
 
@@ -2316,7 +2130,7 @@ function AppDialog({
         {dialog === "record" ? (
           <div className="dialog-body record-detail">
             <div className="record-header"><span className="registry-avatar">FR</span><div><strong>Faturamento e resultado</strong><small>Relatório consolidado</small></div><span className="status green"><i/>Atualizado</span></div>
-            <div className="record-metrics"><article><span>Faturamento</span><strong>{formatBRL(orders ? orders.reduce((sum, o) => sum + parseBRL(o.total), 0) : 0)}</strong></article><article><span>Custos e gastos</span><strong>{formatBRL(expenses ? expenses.reduce((sum, e) => sum + e.amount, 0) : 0)}</strong></article><article><span>Lucro líquido</span><strong>{formatBRL((orders ? orders.reduce((sum, o) => sum + parseBRL(o.total), 0) : 0) - (expenses ? expenses.reduce((sum, e) => sum + e.amount, 0) : 0))}</strong></article></div><div className="net-profit-note"><Icon name="check" size={17}/><span>O resultado desconta peças, despesas, pagamentos de funcionários e taxas de cartão configuradas.</span></div>
+            <div className="record-metrics"><article><span>Faturamento</span><strong>{formatBRL(orders ? orders.reduce((sum, o) => sum + (o.total ?? 0), 0) : 0)}</strong></article><article><span>Custos e gastos</span><strong>{formatBRL(expenses ? expenses.reduce((sum, e) => sum + e.amount, 0) : 0)}</strong></article><article><span>Lucro líquido</span><strong>{formatBRL((orders ? orders.reduce((sum, o) => sum + (o.total ?? 0), 0) : 0) - (expenses ? expenses.reduce((sum, e) => sum + e.amount, 0) : 0))}</strong></article></div><div className="net-profit-note"><Icon name="check" size={17}/><span>O resultado desconta peças, despesas, pagamentos de funcionários e taxas de cartão configuradas.</span></div>
             <div className="history-list"><strong>Últimas atualizações</strong><div><i/><span><b>Hoje</b>Nenhuma movimentação anterior registrada.</span></div></div>
           </div>
         ) : null}
@@ -2330,6 +2144,54 @@ function AppDialog({
         </footer> : <footer className="dialog-footer choice-footer"><button className="ghost-button" onClick={close}>Cancelar</button></footer>}
       </section>
     </div>
+  );
+}
+
+// Primeiro acesso (ou logo após o Super Admin redefinir a senha): o servidor
+// grava mustChangePassword no perfil e o app não abre até a pessoa escolher uma
+// senha própria. Sem esta tela, a senha temporária de 6 dígitos entregue pelo
+// administrador virava a senha definitiva do funcionário — a flag era gravada
+// no Firestore e nunca lida por ninguém.
+function ForcePasswordChange({ session }: { session: ReturnType<typeof useFirebaseSession> }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [localError, setLocalError] = useState("");
+
+  const submit = async () => {
+    if (!currentPassword || !newPassword) return setLocalError("Preencha a senha atual e a nova senha.");
+    if (newPassword !== confirmPassword) return setLocalError("A confirmação não é igual à nova senha.");
+    setSubmitting(true);
+    setLocalError("");
+    try {
+      await session.changePassword(currentPassword, newPassword);
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : "Não foi possível trocar a senha.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitOnEnter = (event: React.KeyboardEvent) => { if (event.key === "Enter") void submit(); };
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="auth-brand"><div className="auth-brand-mark">PP</div><div><strong>Pica Pau Motos</strong><span>Gestão da oficina</span></div></div>
+        <div className="auth-copy"><span>Primeiro acesso</span><h1>Crie a sua senha</h1><p>Você entrou com a senha temporária cadastrada pelo administrador. Escolha agora uma senha só sua para continuar.</p></div>
+        <div className="auth-account"><span>Conta</span><strong>{session.user?.email}</strong></div>
+        <div className="auth-form">
+          <label><span>Senha temporária</span><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} onKeyDown={submitOnEnter} autoComplete="current-password" placeholder="A senha que o administrador passou" autoFocus/></label>
+          <label><span>Nova senha</span><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} onKeyDown={submitOnEnter} autoComplete="new-password" placeholder={`Pelo menos ${MIN_PASSWORD_LENGTH} caracteres`}/></label>
+          <label><span>Repita a nova senha</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} onKeyDown={submitOnEnter} autoComplete="new-password" placeholder="Digite a nova senha de novo"/></label>
+          {localError || session.error ? <div className="auth-alert error"><Icon name="alert" size={17}/><span>{localError || session.error}</span></div> : null}
+          <button className="auth-primary" disabled={submitting} onClick={() => void submit()}><Icon name="check" size={18}/>{submitting ? "Salvando..." : "Salvar e entrar no sistema"}</button>
+          <small className="auth-help">Use pelo menos {MIN_PASSWORD_LENGTH} caracteres, misturando letras e números. Não use apenas números.</small>
+          <button className="auth-link-button" onClick={() => void session.logout()}>Sair desta conta</button>
+        </div>
+      </section>
+    </main>
   );
 }
 
@@ -2477,6 +2339,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [globalSearch, setGlobalSearch] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
     const canOperate = firebaseAdmin
     || (["Ordens de serviço", "Orçamentos"].includes(active) && (canUpdateOrders || canCreateOrders))
     || (["PDV Balcão", "Vendas do balcão"].includes(active) && canUsePdv)
@@ -2522,6 +2385,25 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
       return () => window.clearTimeout(timer);
     }
   }, [active, firebaseAdmin, firebaseEnabled, firebasePermissions]);
+
+  // A topbar sempre anunciou o atalho no badge "Ctrl K", mas nada o escutava.
+  // Esc fecha a busca sem precisar do mouse.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInput.current?.focus();
+        searchInput.current?.select();
+        return;
+      }
+      if (event.key === "Escape" && document.activeElement === searchInput.current) {
+        setGlobalSearch("");
+        searchInput.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const openDialog = (next: Exclude<DialogKind, null>) => {
     setOsStep(1);
@@ -2617,7 +2499,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           <button className="mobile-menu" aria-label="Abrir menu" onClick={() => setMobileMenu(true)}><Icon name="menu" /></button>
           <label className="search-box">
             <Icon name="search" size={19} />
-            <input aria-label="Buscar" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && globalResults[0]) goToSearchResult(globalResults[0].destination); }} placeholder="Buscar OS, cliente, placa ou peça..." />
+            <input ref={searchInput} aria-label="Buscar" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && globalResults[0]) goToSearchResult(globalResults[0].destination); }} placeholder="Buscar OS, cliente, placa ou peça..." />
             <kbd>Ctrl K</kbd>
             {globalSearch ? <div className="global-results">{globalResults.length ? globalResults.map((result) => <button key={`${result.destination}-${result.title}`} onClick={() => goToSearchResult(result.destination)}><span className="registry-avatar">{result.destination.slice(0,2).toUpperCase()}</span><div><strong>{result.title}</strong><small>{result.detail}</small></div><Icon name="arrow" size={16}/></button>) : <div className="no-results">Nenhum resultado encontrado.</div>}</div> : null}
           </label>
@@ -2758,6 +2640,9 @@ export default function Home() {
   const firebaseSession = useFirebaseSession();
   if (firebaseSession.state !== "connected" || !firebaseSession.user || !firebaseSession.profile) {
     return <AuthGate session={firebaseSession}/>;
+  }
+  if (firebaseSession.profile.mustChangePassword) {
+    return <ForcePasswordChange session={firebaseSession}/>;
   }
   return <WorkshopApp firebaseSession={firebaseSession}/>;
 }

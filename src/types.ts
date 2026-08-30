@@ -231,6 +231,14 @@ export type OrderRecord = {
   solution?: string;
   notes?: string;
   total?: number;
+  /** Como a moto chegou à oficina (cliente, parceiro, garantia...). */
+  origin?: string;
+  /** Previsão de entrega mostrada no detalhe da OS. */
+  delivery?: string;
+  /** Prioridade combinada com o cliente (Normal, Urgente...). */
+  priority?: string;
+  /** Resumo do serviço principal, usado nas listagens. */
+  service?: string;
 };
 
 export type ProductRecord = {

@@ -1,0 +1,16 @@
+# Dependências
+node_modules/
+
+# Build de produção
+dist/
+
+# Variáveis de ambiente — o JSON da conta de serviço do Firebase Admin
+# NUNCA pode ir para o repositório.
+.env
+.env.*
+!.env.example
+
+# Logs e arquivos do sistema
+*.log
+npm-debug.log*
+.DS_Store

@@ -1,12 +1,15 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import {
   browserLocalPersistence,
+  EmailAuthProvider,
   getAuth,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   setPersistence,
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
   signOut,
+  updatePassword,
   type User,
 } from "firebase/auth";
 import {
@@ -73,6 +76,13 @@ export type FirebaseAccessProfile = {
   role: UserRole;
   active: boolean;
   permissions: FirebasePermission[];
+  /**
+   * Marcado pelo backend administrativo quando o Super Admin cria a conta ou
+   * redefine a senha. Enquanto for true o app só mostra a tela de troca de
+   * senha — é o que impede a senha temporária de 6 dígitos de virar a senha
+   * definitiva do funcionário.
+   */
+  mustChangePassword: boolean;
 };
 
 export type FirebaseManagedUser = {
@@ -135,6 +145,7 @@ export function firebaseErrorMessage(error: unknown) {
   if (code.includes("email-already-in-use")) return "Este e-mail já está sendo usado por outro usuário.";
   if (code.includes("invalid-email")) return "Informe um endereço de e-mail válido.";
   if (code.includes("weak-password")) return "A senha precisa ter pelo menos 6 caracteres.";
+  if (code.includes("requires-recent-login")) return "Por segurança, entre novamente no sistema antes de trocar a senha.";
   if (code.includes("unauthenticated")) return "Sua sessão expirou. Entre novamente para continuar.";
   if (code.includes("admin/configuration")) return "Configure a credencial do Firebase Admin nas variáveis protegidas do ambiente.";
   if (code.includes("admin/internal")) return "O backend administrativo não conseguiu concluir a operação. Confira os logs do ambiente.";
@@ -175,6 +186,41 @@ export async function requestFirebasePasswordReset(email: string) {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail) throw new Error("Informe seu e-mail para recuperar a senha.");
   await sendPasswordResetEmail(auth, normalizedEmail);
+}
+
+export const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * Troca a senha do usuário que está logado. Diferente de setManagedUserPassword
+ * (que é o Super Admin redefinindo a senha de outra pessoa pelo Admin SDK),
+ * aqui quem troca é o próprio dono da conta: o Firebase exige a senha atual
+ * para reautenticar antes de aceitar a nova.
+ *
+ * Ao final baixa a flag mustChangePassword no perfil de acesso — as regras do
+ * Firestore permitem que cada usuário altere exatamente esse campo no próprio
+ * documento, e nada além dele.
+ */
+export async function changeOwnPassword(currentPassword: string, newPassword: string) {
+  const { auth, db } = services();
+  const currentUser = auth.currentUser;
+  if (!currentUser || !currentUser.email) throw new Error("Entre no sistema para trocar a senha.");
+  if (newPassword.length < MIN_PASSWORD_LENGTH) throw new Error(`A nova senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`);
+  if (/^\d+$/.test(newPassword)) throw new Error("Escolha uma senha com letras e números, não apenas números.");
+  if (newPassword === currentPassword) throw new Error("A nova senha precisa ser diferente da senha temporária.");
+
+  await reauthenticateWithCredential(currentUser, EmailAuthProvider.credential(currentUser.email, currentPassword));
+  await updatePassword(currentUser, newPassword);
+
+  try {
+    await setDoc(doc(db, "userAccess", currentUser.uid), {
+      mustChangePassword: false,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    // A senha já foi trocada no Authentication; se a baixa da flag falhar, o
+    // usuário veria a tela de troca de novo sem entender o motivo.
+    handleFirestoreError(error, OperationType.WRITE, `userAccess/${currentUser.uid}`);
+  }
 }
 
 export async function bootstrapCurrentUserAsSuperAdmin() {
@@ -261,6 +307,7 @@ export function observeAccessProfile(uid: string, callback: (profile: FirebaseAc
           role: "Super Admin",
           active: true,
           permissions: [...allFirebasePermissions],
+          mustChangePassword: false,
         });
         return;
       }
@@ -288,6 +335,9 @@ export function observeAccessProfile(uid: string, callback: (profile: FirebaseAc
       role,
       active,
       permissions,
+      // Só o perfil de acesso carrega a flag: o documento em users/ é só o
+      // cadastro, quem controla credencial é userAccess/.
+      mustChangePassword: accessDoc?.mustChangePassword === true,
     });
   };
 
@@ -503,10 +553,15 @@ export async function syncEmployeesDiff<T extends EmployeeLike>(changed: T[], de
   }
 }
 
-export async function saveFirestoreDoc<T extends { id: string }>(collectionName: string, id: string, data: Partial<T>) {
+// O payload é inferido do próprio objeto passado pelo formulário. A assinatura
+// antiga (`<T extends { id: string }>` recebendo `Partial<T>`) fazia o
+// TypeScript inferir T como `{ id: string }` em todas as chamadas — nenhum
+// formulário passa o tipo explicitamente —, e aí qualquer campo real do
+// cadastro virava "propriedade desconhecida". Eram 7 dos erros de typecheck.
+export async function saveFirestoreDoc<T extends Record<string, unknown>>(collectionName: string, id: string, data: T) {
   const { db } = services();
-  const cleanData = { ...data };
-  delete (cleanData as Record<string, unknown>).id;
+  const cleanData: Record<string, unknown> = { ...data };
+  delete cleanData.id;
   try {
     await setDoc(doc(db, collectionName, id), { ...cleanData, updatedAt: serverTimestamp() }, { merge: true });
   } catch (error) {
@@ -599,6 +654,9 @@ async function callAdmin<TOutput>(input?: object): Promise<TOutput> {
 
 async function listManagedUsersFromFirestore() {
   const { auth, db } = services();
+  // Guardado em uma constante: `auth.currentUser` é um getter e o TypeScript
+  // não mantém o estreitamento de null entre um acesso e o seguinte.
+  const currentUser = auth.currentUser;
   const [accessSnapshot, usersSnapshot] = await Promise.all([
     getDocs(collection(db, "userAccess")).catch(() => ({ docs: [] as DocumentData[] })),
     getDocs(collection(db, "users")).catch(() => ({ docs: [] as DocumentData[] })),
@@ -616,17 +674,17 @@ async function listManagedUsersFromFirestore() {
     const userDocData = usersMap.get(item.id);
     const resolvedName = (typeof userDocData?.name === "string" ? userDocData.name.trim() : "")
       || (typeof item.data()?.name === "string" ? item.data().name.trim() : "")
-      || (item.id === auth.currentUser?.uid ? auth.currentUser.displayName?.trim() : "")
+      || (currentUser && item.id === currentUser.uid ? currentUser.displayName?.trim() : "")
       || "Usuário";
     const mergedData = {
       ...item.data(),
       name: resolvedName,
     };
     const user = managedUserFromData(item.id, mergedData);
-    if (item.id === auth.currentUser?.uid) {
-      user.email ||= auth.currentUser.email ?? "";
+    if (currentUser && item.id === currentUser.uid) {
+      user.email ||= currentUser.email ?? "";
       user.name = resolvedName;
-      user.lastSignInAt ||= auth.currentUser.metadata.lastSignInTime ?? "";
+      user.lastSignInAt ||= currentUser.metadata.lastSignInTime ?? "";
     }
     list.push(user);
   }
@@ -634,13 +692,13 @@ async function listManagedUsersFromFirestore() {
   for (const [uid, userDocData] of usersMap.entries()) {
     if (accessUids.has(uid)) continue;
     const resolvedName = (typeof userDocData?.name === "string" ? userDocData.name.trim() : "")
-      || (uid === auth.currentUser?.uid ? auth.currentUser?.displayName?.trim() : "")
+      || (currentUser && uid === currentUser.uid ? currentUser.displayName?.trim() : "")
       || "Usuário";
     const user = managedUserFromData(uid, { ...userDocData, name: resolvedName, hasAccessProfile: false });
-    if (uid === auth.currentUser?.uid) {
-      user.email ||= auth.currentUser.email ?? "";
+    if (currentUser && uid === currentUser.uid) {
+      user.email ||= currentUser.email ?? "";
       user.name = resolvedName;
-      user.lastSignInAt ||= auth.currentUser.metadata.lastSignInTime ?? "";
+      user.lastSignInAt ||= currentUser.metadata.lastSignInTime ?? "";
     }
     list.push(user);
   }

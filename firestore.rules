@@ -5,6 +5,9 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Conta de resgate do dono da oficina. Serve apenas para o primeiro acesso
+    // (ou para recuperar o sistema caso o único Super Admin seja perdido) e é
+    // a mesma conta exigida em INITIAL_SUPER_ADMIN_EMAIL no servidor.
     function isBootstrappedAdmin() {
       return signedIn() && request.auth.token.email == 'matheus2713.m@gmail.com';
     }
@@ -37,17 +40,42 @@ service cloud.firestore {
       return isSuperAdmin() || (activeUser() && ('permissions' in profile()) && (permission in profile().permissions));
     }
 
+    // Campos que decidem quem é quem no sistema. Só o Super Admin (via console
+    // ou via API administrativa, que usa o Admin SDK e não passa por estas
+    // regras) pode alterá-los. Sem esta trava qualquer funcionário logado
+    // conseguia gravar role:'Super Admin' no próprio documento e assumir o
+    // sistema inteiro.
+    function privilegeFields() {
+      return ['role', 'permissions', 'active', 'employeeId', 'uid', 'email', 'createdBy', 'createdAt'];
+    }
+
+    function keepsOwnPrivileges() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(privilegeFields());
+    }
+
+    function changesOnly(allowedKeys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedKeys);
+    }
+
     match /userAccess/{userId} {
       allow get: if signedIn() && (request.auth.uid == userId || isSuperAdmin());
       allow list: if isSuperAdmin();
-      allow create, update: if signedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow create: if isSuperAdmin();
+      // O próprio usuário só pode baixar a flag de troca de senha obrigatória
+      // depois de definir a senha definitiva. Todo o resto do perfil de acesso
+      // é gravado pelo Super Admin.
+      allow update: if isSuperAdmin()
+        || (request.auth.uid == userId && changesOnly(['mustChangePassword', 'updatedAt']));
       allow delete: if isSuperAdmin();
     }
 
     match /users/{userId} {
       allow get: if signedIn() && (request.auth.uid == userId || isSuperAdmin());
       allow list: if isSuperAdmin();
-      allow create, update: if signedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow create: if isSuperAdmin();
+      // Cada um pode corrigir os próprios dados de contato (nome, telefone),
+      // nunca o cargo, as permissões ou o vínculo com o funcionário.
+      allow update: if isSuperAdmin() || (request.auth.uid == userId && keepsOwnPrivileges());
       allow delete: if isSuperAdmin();
     }
 
@@ -59,27 +87,27 @@ service cloud.firestore {
 
     match /products/{documentId} {
       allow read: if can('inventory.view') || can('pos.use') || can('orders.view');
-      allow create, update, delete: if can('inventory.manage') || isSuperAdmin();
+      allow create, update, delete: if can('inventory.manage');
     }
 
     match /clients/{documentId} {
       allow read: if can('customers.view') || can('orders.view') || can('pos.use');
-      allow create, update, delete: if can('customers.manage') || isSuperAdmin();
+      allow create, update, delete: if can('customers.manage');
     }
 
     match /motorcycles/{documentId} {
       allow read: if can('customers.view') || can('orders.view');
-      allow create, update, delete: if can('customers.manage') || isSuperAdmin();
+      allow create, update, delete: if can('customers.manage');
     }
 
     match /expenses/{documentId} {
       allow read: if can('finance.view');
-      allow create, update, delete: if can('finance.manage') || isSuperAdmin();
+      allow create, update, delete: if can('finance.manage');
     }
 
     match /employees/{documentId} {
       allow read: if signedIn();
-      allow create, update, delete: if can('team.manage') || isSuperAdmin();
+      allow create, update, delete: if isSuperAdmin();
     }
 
     match /employeeCompensation/{documentId} {
@@ -87,32 +115,32 @@ service cloud.firestore {
     }
 
     match /partners/{documentId} {
-      allow read: if can('customers.view') || can('orders.create') || isSuperAdmin();
+      allow read: if can('customers.view') || can('orders.create');
       allow create, update, delete: if isSuperAdmin();
     }
 
     match /quickServices/{documentId} {
-      allow read: if can('quickService.use') || can('orders.create') || isSuperAdmin();
+      allow read: if can('quickService.use') || can('orders.create');
       allow create, update, delete: if isSuperAdmin();
     }
 
     match /categories/{documentId} {
-      allow read: if can('inventory.view') || isSuperAdmin();
+      allow read: if can('inventory.view');
       allow create, update, delete: if isSuperAdmin();
     }
 
     match /suppliers/{documentId} {
-      allow read: if can('inventory.view') || can('inventory.manage') || isSuperAdmin();
-      allow create, update, delete: if can('inventory.manage') || isSuperAdmin();
+      allow read: if can('inventory.view') || can('inventory.manage');
+      allow create, update, delete: if can('inventory.manage');
     }
 
     match /paymentMachines/{documentId} {
-      allow read: if can('finance.view') || can('pos.use') || isSuperAdmin();
+      allow read: if can('finance.view') || can('pos.use');
       allow create, update, delete: if isSuperAdmin();
     }
 
     match /paymentMethods/{documentId} {
-      allow read: if can('finance.view') || can('pos.use') || isSuperAdmin();
+      allow read: if can('finance.view') || can('pos.use');
       allow create, update, delete: if isSuperAdmin();
     }
 
@@ -123,7 +151,9 @@ service cloud.firestore {
 
     match /auditLogs/{documentId} {
       allow read: if isSuperAdmin();
-      allow create: if signedIn();
+      // Um registro de auditoria só pode ser criado em nome de quem está
+      // logado, e nunca alterado ou apagado depois.
+      allow create: if signedIn() && request.resource.data.actorUid == request.auth.uid;
       allow update, delete: if false;
     }
 
