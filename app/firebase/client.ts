@@ -706,6 +706,74 @@ export async function saveOrderWithStock(
   }
 }
 
+/**
+ * Grava as parcelas de um lançamento de conta em um lote só.
+ *
+ * Parcelas separadas em gravações independentes deixariam a oficina com metade
+ * do parcelamento no banco se a conexão caísse no meio.
+ */
+export async function saveAccounts(prefix: string, startNumber: number, accounts: Array<Record<string, unknown>>) {
+  if (!accounts.length) return [] as string[];
+  const { db } = services();
+  const safePrefix = (prefix || "CT").trim().replace(/-+$/, "") || "CT";
+  try {
+    // Procura números livres antes de gravar. A tela só enxerga as contas se o
+    // usuário tiver permissão de ver o financeiro — quem opera só o PDV recebe
+    // a lista vazia, a sequência recomeçaria do 1 e o batch sobrescreveria uma
+    // conta existente sem reclamar.
+    const ids: string[] = [];
+    let number = Math.max(1, startNumber);
+    for (let attempts = 0; ids.length < accounts.length && attempts < accounts.length + 60; attempts += 1) {
+      const id = `${safePrefix}-${String(number).padStart(4, "0")}`;
+      number += 1;
+      if ((await getDoc(doc(db, "accounts", id))).exists()) continue;
+      ids.push(id);
+    }
+    if (ids.length < accounts.length) throw new Error("Não foi possível gerar a numeração das contas. Tente novamente.");
+
+    const batch = writeBatch(db);
+    accounts.forEach((data, index) => {
+      batch.set(doc(db, "accounts", ids[index]!), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    });
+    await batch.commit();
+    return ids;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "accounts");
+  }
+}
+
+/**
+ * Registra uma baixa (total ou parcial) em uma conta.
+ *
+ * Usa transação porque a baixa é acrescentada à lista que já está gravada: ler
+ * a conta na tela e regravar a lista inteira faria duas baixas simultâneas
+ * apagarem uma à outra. Também impede baixa acima do saldo, que viraria crédito
+ * fantasma na conta.
+ */
+export async function settleAccount(accountId: string, settlement: Record<string, unknown>) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const reference = doc(db, "accounts", accountId);
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists()) throw new Error("Esta conta não existe mais.");
+      const data = snapshot.data() ?? {};
+      const settlements = Array.isArray(data.settlements) ? data.settlements : [];
+      const paid = settlements.reduce((total: number, item: { amount?: number }) => total + (Number(item?.amount) || 0), 0);
+      const open = Math.max(0, Number(data.amount ?? 0) - paid);
+      const amount = Number(settlement.amount) || 0;
+      if (amount <= 0) throw new Error("Informe o valor da baixa.");
+      if (amount > open + 0.005) throw new Error(`O valor da baixa passa do saldo em aberto (${open.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}).`);
+      transaction.set(reference, {
+        settlements: [...settlements, settlement],
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `accounts/${accountId}`);
+  }
+}
+
 export async function deleteFirestoreDoc(collectionName: string, id: string) {
   const { db } = services();
   try {
