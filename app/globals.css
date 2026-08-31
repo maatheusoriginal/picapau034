@@ -289,6 +289,9 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .summary-title { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid #eceae7; }
 .summary-title span { color: #77787c; font-size: 10px; font-weight: 700; }
 .summary-title b { color: #aaa; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; }
+/* O .summary-title nasceu dentro do resumo do PDV, que já tem recuo próprio.
+   Solto num painel (quadro do mecânico) ele encostaria nas bordas. */
+.module-panel > .summary-title { padding: 14px 15px; }
 .pdv-client { width: 100%; display: flex; align-items: center; gap: 9px; padding: 13px 0; border: 0; border-bottom: 1px solid #eceae7; background: transparent; text-align: left; }
 .pdv-client div { flex: 1; }
 .pdv-client strong, .pdv-client small { display: block; }
