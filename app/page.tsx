@@ -10,6 +10,8 @@ import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, 
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
 import { openWhatsapp, printDocument } from "./printing";
 import { clearReloadMark, ErrorBoundary } from "./ErrorBoundary";
+import { downloadFile } from "./download";
+import { backupCount, backupFileName, backupIsDue, backupReminder, backupSummary, buildBackup } from "../src/backup";
 import type { SettingsTab } from "../src/components/SettingsWorkspace";
 
 // Carregados sob demanda: cada um só é montado quando o diálogo/aba
@@ -38,6 +40,7 @@ import {
   addCashMovement,
   closeCashSession,
   openCashSession,
+  readAllCollections,
   recordMovement,
   recordStockEntry,
   saveImportedProducts,
@@ -1250,6 +1253,7 @@ function AdminWorkspace({
   openSettings,
   settings,
   users,
+  currentFirebaseUser,
   products,
   orders,
   clients,
@@ -1268,6 +1272,7 @@ function AdminWorkspace({
   openSettings: (tab: SettingsTab) => void;
   settings: Partial<SettingsConfig> | null;
   users: UserConfig[];
+  currentFirebaseUser: FirebaseUserSummary | null;
   products: ProductRecord[];
   orders: OrderRecord[];
   clients: ClientRecord[];
@@ -1291,6 +1296,40 @@ function AdminWorkspace({
   const activeQuickServices = quickServices.filter((service) => service.active);
   const activePartners = partners.filter((partner) => partner.active);
   const osPrefix = settings?.osPrefix || "OS";
+
+  // --- Cópia de segurança ---
+  // O Firestore no plano gratuito não guarda backup nenhum. O aviso existe
+  // porque o problema real não é gerar o arquivo, é lembrar de gerar.
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupNote, setBackupNote] = useState("");
+  const lembrete = backupReminder(settings?.lastBackupAt);
+  const backupAtrasado = backupIsDue(settings?.lastBackupAt);
+
+  const baixarBackup = async () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setBackupNote("");
+    try {
+      const { data, failed } = await readAllCollections();
+      const arquivo = buildBackup(data, {
+        createdBy: currentFirebaseUser?.email ?? "",
+        workshop: settings?.workshopName || "Pica Pau Motos",
+      });
+      downloadFile(backupFileName(), JSON.stringify(arquivo, null, 2));
+      // A data fica em settings para valer em qualquer aparelho — guardar no
+      // navegador faria o celular achar que nunca houve backup feito no
+      // computador, e vice-versa.
+      await saveFirestoreDoc("settings", "global", { lastBackupAt: arquivo.createdAt });
+      const resumo = backupSummary(arquivo).slice(0, 3).map((item) => `${item.count} ${item.collection}`).join(", ");
+      setBackupNote(failed.length
+        ? `${backupCount(arquivo)} registros salvos, mas ${failed.join(", ")} não pôde ser lido. Essa parte NÃO está protegida.`
+        : `${backupCount(arquivo)} registros salvos (${resumo}…). Guarde o arquivo fora do celular.`);
+    } catch (error) {
+      setBackupNote(error instanceof Error ? error.message : "Não foi possível gerar a cópia de segurança.");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
 
   // O que ainda falta configurar para a oficina operar sem tropeço. Substitui o
   // selo "Sistema funcionando normalmente", que estava sempre verde.
@@ -1381,6 +1420,18 @@ function AdminWorkspace({
           </div>
         </div>
       ) : null}
+
+      <div className={backupAtrasado ? "admin-pending" : "admin-pending backup-ok"} role="status">
+        <Icon name={backupAtrasado ? "alert" : "check"} size={18}/>
+        <div>
+          <strong>{backupAtrasado ? "Cópia de segurança" : "Cópia de segurança em dia"}</strong>
+          <small>{lembrete || "Baixada hoje. O arquivo traz produtos, clientes, OS, vendas, caixa e contas."}</small>
+        </div>
+        <div className="admin-pending-actions">
+          <button onClick={() => void baixarBackup()} disabled={backupBusy}>{backupBusy ? "Gerando…" : "Baixar backup"}</button>
+        </div>
+      </div>
+      {backupNote ? <div className="info-strip"><Icon name="check" size={18}/><span>{backupNote}</span></div> : null}
 
       <div className="admin-overview">
         <section className="admin-welcome">
@@ -1530,7 +1581,7 @@ export function ModuleWorkspace({
       <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify} initialTab={settingsTab}/>
     </Suspense></ErrorBoundary>
   );
-  if (active === "Administração") return <AdminWorkspace navigate={navigate} openSettings={openSettings} settings={settings} users={users} products={products} orders={orders} clients={clients} motorcycles={motorcycles} sales={sales} expenses={expenses} accounts={accounts} categories={categories} quickServices={quickServices} partners={partners} paymentMachines={paymentMachines} paymentMethods={paymentMethods} suppliers={suppliers}/>;
+  if (active === "Administração") return <AdminWorkspace navigate={navigate} openSettings={openSettings} settings={settings} users={users} currentFirebaseUser={currentFirebaseUser} products={products} orders={orders} clients={clients} motorcycles={motorcycles} sales={sales} expenses={expenses} accounts={accounts} categories={categories} quickServices={quickServices} partners={partners} paymentMachines={paymentMachines} paymentMethods={paymentMethods} suppliers={suppliers}/>;
 
   /**
    * O quadro do mecânico substitui a tabela de seis colunas.

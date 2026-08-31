@@ -32,6 +32,7 @@ import {
 } from "firebase/firestore";
 import { allFirebasePermissions, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../../src/types";
 import { costAfterEntry, toAmount } from "../../src/inventory";
+import { BACKUP_COLLECTIONS } from "../../src/backup";
 
 type FirebaseWebConfig = {
   apiKey: string;
@@ -805,6 +806,30 @@ export async function saveAccounts(prefix: string, startNumber: number, accounts
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, "accounts");
   }
+}
+
+/**
+ * Lê todas as coleções da oficina para a cópia de segurança.
+ *
+ * Uma coleção que falhar (falta de permissão, por exemplo) não derruba o
+ * backup inteiro: ela é reportada e o resto é salvo. Um backup com 17 das 18
+ * coleções vale infinitamente mais que nenhum — e a tela avisa o que faltou,
+ * para a pessoa saber o que NÃO está protegido.
+ */
+export async function readAllCollections(): Promise<{ data: Record<string, Array<Record<string, unknown>>>; failed: string[] }> {
+  const { db } = services();
+  const data: Record<string, Array<Record<string, unknown>>> = {};
+  const failed: string[] = [];
+
+  for (const name of BACKUP_COLLECTIONS) {
+    try {
+      const snapshot = await getDocs(collection(db, name));
+      data[name] = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    } catch {
+      failed.push(name);
+    }
+  }
+  return { data, failed };
 }
 
 /**

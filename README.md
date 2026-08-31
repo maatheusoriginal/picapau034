@@ -42,6 +42,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:permissions` | Confere o que cada cargo recebe por padrão |
 | `npm run check:api-imports` | Confere se as funções da Vercel conseguem carregar |
 | `npm run check:mechanic` | Confere o quadro do mecânico (o que é dele e o que está livre) |
+| `npm run check:backup` | Confere o que a cópia de segurança leva e quando ela avisa |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -82,6 +83,7 @@ app/
   globals.css        Estilos da aplicação
   firebase/client.ts Toda a conversa com o Firebase no navegador
   printing.ts        Envia o documento para a impressora e abre o WhatsApp
+  download.ts        Entrega um arquivo para a pessoa salvar
   ErrorBoundary.tsx  Rede de segurança: evita a tela branca e recupera versão nova
 server/
   index.ts           Express: rotas da API e entrega da interface
@@ -96,6 +98,7 @@ src/
   import.ts          Leitura da planilha de estoque (funções puras)
   cash.ts            Caixa: o dinheiro em espécie da gaveta (funções puras)
   mechanic.ts        Quadro do mecânico: minhas OS e as da oficina (funções puras)
+  backup.ts          O que entra na cópia de segurança e quando avisar (funções puras)
   components/        Modais de cadastro e a área de Configurações
 scripts/
   check-finance.ts   Confere as contas do financeiro
@@ -106,6 +109,7 @@ scripts/
   check-permissions.ts Confere as permissões padrão de cada cargo
   check-api-imports.ts Confere as extensões .js dos imports das funções
   check-mechanic.ts  Confere o quadro do mecânico
+  check-backup.ts    Confere a cópia de segurança
 firestore.rules      Regras de segurança do banco
 ```
 
@@ -668,6 +672,54 @@ O que foi conferido, renderizando cada tela em 360, 768 e 1440px: **18 telas e
   e a ação; sai o contexto (categoria, responsável, data de entrada, descrição).
   Nada se perde — abrir o registro mostra tudo.
 
+## Cópia de segurança
+
+**O Firestore no plano gratuito não faz backup nenhum.** Se alguém apagar os
+produtos ou o histórico de OS, não existe de onde recuperar.
+
+Em **Administração** há o botão **Baixar backup**: ele lê todas as coleções da
+oficina e entrega um arquivo `.json` — produtos, clientes, motos, OS, vendas,
+entradas de estoque, contas, gastos, movimentações, caixa, fornecedores,
+categorias, parceiros, serviços rápidos, formas e máquinas de pagamento,
+funcionários e usuários.
+
+Ficam **de fora** de propósito: o registro de auditoria (`auditLogs`), os perfis
+de acesso (`userAccess`) e a remuneração dos funcionários
+(`employeeCompensation`). São dados de segurança e de pessoal, não da operação —
+um arquivo baixado no celular não é lugar para eles.
+
+Se alguma coleção falhar na leitura, o backup **não é abortado**: o resto é
+salvo e a tela diz o que faltou, para a pessoa saber o que não está protegido.
+Um backup com 17 das 18 coleções vale muito mais que nenhum.
+
+### Quando ele avisa
+
+A data do último backup fica em `settings/global.lastBackupAt` — no banco, e não
+no navegador, para valer em qualquer aparelho: guardada localmente, o celular
+acharia que nunca houve backup feito no computador.
+
+Passado **um dia**, a faixa em Administração fica âmbar e cobra. Um dia de
+vendas, OS e caixa perdido já dói o suficiente para valer o incômodo.
+
+### O que este backup não é
+
+- **Não é automático.** O navegador só executa quando está aberto. Backup
+  automático de verdade exige servidor.
+- **Não envia para o Google Drive sozinho.** Uma conta de serviço não tem cota
+  de armazenamento e não pode ser dona de arquivo no Drive
+  ([documentação do Google](https://developers.google.com/workspace/drive/api/guides/about-shareddrives)),
+  e Drive Compartilhado é recurso de conta Workspace paga. Enviar para o Drive
+  só funciona autorizado pela pessoa, no navegador.
+- **Não substitui o backup do Firebase.** O agendado nativo existe e roda
+  sozinho, mas exige o plano Blaze.
+
+O arquivo tem os dados dos seus clientes. Guarde-o com o mesmo cuidado que teria
+com uma agenda de papel da oficina — não em pasta compartilhada, não no grupo do
+WhatsApp.
+
+**Um backup só vale depois de testado.** Abra o arquivo uma vez e confira que os
+produtos e as OS estão lá dentro.
+
 ## Modelo de segurança
 
 Esconder um botão na tela não é segurança. O bloqueio real está em três camadas:
@@ -704,6 +756,7 @@ sessões anteriores daquele usuário.
 - [ ] `npm run check:permissions` sem falhas
 - [ ] `npm run check:api-imports` sem falhas
 - [ ] `npm run check:mechanic` sem falhas
+- [ ] `npm run check:backup` sem falhas
 - [ ] `npm run build` conclui sem erros
 - [ ] Variáveis `VITE_FIREBASE_*` configuradas no ambiente de produção
 - [ ] `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` e `INITIAL_SUPER_ADMIN_EMAIL` cadastradas
