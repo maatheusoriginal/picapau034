@@ -1,4 +1,4 @@
-import { accountDescription, isCashPayment, parseBRDate } from "./finance";
+import { accountDescription, drawerTotal, isCashPayment, parseBRDate, paymentsOf } from "./finance";
 import type { AccountRecord, CashMovement, CashSession, ExpenseRecord, MovementRecord, OrderRecord, SaleRecord } from "./types";
 
 /**
@@ -97,27 +97,35 @@ export function drawerEntries(session: CashSession | null, sources: DrawerSource
   }];
 
   (sources.sales ?? []).forEach((sale) => {
-    if (!isDrawerPayment(sale.paymentMethod) || !withinSession(session, sale.soldAt)) return;
+    if (!withinSession(session, sale.soldAt)) return;
+    // Só a parte em espécie: numa venda dividida entre PIX e dinheiro, a gaveta
+    // recebeu apenas o dinheiro. Esperar o total era o que fazia a conferência
+    // acusar falta todo dia sem ninguém entender.
+    const emEspecie = drawerTotal(paymentsOf(sale));
+    if (emEspecie <= 0) return;
+    const dividido = (sale.payments?.length ?? 0) > 1;
     entries.push({
       id: sale.id,
       kind: "Venda",
-      description: `${sale.origin} · ${sale.customer || "Consumidor final"}`,
+      description: `${sale.origin} · ${sale.customer || "Consumidor final"}${dividido ? " · parte em dinheiro" : ""}`,
       at: sale.soldAt,
-      // O que entra na gaveta é o valor cheio: taxa de maquininha não existe
-      // em pagamento em dinheiro.
-      amount: sale.total,
+      // Taxa de maquininha não existe em pagamento em espécie.
+      amount: emEspecie,
     });
   });
 
   (sources.orders ?? []).forEach((order) => {
     const at = orderInstant(order);
-    if (!order.closed || !isDrawerPayment(order.paymentMethod) || !withinSession(session, at)) return;
+    if (!order.closed || !withinSession(session, at)) return;
+    const emEspecie = drawerTotal(paymentsOf(order));
+    if (emEspecie <= 0) return;
+    const dividido = (order.payments?.length ?? 0) > 1;
     entries.push({
       id: order.id,
       kind: "Ordem de serviço",
-      description: `${order.customer}${order.plate ? ` · ${order.plate}` : ""}`,
+      description: `${order.customer}${order.plate ? ` · ${order.plate}` : ""}${dividido ? " · parte em dinheiro" : ""}`,
       at,
-      amount: order.total ?? 0,
+      amount: emEspecie,
     });
   });
 
@@ -293,12 +301,17 @@ export function sessionIsStale(session: CashSession | null, now: Date = new Date
 /** Vendas que NÃO passaram pela gaveta, para o fechamento não ser lido como se fosse o dia inteiro. */
 export function nonDrawerTotal(session: CashSession | null, sales: SaleRecord[] = [], orders: OrderRecord[] = []): number {
   if (!session) return 0;
+  // O que virou dinheiro mas NÃO passou pela gaveta: PIX e cartão. Numa venda
+  // dividida, é só a parte que foi por esses meios.
+  const foraDaGaveta = (parts: ReturnType<typeof paymentsOf>) => round2(parts
+    .filter((part) => isCashPayment(part.method) && part.method.trim() !== "Dinheiro")
+    .reduce((total, part) => total + part.amount, 0));
   const fromSales = sales
-    .filter((sale) => withinSession(session, sale.soldAt) && !isDrawerPayment(sale.paymentMethod) && isCashPayment(sale.paymentMethod))
-    .reduce((total, sale) => total + sale.total, 0);
+    .filter((sale) => withinSession(session, sale.soldAt))
+    .reduce((total, sale) => total + foraDaGaveta(paymentsOf(sale)), 0);
   const fromOrders = orders
-    .filter((order) => order.closed && withinSession(session, orderInstant(order)) && !isDrawerPayment(order.paymentMethod) && isCashPayment(order.paymentMethod))
-    .reduce((total, order) => total + (order.total ?? 0), 0);
+    .filter((order) => order.closed && withinSession(session, orderInstant(order)))
+    .reduce((total, order) => total + foraDaGaveta(paymentsOf(order)), 0);
   return round2(fromSales + fromOrders);
 }
 

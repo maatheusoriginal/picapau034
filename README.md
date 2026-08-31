@@ -306,6 +306,45 @@ Detalhes que costumam morder:
 
 Importar exige permissão de gerenciar estoque; quem só consulta não vê o botão.
 
+## Pagamento dividido e troco
+
+O botão "Dividir pagamento" existia, abria quatro campos e **não gravava nada**:
+a venda entrava com uma forma só. O cliente pagava R$ 100 no PIX e R$ 50 em
+dinheiro, o caixa esperava R$ 150 na gaveta, e a conferência fechava errado sem
+ninguém entender por quê.
+
+Agora as partes são gravadas na venda (e na OS) e cada uma vai para o lugar
+certo:
+
+| Parte | Para onde vai |
+| --- | --- |
+| Dinheiro | Gaveta do caixa |
+| PIX, débito, crédito | Conta (com a taxa da maquininha só sobre essa parte) |
+| Nota a prazo | Conta a receber, **só desse pedaço** |
+
+O restante é **calculado**, não digitado: é como se divide no balcão ("R$ 50 no
+dinheiro, o resto no PIX") e evita a soma não fechar por erro de digitação. A
+soma tem que bater ao centavo — aceitar diferença seria gravar uma venda que não
+corresponde ao que o cliente pagou, e a sobra apareceria no fechamento como se
+fosse erro de alguém.
+
+O cupom impresso mostra cada forma com seu valor.
+
+**Troco**: o campo "valor recebido" e o troco eram fixos em R$ 0,00. Agora o
+troco é calculado sobre a parte em espécie — inclusive numa venda dividida, onde
+só o pedaço em dinheiro conta.
+
+### Como o resto do sistema enxerga
+
+`paymentsOf()` é o adaptador: devolve as partes como lista, e transforma uma
+venda antiga (que só tem `paymentMethod`) numa lista de um item. Por isso nada
+quebrou nos registros que já existiam.
+
+O faturamento soma o que **virou dinheiro** (`settled`), não o total da venda.
+Numa venda dividida com parte fiada, esse pedaço entra no faturamento quando o
+cliente pagar, pela baixa da conta a receber — somar as duas coisas contaria o
+mesmo dinheiro duas vezes.
+
 ## Caixa
 
 O caixa é o **dinheiro em espécie da gaveta**, e só ele. Venda no PIX, no débito
