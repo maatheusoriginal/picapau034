@@ -539,7 +539,10 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .cash-actions small { font-size: 7px; color: #929296; }
 .order-detail { display: grid; gap: 12px; }
 .order-detail-top { display: flex; align-items: center; justify-content: space-between; }
-.order-actions { display: flex; gap: 7px; }
+/* Quebra em duas linhas quando não cabe: no quadro do mecânico uma OS em
+   serviço tem três botões (Abrir, Aguardando peça, Marcar pronta), e no
+   celular eles espremeriam o nome do cliente até sumir. */
+.order-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .order-actions button, .order-section-title button { display: flex; align-items: center; gap: 6px; height: 31px; padding: 0 10px; border: 1px solid #deddda; border-radius: 7px; background: white; color: #5f6064; font-size: 8px; font-weight: 700; }
 .order-info-grid { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #e4e2de; border-radius: 10px; overflow: hidden; }
 .order-info-grid > div { min-height: 72px; padding: 12px; border-left: 1px solid #eeece9; }

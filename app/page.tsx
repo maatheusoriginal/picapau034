@@ -1559,11 +1559,11 @@ function ModuleWorkspace({
           </span>
           <div className="order-actions">
             <button onClick={() => openDialog("order", order.id)}>Abrir</button>
-            {row.action && row.target ? (
-              <button onClick={() => void onAdvanceOrder(order, row.target!, mechanicsAfterTaking(order, viewerEmployeeId, allowMultiple))
-                .then(() => notify(row.mine ? `${order.id}: ${row.target}.` : `${order.id} agora é sua.`))
-                .catch((error) => notify(error instanceof Error ? error.message : "Não foi possível atualizar a OS."))}>{row.action}</button>
-            ) : null}
+            {row.actions.map((action) => (
+              <button key={action.label} onClick={() => void onAdvanceOrder(order, action.target, mechanicsAfterTaking(order, viewerEmployeeId, allowMultiple))
+                .then(() => notify(row.mine ? `${order.id}: ${action.target}.` : `${order.id} agora é sua.`))
+                .catch((error) => notify(error instanceof Error ? error.message : "Não foi possível atualizar a OS."))}>{action.label}</button>
+            ))}
           </div>
         </div>
       );
@@ -1585,7 +1585,7 @@ function ModuleWorkspace({
 
         <div className="module-summary">
           <article><span>Fazendo agora</span><strong>{resumo.working}</strong><small>{resumo.working > 0 ? "Na sua bancada" : "Nada em andamento"}</small></article>
-          <article><span>Suas, a começar</span><strong>{resumo.waiting}</strong><small>{resumo.ready > 0 ? `${resumo.ready} pronta(s) aguardando o cliente` : "Nenhuma esperando"}</small></article>
+          <article className={resumo.blocked > 0 ? "summary-danger" : ""}><span>Esperando peça</span><strong>{resumo.blocked}</strong><small>{resumo.blocked > 0 ? "Paradas até a peça chegar" : `${resumo.waiting} sua(s) a começar`}</small></article>
           <article><span>Na oficina</span><strong>{resumo.available}</strong><small>{resumo.available > 0 ? "Disponíveis para pegar" : "Nenhuma outra aberta"}</small></article>
         </div>
 
@@ -1616,11 +1616,12 @@ function ModuleWorkspace({
     const filteredOrders = orders.filter((order) => {
       const text = `${order.id} ${order.customer} ${order.bike} ${order.plate}`.toLowerCase();
       const byText = text.includes(query.toLowerCase());
-      const byStatus = listFilter === "Todos" || (listFilter === "Abertas" && ["Recepção", "Avaliação", "Aprovação"].includes(order.status)) || (listFilter === "Em andamento" && order.status === "Em serviço") || (listFilter === "Concluídas" && order.status === "Entrega");
+      const byStatus = listFilter === "Todos" || (listFilter === "Abertas" && ["Recepção", "Avaliação", "Aprovação"].includes(order.status)) || (listFilter === "Em andamento" && ["Em serviço", "Aguardando peça"].includes(order.status)) || (listFilter === "Concluídas" && order.status === "Entrega");
       return byText && byStatus;
     });
     const openCount = orders.filter((order) => ["Recepção", "Avaliação", "Aprovação"].includes(order.status)).length;
     const inServiceCount = orders.filter((order) => order.status === "Em serviço").length;
+    const blockedCount = orders.filter((order) => order.status === "Aguardando peça").length;
     const readyCount = orders.filter((order) => order.status === "Entrega" && !order.closed).length;
     const budgetDraftCount = orders.filter((order) => order.status === "Recepção" || order.status === "Avaliação").length;
     const budgetPendingCount = orders.filter((order) => order.status === "Aprovação").length;
@@ -1634,7 +1635,7 @@ function ModuleWorkspace({
         </div>
         <div className="module-summary">
           <article><span>{isBudget ? "Em elaboração" : "Em aberto"}</span><strong>{isBudget ? budgetDraftCount : openCount}</strong><small>{(isBudget ? budgetDraftCount : openCount) > 0 ? "Precisam de ação" : "Nenhum pendente"}</small></article>
-          <article><span>{isBudget ? "Aguardando cliente" : "Em serviço"}</span><strong>{isBudget ? budgetPendingCount : inServiceCount}</strong><small>{(isBudget ? budgetPendingCount : inServiceCount) > 0 ? (isBudget ? "Aguardando aprovação" : "Mecânicos trabalhando") : "Nenhum em andamento"}</small></article>
+          <article><span>{isBudget ? "Aguardando cliente" : "Em serviço"}</span><strong>{isBudget ? budgetPendingCount : inServiceCount}</strong><small>{isBudget ? (budgetPendingCount > 0 ? "Aguardando aprovação" : "Nenhum em andamento") : blockedCount > 0 ? `${blockedCount} parada(s) esperando peça` : inServiceCount > 0 ? "Mecânicos trabalhando" : "Nenhum em andamento"}</small></article>
           <article><span>{isBudget ? "Aprovados no mês" : "Prontas"}</span><strong>{isBudget ? budgetApprovedCount : readyCount}</strong><small>{(isBudget ? budgetApprovedCount : readyCount) > 0 ? (isBudget ? "Propostas aceitas" : "Aguardando retirada") : "Nenhum registro"}</small></article>
         </div>
         <section className="panel module-panel">
@@ -4112,6 +4113,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
                 { label: "Avaliação", value: String(orders.filter((o) => o.status === "Avaliação").length), helper: "Orçamento e diagnóstico", tone: "violet" },
                 { label: "Aprovação", value: String(orders.filter((o) => o.status === "Aprovação").length), helper: "Aguardando cliente", tone: "red" },
                 { label: "Em serviço", value: String(orders.filter((o) => o.status === "Em serviço").length), helper: "Execução na oficina", tone: "amber" },
+                { label: "Aguardando peça", value: String(orders.filter((o) => o.status === "Aguardando peça").length), helper: "Serviço parado até a peça chegar" },
                 { label: "Prontas", value: String(orders.filter((o) => o.status === "Entrega" && !o.closed).length), helper: "Aguardando retirada", tone: "green" },
               ].map((item) => (
                 <button className="flow-card" key={item.label} onClick={() => setActive("Ordens de serviço")}>

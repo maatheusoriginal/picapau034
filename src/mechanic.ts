@@ -33,10 +33,13 @@ export function isAssignedTo(order: OrderRecord, employeeId: string): boolean {
  */
 const STAGE_ORDER: Record<string, number> = {
   "Em serviço": 0,
-  "Aprovação": 1,
-  "Avaliação": 2,
-  "Recepção": 3,
-  "Entrega": 4,
+  // Logo depois do que está na mão: é uma moto começada e parada, o que o
+  // mecânico precisa reencontrar assim que a peça chegar.
+  "Aguardando peça": 1,
+  "Aprovação": 2,
+  "Avaliação": 3,
+  "Recepção": 4,
+  "Entrega": 5,
 };
 
 function byStage(a: OrderRecord, b: OrderRecord): number {
@@ -71,6 +74,8 @@ export function mechanicBoard(orders: OrderRecord[], employeeId: string): Mechan
 export type MechanicSummary = {
   /** Minhas OS com serviço em andamento. */
   working: number;
+  /** Minhas OS paradas esperando peça. */
+  blocked: number;
   /** Minhas OS que ainda não começaram. */
   waiting: number;
   /** Minhas OS prontas, aguardando a entrega ao cliente. */
@@ -82,37 +87,51 @@ export type MechanicSummary = {
 export function mechanicSummary(board: MechanicBoard): MechanicSummary {
   return {
     working: board.mine.filter((order) => order.status === "Em serviço").length,
+    blocked: board.mine.filter((order) => order.status === "Aguardando peça").length,
     waiting: board.mine.filter((order) => ["Recepção", "Avaliação", "Aprovação"].includes(order.status)).length,
     ready: board.mine.filter((order) => order.status === "Entrega").length,
     available: board.shop.length,
   };
 }
 
+/** Um botão de um toque na linha da OS. */
+export type BoardAction = { label: string; target: ServiceOrderStatus };
+
 /**
- * O próximo passo natural da OS na bancada, para caber em um toque.
+ * Os movimentos que o mecânico faz de verdade, para caberem em um toque.
  *
- * Só os dois movimentos que o mecânico faz de verdade: começar o serviço e
- * marcar como pronta. Orçamento e aprovação são conversa com o cliente, então
- * "Avaliação" e "Aprovação" também levam a "Em serviço" — é o que acontece
- * quando o cliente aprova e a moto vai para a bancada. Todo o resto continua
- * disponível abrindo a OS.
+ * "Em serviço" tem DOIS, e é a razão de existir mais de um botão por linha:
+ * terminar e travar esperando peça acontecem com a mesma frequência. Deixar a
+ * segunda escondida atrás de "Abrir" era o que fazia ninguém registrar a
+ * espera — e a oficina não enxergar a moto parada.
+ *
+ * Orçamento e aprovação são conversa com o cliente, então "Avaliação" e
+ * "Aprovação" levam direto a "Em serviço": é o que acontece quando o cliente
+ * aprova e a moto vai para a bancada. Todo o resto continua no diálogo da OS.
  */
-export function nextStatusFor(status: string): ServiceOrderStatus | null {
-  if (status === "Entrega") return null;
-  if (status === "Em serviço") return "Entrega";
-  return "Em serviço";
+export function actionsFor(status: string): BoardAction[] {
+  // Rótulos curtos de propósito: com três botões na linha ("Abrir" mais dois),
+  // texto longo espremia o nome do cliente até quebrar em quatro linhas no
+  // celular. A situação colorida ao lado já diz de onde a OS está saindo.
+  if (status === "Entrega") return [];
+  if (status === "Em serviço") return [
+    { label: "Falta peça", target: "Aguardando peça" },
+    { label: "Pronta", target: "Entrega" },
+  ];
+  if (status === "Aguardando peça") return [{ label: "Peça chegou", target: "Em serviço" }];
+  return [{ label: "Iniciar", target: "Em serviço" }];
 }
 
-/** O que o botão de um toque diz. */
-export function actionLabelFor(status: string): string {
-  if (status === "Entrega") return "";
-  if (status === "Em serviço") return "Marcar pronta";
-  return "Iniciar serviço";
-}
-
-/** O que o botão diz quando a OS ainda não é dele. */
+/**
+ * O que o botão diz quando a OS ainda não é dele.
+ *
+ * Uma OS parada esperando peça também pode ser assumida: quem tem a peça na
+ * mão, ou sabe onde ela está, resolve mais rápido que quem abriu o serviço.
+ */
 export function takeLabelFor(status: string): string {
-  return status === "Em serviço" ? "Ajudar nesta" : "Pegar esta OS";
+  if (status === "Em serviço") return "Ajudar";
+  if (status === "Aguardando peça") return "Assumir";
+  return "Pegar";
 }
 
 /**
@@ -134,18 +153,16 @@ export function mechanicsAfterTaking(order: OrderRecord, employeeId: string, all
 export type BoardRow = {
   order: OrderRecord;
   mine: boolean;
-  /** Texto do botão de ação. Vazio quando não há ação de um toque. */
-  action: string;
-  /** Situação para onde o botão leva. */
-  target: ServiceOrderStatus | null;
+  /** Botões de um toque. Vazio quando não há nada a fazer sem abrir a OS. */
+  actions: BoardAction[];
 };
 
 export function boardRow(order: OrderRecord, employeeId: string): BoardRow {
   const mine = isAssignedTo(order, employeeId);
-  return {
-    order,
-    mine,
-    action: mine ? actionLabelFor(order.status) : takeLabelFor(order.status),
-    target: mine ? nextStatusFor(order.status) : (order.status === "Em serviço" ? null : "Em serviço"),
-  };
+  if (mine) return { order, mine, actions: actionsFor(order.status) };
+  // Assumir uma OS que já está sendo feita seria mexer no serviço do colega
+  // sem ele saber; para isso, abre a OS e conversa. Nas demais, assumir leva
+  // para a bancada — que é o que a pessoa vai fazer em seguida.
+  if (order.status === "Em serviço") return { order, mine, actions: [] };
+  return { order, mine, actions: [{ label: takeLabelFor(order.status), target: "Em serviço" }] };
 }
