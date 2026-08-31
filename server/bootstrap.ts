@@ -1,6 +1,6 @@
-import { firebaseAdmin } from "./firebase-admin";
-import { header, type ApiRequest, type ApiResponse } from "./http";
-import { allFirebasePermissions } from "../src/types";
+import { firebaseAdmin } from "./firebase-admin.js";
+import { header, type ApiRequest, type ApiResponse } from "./http.js";
+import { allFirebasePermissions } from "../src/types.js";
 
 function sendError(response: ApiResponse, status: number, code: string, message: string) {
   response.status(status).json({ error: { code, message } });

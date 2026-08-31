@@ -2,8 +2,8 @@ import express from "express";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getAdminUsers, postAdminUsers } from "./admin-users";
-import { bootstrapSuperAdmin } from "./bootstrap";
+import { getAdminUsers, postAdminUsers } from "./admin-users.js";
+import { bootstrapSuperAdmin } from "./bootstrap.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const port = Number(process.env.PORT || 3000);

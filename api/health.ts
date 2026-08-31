@@ -1,4 +1,4 @@
-import type { ApiRequest, ApiResponse } from "../server/http";
+import type { ApiRequest, ApiResponse } from "../server/http.js";
 
 /**
  * Diz se o backend administrativo está de pé e configurado.

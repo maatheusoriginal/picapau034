@@ -1,7 +1,7 @@
 import type { UserRecord } from "firebase-admin/auth";
-import { header, type ApiRequest, type ApiResponse } from "./http";
-import { firebaseAdmin } from "./firebase-admin";
-import { allFirebasePermissions, allUserRoles, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../src/types";
+import { header, type ApiRequest, type ApiResponse } from "./http.js";
+import { firebaseAdmin } from "./firebase-admin.js";
+import { allFirebasePermissions, allUserRoles, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../src/types.js";
 
 const roles = allUserRoles;
 const permissions = allFirebasePermissions;
