@@ -439,6 +439,54 @@ os usuários (modo de leitura, lendo o Firestore), mas as operações falham com
 erro de configuração. Como o Admin SDK não passa pelas regras do Firestore, a
 criação de usuário funciona mesmo antes de publicar `firestore.rules`.
 
+## Publicar na Vercel
+
+O sistema **não é um site estático**. Três rotas rodam no servidor e são o que
+permite criar o primeiro Super Admin e gerenciar usuários:
+
+| Rota | Para quê |
+| --- | --- |
+| `GET /api/health` | Diz se o backend está de pé e se a credencial está configurada |
+| `GET/POST /api/admin/users` | Listar, criar, editar, apagar usuário e redefinir senha |
+| `POST /api/setup/bootstrap` | Criar o primeiro Super Admin |
+
+Localmente elas sobem no Express (`npm run dev`). Na Vercel, a pasta `api/` vira
+funções serverless — os arquivos ali só decidem o método HTTP e chamam **os
+mesmos handlers** de `server/`. Nenhuma lógica de permissão é duplicada, que é
+exatamente onde duas cópias divergem com o tempo e abrem brecha.
+
+Para isso funcionar, os handlers foram tipados com `ApiRequest`/`ApiResponse`
+(ver `server/http.ts`) em vez de `Request`/`Response` do Express: descrevem só o
+que os handlers usam (cabeçalhos, corpo, status, json), e tanto o Express quanto
+a Vercel atendem a essa forma.
+
+### As oito variáveis de ambiente
+
+Todas em **Produção e Pré-visualização**. Ver `.env.example`, que traz as oito
+com explicação.
+
+As seis `VITE_FIREBASE_*` são obrigatórias — sem elas o sistema para na abertura
+com "Configuração do Firebase incompleta". Não são segredo: vão para dentro do
+navegador de qualquer visitante.
+
+`FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` **é chave-mestra** e nunca sai das
+variáveis de ambiente. `INITIAL_SUPER_ADMIN_EMAIL` é o e-mail que pode concluir
+a configuração inicial.
+
+### Como diagnosticar
+
+Abra `https://SEU-ENDERECO/api/health`:
+
+| Resposta | Significa |
+| --- | --- |
+| **404** | As funções não subiram. Confira se a pasta `api/` foi publicada |
+| `firebaseAdminConfigured: false` | Subiram, mas falta a credencial no ambiente |
+| `firebaseAdminConfigured: true` | Tudo certo |
+
+Sem as rotas, a tela de usuários ainda **lista** quem já tem perfil (ela lê o
+Firestore direto) e mostra um aviso — foi assim que este problema apareceu. Mas
+criar e editar falham.
+
 ## Modelo de segurança
 
 Esconder um botão na tela não é segurança. O bloqueio real está em três camadas:

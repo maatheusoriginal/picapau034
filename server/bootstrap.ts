@@ -1,14 +1,14 @@
-import type { Request, Response } from "express";
 import { firebaseAdmin } from "./firebase-admin";
+import { header, type ApiRequest, type ApiResponse } from "./http";
 import { allFirebasePermissions } from "../src/types";
 
-function sendError(response: Response, status: number, code: string, message: string) {
+function sendError(response: ApiResponse, status: number, code: string, message: string) {
   response.status(status).json({ error: { code, message } });
 }
 
-export async function bootstrapSuperAdmin(request: Request, response: Response) {
+export async function bootstrapSuperAdmin(request: ApiRequest, response: ApiResponse) {
   try {
-    const authorization = request.header("authorization") ?? "";
+    const authorization = header(request, "authorization");
     if (!authorization.startsWith("Bearer ")) {
       sendError(response, 401, "unauthenticated", "Entre no sistema para continuar.");
       return;
