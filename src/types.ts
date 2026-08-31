@@ -530,7 +530,16 @@ export type StockEntryRecord = {
   operatorName?: string;
 };
 
-export const serviceOrderStatuses = ["Recepção", "Avaliação", "Aprovação", "Em serviço", "Entrega"] as const;
+/**
+ * As situações da OS, na ordem em que a moto caminha pela oficina.
+ *
+ * A ordem importa de verdade: `shouldReserveStock` decide pela POSIÇÃO se a
+ * peça já saiu do estoque ("da bancada em diante"). Por isso "Aguardando peça"
+ * fica depois de "Em serviço" — o serviço começou, as peças que existiam já
+ * foram baixadas, e parar para esperar uma que faltou não devolve as outras
+ * para a prateleira.
+ */
+export const serviceOrderStatuses = ["Recepção", "Avaliação", "Aprovação", "Em serviço", "Aguardando peça", "Entrega"] as const;
 
 export type ServiceOrderStatus = (typeof serviceOrderStatuses)[number];
 
@@ -543,7 +552,10 @@ export type ServiceOrderStatus = (typeof serviceOrderStatuses)[number];
 export function statusTone(status: string): string {
   if (status === "Entrega") return "green";
   if (status === "Em serviço") return "amber";
-  if (status === "Aprovação") return "red";
+  // Vermelho para as duas situações em que a moto está parada esperando outra
+  // pessoa: o cliente aprovar ou o fornecedor entregar. É o que precisa saltar
+  // aos olhos de quem olha o quadro da oficina.
+  if (status === "Aprovação" || status === "Aguardando peça") return "red";
   if (status === "Avaliação") return "violet";
   return "blue";
 }

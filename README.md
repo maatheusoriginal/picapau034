@@ -507,6 +507,30 @@ Sem as rotas, a tela de usuários ainda **lista** quem já tem perfil (ela lê o
 Firestore direto) e mostra um aviso — foi assim que este problema apareceu. Mas
 criar e editar falham.
 
+## Situações da OS
+
+```
+Recepção → Avaliação → Aprovação → Em serviço → Aguardando peça → Entrega
+```
+
+**A ordem da lista importa de verdade.** `shouldReserveStock` decide pela
+POSIÇÃO se a peça já saiu do estoque ("da bancada em diante"), então mover uma
+situação na lista muda quando o estoque é baixado. "Aguardando peça" fica depois
+de "Em serviço" justamente por isso: o serviço começou, as peças que existiam já
+foram baixadas, e parar para esperar uma que faltou não devolve as outras para a
+prateleira.
+
+**Aguardando peça** existe porque a moto parada era invisível: ela ficava em "Em
+serviço" e ninguém sabia que estava esperando fornecedor. Agora aparece em
+vermelho no quadro do mecânico, no filtro "Em andamento", no cartão de "Em
+serviço" ("2 parada(s) esperando peça") e como etapa própria no funil da Visão
+geral.
+
+As cores: verde é entregue, âmbar é serviço andando, violeta é orçamento sendo
+feito, e **vermelho são as duas situações em que a moto está parada esperando
+outra pessoa** — o cliente aprovar ou o fornecedor entregar. É o que precisa
+saltar aos olhos de quem olha o quadro.
+
 ## Quadro do mecânico
 
 Quem entra com o perfil **Mecânico** vê, em "Ordens de serviço", um quadro no
@@ -527,15 +551,28 @@ está livre, ou ele fica ocioso ou vai perguntar para alguém.
 
 Cada linha traz o passo seguinte, sem abrir a OS:
 
-| Situação | Botão | Vai para |
+| Situação | Botão(ões) | Vai para |
 | --- | --- | --- |
-| Recepção, Avaliação, Aprovação | Iniciar serviço | Em serviço |
-| Em serviço | Marcar pronta | Entrega |
+| Recepção, Avaliação, Aprovação | Iniciar | Em serviço |
+| Em serviço | **Falta peça** / **Pronta** | Aguardando peça / Entrega |
+| Aguardando peça | Peça chegou | Em serviço |
 | Entrega | — | (só "Abrir") |
+
+"Em serviço" tem dois botões porque terminar e travar esperando peça acontecem
+com a mesma frequência. Deixar o segundo escondido atrás de "Abrir" era o que
+fazia ninguém registrar a espera — e a oficina não enxergar a moto parada.
+
+Os rótulos são curtos de propósito: com três botões na linha, texto longo
+espremia o nome do cliente até quebrar em quatro linhas no celular.
 
 "Abrir" continua levando ao diálogo completo, com todas as situações, peças,
 impressão e WhatsApp. O botão de um toque cobre o caso comum; o diálogo cobre o
 resto.
+
+Uma OS que **outro mecânico já está fazendo** não tem botão rápido: assumir o
+serviço do colega sem ele saber é pior que dar dois toques a mais. Abra a OS e
+converse. Uma OS parada esperando peça, sim — quem tem a peça na mão resolve
+mais rápido que quem começou.
 
 **Pegar uma OS da oficina acrescenta o mecânico à equipe** — não substitui quem
 já estava. Duas pessoas na mesma moto é comum, e apagar o responsável anterior
