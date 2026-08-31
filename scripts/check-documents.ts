@@ -48,10 +48,18 @@ const sale: SaleRecord = {
 const osDoc = buildOrderDocument({ order, settings, mechanics: "João + Ana" });
 const saleDoc = buildSaleDocument(sale, settings);
 const saleComDesconto = buildSaleDocument({ ...sale, subtotal: 100, discount: 10, total: 90 }, settings);
+const saleDividida = buildSaleDocument({ ...sale, total: 150, paymentMethod: "PIX",
+  payments: [{ method: "PIX", amount: 100 }, { method: "Dinheiro", amount: 50 }] }, settings);
 const uma = buildOrderDocument({ order, settings: { ...settings, printThreeCopies: false }, mechanics: "" });
 const a4 = buildOrderDocument({ order, settings: { ...settings, printFormat: "A4" }, mechanics: "" });
 
 const casos: Array<[string, unknown, unknown]> = [
+  // Pagamento dividido no cupom
+  ["cupom dividido mostra as duas formas", saleDividida.includes("PIX") && saleDividida.includes("Dinheiro"), true],
+  ["com o valor de cada parte", saleDividida.includes((100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })), true],
+  ["e não imprime a linha genérica de pagamento", saleDividida.includes("<span class=\"label\">Pagamento</span>"), false],
+  ["cupom de pagamento único mantém a linha de sempre", saleDoc.includes("Pagamento"), true],
+
   // Desconto no cupom
   ["cupom sem desconto não mostra subtotal", saleDoc.includes("Subtotal"), false],
   ["cupom com desconto mostra o subtotal", saleComDesconto.includes("Subtotal"), true],

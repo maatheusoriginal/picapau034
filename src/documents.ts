@@ -1,3 +1,4 @@
+import { paymentsOf } from "./finance";
 import type { OrderRecord, SaleRecord, ServiceOrderItem, SettingsConfig } from "./types";
 
 /**
@@ -162,7 +163,15 @@ export function buildSaleDocument(sale: SaleRecord, settings: Partial<SettingsCo
     ${sale.discount ? `<div class="row"><span class="label">Subtotal</span><span>${money(sale.subtotal ?? sale.total + sale.discount)}</span></div>
     <div class="row"><span class="label">Desconto</span><span>- ${money(sale.discount)}</span></div>` : ""}
     <div class="row total"><span>Total</span><span>${money(sale.total)}</span></div>
-    <div class="row"><span class="label">Pagamento</span><span>${escapeHtml(sale.paymentMethod)}</span></div>
+    ${(() => {
+      const parts = paymentsOf(sale).filter((part) => part.amount > 0);
+      // Cupom com o pagamento dividido linha a linha: o cliente confere o que
+      // pagou em cada forma, e a oficina tem o comprovante do que ficou fiado.
+      if (parts.length > 1) {
+        return parts.map((part) => `<div class="row"><span class="label">${escapeHtml(part.method)}</span><span>${money(part.amount)}</span></div>`).join("");
+      }
+      return `<div class="row"><span class="label">Pagamento</span><span>${escapeHtml(sale.paymentMethod)}</span></div>`;
+    })()}
     ${sale.machineName ? `<div class="row"><span class="label">Maquininha</span><span>${escapeHtml(sale.machineName)}</span></div>` : ""}
     <div class="note">Documento sem valor fiscal.</div>
   </div>`;

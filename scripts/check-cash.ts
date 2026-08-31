@@ -36,6 +36,12 @@ const sales = [
   { id: "VEN-0003", origin: "PDV", customer: "Ana", items: [], total: 200, fee: 8, net: 192, paymentMethod: "Crédito", date: "10/03/2026", soldAt: "2026-03-10T15:30:00.000Z" },
   // Fiado: não virou dinheiro em lugar nenhum.
   { id: "VEN-0004", origin: "PDV", customer: "Pedro", items: [], total: 90, paymentMethod: "Nota a prazo", date: "10/03/2026", soldAt: "2026-03-10T16:00:00.000Z" },
+  // Dividida: R$ 70 no PIX e R$ 30 em dinheiro. Só os R$ 30 vão para a gaveta.
+  { id: "VEN-0005", origin: "PDV", customer: "Sofia", items: [], total: 100, paymentMethod: "PIX", date: "10/03/2026", soldAt: "2026-03-10T16:10:00.000Z",
+    payments: [{ method: "PIX", amount: 70 }, { method: "Dinheiro", amount: 30 }] },
+  // Dividida entre dinheiro e fiado: entra só o dinheiro.
+  { id: "VEN-0006", origin: "PDV", customer: "Tiago", items: [], total: 200, paymentMethod: "Dinheiro", date: "10/03/2026", soldAt: "2026-03-10T16:15:00.000Z",
+    payments: [{ method: "Dinheiro", amount: 80 }, { method: "Nota a prazo", amount: 120 }] },
   // Dinheiro, mas ANTES da abertura: é da sessão de ontem.
   { id: "VEN-0000", origin: "PDV", customer: "Ontem", items: [], total: 999, paymentMethod: "Dinheiro", date: "09/03/2026", soldAt: "2026-03-09T20:00:00.000Z" },
 ] as unknown as SaleRecord[];
@@ -80,10 +86,11 @@ const resumoComMov = cashSummary(sessao, comMovimentacoes);
 const extrato = drawerEntries(sessao, fontes);
 const resumo = cashSummary(sessao, fontes);
 
-// Esperado: 200 (abertura) + 150 (venda dinheiro) + 320 (OS dinheiro)
-//         + 90 (recebimento em dinheiro) + 100 (suprimento)
-//         − 300 (sangria) − 60 (gasto dinheiro) − 150 (baixa em dinheiro) = 350
-const esperado = 350;
+// Esperado: 200 (abertura) + 150 (venda dinheiro) + 30 e 80 (partes em dinheiro
+//         das vendas divididas) + 320 (OS dinheiro) + 90 (recebimento em
+//         dinheiro) + 100 (suprimento) − 300 (sangria) − 60 (gasto dinheiro)
+//         − 150 (baixa em dinheiro) = 460
+const esperado = 460;
 
 const sessaoVazia: CashSession = { id: "CX-0002", openedAt: "2026-03-11T11:00:00.000Z", openedDate: "11/03/2026", openingAmount: 150, status: "aberto" };
 const historico = [sessao, { ...sessao, id: "CX-0000", status: "fechado", closedAt: "2026-03-09T21:00:00.000Z" },
@@ -101,7 +108,7 @@ const casos: Array<[string, unknown, unknown]> = [
 
   // --- Extrato da gaveta ---
   ["a abertura é a primeira linha do extrato", extrato[extrato.length - 1]!.kind, "Abertura"],
-  ["o extrato mostra o que passou pela gaveta", extrato.length, 8],
+  ["o extrato mostra o que passou pela gaveta", extrato.length, 10],
   ["o mais recente aparece primeiro", extrato[0]!.kind, "Sangria"],
   ["venda em dinheiro entra", extrato.some((e) => e.id === "VEN-0001" && e.amount === 150), true],
   ["venda no PIX não entra", extrato.some((e) => e.id === "VEN-0002"), false],
@@ -123,25 +130,25 @@ const casos: Array<[string, unknown, unknown]> = [
 
   // --- Resumo do caixa ---
   ["o fundo de troco entra no esperado", resumo.opening, 200],
-  ["vendas e OS em dinheiro somam", resumo.sales, 470],
+  ["vendas e OS em dinheiro somam", resumo.sales, 580],
   ["recebimento de fiado em dinheiro soma", resumo.received, 90],
   ["suprimentos somam", resumo.supplies, 100],
   ["sangrias são contadas à parte", resumo.withdrawals, 300],
   ["gastos em dinheiro somam", resumo.expenses, 210],
   ["o esperado na gaveta fecha", resumo.expected, esperado],
-  ["a abertura não conta como movimentação", resumo.count, 7],
+  ["a abertura não conta como movimentação", resumo.count, 9],
   ["caixa recém-aberto espera só o fundo de troco", cashSummary(sessaoVazia, fontes).expected, 150],
   ["e sem movimentação nenhuma", cashSummary(sessaoVazia, fontes).count, 0],
 
   // --- Fechamento ---
   ["contando o esperado, o caixa confere", cashDifference(esperado, esperado), 0],
   ["e a etiqueta diz que confere", differenceLabel(cashDifference(esperado, esperado)), "Confere"],
-  ["faltando R$ 50, a diferença é negativa", cashDifference(300, esperado), -50],
-  ["e a etiqueta diz falta", differenceLabel(cashDifference(300, esperado)), "Falta"],
-  ["sobrando R$ 20, a diferença é positiva", cashDifference(370, esperado), 20],
-  ["e a etiqueta diz sobra", differenceLabel(cashDifference(370, esperado)), "Sobra"],
-  ["um centavo de arredondamento não é erro de caixa", differenceLabel(cashDifference(350.004, esperado)), "Confere"],
-  ["mas um centavo de verdade é", differenceLabel(cashDifference(350.01, esperado)), "Sobra"],
+  ["faltando R$ 50, a diferença é negativa", cashDifference(esperado - 50, esperado), -50],
+  ["e a etiqueta diz falta", differenceLabel(cashDifference(esperado - 50, esperado)), "Falta"],
+  ["sobrando R$ 20, a diferença é positiva", cashDifference(esperado + 20, esperado), 20],
+  ["e a etiqueta diz sobra", differenceLabel(cashDifference(esperado + 20, esperado)), "Sobra"],
+  ["um centavo de arredondamento não é erro de caixa", differenceLabel(cashDifference(esperado + 0.004, esperado)), "Confere"],
+  ["mas um centavo de verdade é", differenceLabel(cashDifference(esperado + 0.01, esperado)), "Sobra"],
 
   // --- Uma sessão por vez ---
   ["com o caixa aberto, não dá para abrir outro", canOpenSession([sessao]), false],
@@ -151,9 +158,9 @@ const casos: Array<[string, unknown, unknown]> = [
   ["o histórico vem da mais recente para a mais antiga", json(closedSessions(historico).map((s) => s.id)), json(["CX-0000", "CX-0009"])],
 
   // --- Regras da movimentação ---
-  ["sangria acima do que há na gaveta é barrada", movementProblem("Sangria", 400, esperado).includes("Não dá para sangrar"), true],
+  ["sangria acima do que há na gaveta é barrada", movementProblem("Sangria", esperado + 50, esperado).includes("Não dá para sangrar"), true],
   ["sangria do valor exato passa", movementProblem("Sangria", esperado, esperado), ""],
-  ["suprimento acima do saldo é normal", movementProblem("Suprimento", 5000, esperado), ""],
+  ["suprimento acima do saldo é normal", movementProblem("Suprimento", esperado + 5000, esperado), ""],
   ["valor zero é barrado", movementProblem("Suprimento", 0, esperado), "Informe um valor maior que zero."],
   ["valor negativo é barrado", movementProblem("Sangria", -10, esperado), "Informe um valor maior que zero."],
   ["a movimentação é gravada sempre positiva", buildMovement("Sangria", -80, " Depósito ").amount, 80],
@@ -163,8 +170,18 @@ const casos: Array<[string, unknown, unknown]> = [
 
   // --- O que NÃO está na gaveta ---
   // 400 do PIX + 200 do crédito. Fiado fica de fora: não virou dinheiro.
-  ["o que entrou fora da gaveta é somado à parte", nonDrawerTotal(sessao, sales, orders), 850],
+  ["o que entrou fora da gaveta é somado à parte", nonDrawerTotal(sessao, sales, orders), 920],
   ["sem sessão, nada a somar", nonDrawerTotal(null, sales, orders), 0],
+
+  // --- Pagamento dividido na gaveta ---
+  ["a venda dividida entra só com a parte em dinheiro", extrato.find((e) => e.id === "VEN-0005")!.amount, 30],
+  ["e a linha avisa que é parte do pagamento", extrato.find((e) => e.id === "VEN-0005")!.description.includes("parte em dinheiro"), true],
+  ["dividida com fiado entra só o dinheiro", extrato.find((e) => e.id === "VEN-0006")!.amount, 80],
+  ["o PIX e o fiado não passam pela gaveta", extrato.filter((e) => e.id === "VEN-0005").length, 1],
+  // 470 do cenário base + 30 + 80 das duas divididas.
+  ["as partes em dinheiro somam nas vendas", resumo.sales, 580],
+  // 850 do base + 70 do PIX da venda dividida. O fiado não entra: não virou dinheiro.
+  ["o que entrou fora da gaveta soma só PIX e cartão", nonDrawerTotal(sessao, sales, orders), 920],
 
   // --- Movimentação manual na gaveta ---
   ["entrada manual em dinheiro entra na gaveta", drawerEntries(sessao, comMovimentacoes).some((e) => e.id === "MOV-0001" && e.amount === 40), true],
@@ -172,8 +189,8 @@ const casos: Array<[string, unknown, unknown]> = [
   ["entrada manual por PIX não passa pela gaveta", drawerEntries(sessao, comMovimentacoes).some((e) => e.id === "MOV-0003"), false],
   ["a entrada manual soma no que entrou", resumoComMov.received, 130],
   ["a saída manual soma no que saiu", resumoComMov.expenses, 235],
-  // 350 do cenário base + 40 de entrada − 25 de saída.
-  ["o esperado na gaveta considera as duas", resumoComMov.expected, 365],
+  // 460 do cenário base + 40 de entrada − 25 de saída.
+  ["o esperado na gaveta considera as duas", resumoComMov.expected, 475],
   ["sem movimentação manual, o esperado não muda", cashSummary(sessao, fontes).expected, esperado],
 
   // --- Caixa esquecido aberto ---

@@ -67,6 +67,9 @@ export type ExpenseRecord = {
   method: string;
   /** ISO 8601 do pagamento. Só existe em gasto pago, e é o que prende o gasto à sessão de caixa certa. */
   paidAt?: string;
+  /** Fornecedor de quem foi comprado, quando informado no lançamento. */
+  supplierId?: string;
+  supplierName?: string;
   order?: string;
   charged?: number;
   employeeId?: string;
@@ -278,6 +281,8 @@ export type OrderRecord = {
   motorcycleId?: string;
   /** Quilometragem registrada na recepção. */
   mileage?: string;
+  /** Se o odômetro foi conferido na recepção da moto. */
+  mileageChecked?: boolean;
   /** Nível de combustível na entrada da moto. */
   fuelLevel?: string;
   /** OS entregue e recebida: sai das listas de serviço em andamento. */
@@ -286,6 +291,8 @@ export type OrderRecord = {
   closedAt?: string;
   /** ISO 8601 do encerramento. `closedAt` só tem a data, e a sessão de caixa precisa da hora. */
   closedAtISO?: string;
+  /** As partes do pagamento no encerramento, quando foi dividido. */
+  payments?: SalePayment[];
   /** Forma de pagamento usada no encerramento. */
   paymentMethod?: string;
   /**
@@ -480,6 +487,23 @@ export type CartItem = {
  * Venda concluída — no balcão (PDV) ou como serviço rápido. É o registro de
  * entrada de dinheiro da oficina: o financeiro soma daqui o que foi recebido.
  */
+/**
+ * Uma parte do pagamento de uma venda ou OS.
+ *
+ * Existe porque "dividir pagamento" era um botão que não gravava nada: o
+ * cliente pagava R$ 100 no PIX e R$ 50 em dinheiro, e a venda entrava com uma
+ * forma só. O caixa então esperava R$ 150 na gaveta e a conferência fechava
+ * errado, sem ninguém entender por quê.
+ */
+export type SalePayment = {
+  method: string;
+  amount: number;
+  /** Taxa da maquininha desta parte, quando foi cartão. */
+  fee?: number;
+  machineName?: string;
+  installments?: number;
+};
+
 export type SaleRecord = {
   id: string;
   origin: "PDV" | "Serviço rápido";
@@ -490,7 +514,10 @@ export type SaleRecord = {
   discount?: number;
   /** O que o cliente pagou de fato: subtotal menos desconto. */
   total: number;
+  /** Forma principal. Continua existindo para as vendas antigas e para exibição. */
   paymentMethod: string;
+  /** As partes do pagamento, quando foi dividido. Ausente = pagamento único. */
+  payments?: SalePayment[];
   /** Taxa da maquininha, quando a venda foi no cartão. */
   fee?: number;
   /** Valor líquido depois da taxa. */

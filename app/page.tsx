@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
-import { accountOpen, accountStatus, discountPercent, discountProblem, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, receivableAccountEntries, splitInstallments, totalAfterDiscount } from "../src/finance";
+import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking } from "../src/mechanic";
@@ -1968,6 +1968,13 @@ export function AppDialog({
 
   const [paymentMethod, setPaymentMethod] = useState("PIX");
   const [splitPayment, setSplitPayment] = useState(false);
+  // Duas partes: forma e valor de cada uma. A segunda é calculada como o
+  // restante enquanto a pessoa não digita nada nela — que é como todo mundo
+  // divide na prática ("R$ 50 no dinheiro, o resto no PIX").
+  const [splitFirstMethod, setSplitFirstMethod] = useState("PIX");
+  const [splitFirstAmount, setSplitFirstAmount] = useState("");
+  const [splitSecondMethod, setSplitSecondMethod] = useState("Dinheiro");
+  const [cashReceived, setCashReceived] = useState("");
   const [catalogSelection, setCatalogSelection] = useState("");
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogCategory, setCatalogCategory] = useState("Todos");
@@ -2003,6 +2010,8 @@ export function AppDialog({
   const [quickPayment, setQuickPayment] = useState("PIX");
   const [expenseCategory, setExpenseCategory] = useState("Peça comprada fora do estoque");
   const [expensePaymentMode, setExpensePaymentMode] = useState("Caixa");
+  const [expenseSupplierId, setExpenseSupplierId] = useState("");
+  const [expensePlannedMethod, setExpensePlannedMethod] = useState("PIX");
   const [expenseDescription, setExpenseDescription] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expenseSale, setExpenseSale] = useState("");
@@ -2042,6 +2051,7 @@ export function AppDialog({
   const [osProblem, setOsProblem] = useState("");
   const [osPriority, setOsPriority] = useState("Normal");
   const [osFuel, setOsFuel] = useState("");
+  const [osMileageChecked, setOsMileageChecked] = useState("Sim");
   const [quickAccount, setQuickAccount] = useState("");
   const [osDelivery, setOsDelivery] = useState("");
   // Cadastro rápido da etapa 1, quando o cliente ou a moto ainda não existem.
@@ -2095,6 +2105,15 @@ export function AppDialog({
 
   // Mesmo motivo no caixa: reabrir o diálogo com o valor da sangria anterior
   // ainda digitado é o tipo de coisa que faz sair dinheiro duas vezes.
+  // Fechar e reabrir o pagamento não pode manter a divisão anterior: seria
+  // dividir a venda seguinte com os valores da venda passada.
+  useEffect(() => {
+    if (dialog === "payment" || dialog === "orderCheckout") return;
+    setSplitPayment(false);
+    setSplitFirstAmount("");
+    setCashReceived("");
+  }, [dialog]);
+
   useEffect(() => {
     if (dialog === "finance") return;
     setMovementAmount("");
@@ -2204,6 +2223,26 @@ export function AppDialog({
   const paymentGross = dialog === "orderCheckout" ? checkoutTotal : cartTotal;
   const paymentFeeRate = paymentMethod === "Débito" ? selectedMachine?.debitFee ?? 0 : paymentMethod === "Crédito" ? paymentInstallments === 1 ? selectedMachine?.credit1xFee ?? 0 : paymentInstallments <= 6 ? selectedMachine?.credit2to6Fee ?? 0 : selectedMachine?.credit7to12Fee ?? 0 : 0;
   const paymentFeeAmount = paymentGross * (paymentFeeRate / 100);
+
+  // --- Pagamento dividido ---
+  // A taxa da maquininha vale por parte: só o pedaço que foi no cartão paga.
+  const feeRateOf = (method: string) => method === "Débito" ? selectedMachine?.debitFee ?? 0
+    : method === "Crédito" ? (paymentInstallments === 1 ? selectedMachine?.credit1xFee ?? 0 : paymentInstallments <= 6 ? selectedMachine?.credit2to6Fee ?? 0 : selectedMachine?.credit7to12Fee ?? 0)
+    : 0;
+  const splitFirstValue = toAmount(splitFirstAmount);
+  // O restante é calculado, não digitado: é assim que a divisão acontece no
+  // balcão, e evita a soma não fechar por erro de digitação.
+  const splitSecondValue = Math.max(0, Math.round((paymentGross - splitFirstValue) * 100) / 100);
+  const splitParts = [
+    { method: splitFirstMethod, amount: splitFirstValue, fee: splitFirstValue * (feeRateOf(splitFirstMethod) / 100), machineName: ["Débito", "Crédito"].includes(splitFirstMethod) ? selectedMachine?.name ?? "" : undefined },
+    { method: splitSecondMethod, amount: splitSecondValue, fee: splitSecondValue * (feeRateOf(splitSecondMethod) / 100), machineName: ["Débito", "Crédito"].includes(splitSecondMethod) ? selectedMachine?.name ?? "" : undefined },
+  ];
+  const splitIssue = splitPayment ? splitProblem(paymentGross, splitParts) : "";
+  // Formas efetivas da venda: as partes quando dividido, a única quando não.
+  const effectivePayments = splitPayment ? splitParts.filter((part) => part.amount > 0) : [];
+  const cashDue = splitPayment ? drawerTotal(splitParts) : (paymentMethod === "Dinheiro" ? paymentGross : 0);
+  const changeDue = changeFor(cashDue, toAmount(cashReceived));
+  const paymentCreditAmount = splitPayment ? creditTotal(splitParts) : (isCreditPayment(paymentMethod) ? paymentGross : 0);
   const orderStatusTone = statusTone(orderStatus);
   const handleCustomerLookup = (value: string) => {
     const formattedValue = onlyDigits(value) ? formatPhone(value) : value;
@@ -2368,6 +2407,7 @@ export function AppDialog({
       items: osItems,
       problem: osProblem,
       mileage: osMileage,
+      mileageChecked: osMileageChecked === "Sim",
       priority: currentPriority,
       fuelLevel: currentFuel,
       delivery: osDelivery ? osDelivery.split("-").reverse().join("/") : "",
@@ -2479,6 +2519,8 @@ export function AppDialog({
     mechanicId?: string;
     mechanicName?: string;
     method: string;
+    /** Partes do pagamento, quando dividido. Vazio = pagamento único. */
+    payments?: Array<{ method: string; amount: number; fee?: number; machineName?: string }>;
     account?: string;
   }) => {
     const usesMachine = ["Débito", "Crédito"].includes(input.method);
@@ -2488,7 +2530,13 @@ export function AppDialog({
       : installments === 1 ? selectedMachine?.credit1xFee ?? 0
       : installments <= 6 ? selectedMachine?.credit2to6Fee ?? 0
       : selectedMachine?.credit7to12Fee ?? 0;
-    const fee = input.total * (rate / 100);
+    const dividido = (input.payments?.length ?? 0) > 1;
+    const fee = dividido
+      ? (input.payments ?? []).reduce((total, part) => total + (part.fee ?? 0), 0)
+      : input.total * (rate / 100);
+    // Numa venda dividida, o que virou dinheiro agora é tudo menos a parte
+    // fiada — e é sobre esse valor que a taxa de maquininha incide.
+    const recebido = dividido ? settledTotal(input.payments ?? []) : input.total;
     const saleId = `VEN-${String(highestSequence(sales, "VEN") + 1).padStart(4, "0")}`;
     await recordSale(saleId, {
       origin: input.origin,
@@ -2498,7 +2546,8 @@ export function AppDialog({
       ...(input.discount ? { subtotal: input.subtotal ?? input.total + input.discount, discount: input.discount } : {}),
       total: input.total,
       paymentMethod: input.method,
-      ...(usesMachine ? {
+      ...(dividido ? { payments: input.payments, fee, net: recebido - fee } : {}),
+      ...(!dividido && usesMachine ? {
         fee,
         net: input.total - fee,
         machineName: selectedMachine?.name ?? "",
@@ -2511,7 +2560,8 @@ export function AppDialog({
       date: new Date().toLocaleDateString("pt-BR"),
       soldAt: new Date().toISOString(),
     }, input.stockUpdates);
-    if (isCreditPayment(input.method)) {
+    const aPrazo = dividido ? creditTotal(input.payments ?? []) : (isCreditPayment(input.method) ? input.total : 0);
+    if (aPrazo > 0) {
       // A venda já está gravada neste ponto. Se a conta a receber falhar — o
       // operador do PDV pode não ter permissão no financeiro — a venda não pode
       // ser desfeita, então o erro precisa aparecer nomeando o que faltou, em
@@ -2519,8 +2569,8 @@ export function AppDialog({
       try {
         await createReceivableFor({
           person: "Consumidor final",
-          description: `${input.origin} ${saleId}`,
-          amount: input.total,
+          description: dividido ? `${input.origin} ${saleId} · parte a prazo` : `${input.origin} ${saleId}`,
+          amount: aPrazo,
           origin: "Venda",
           sourceId: saleId,
         });
@@ -2748,6 +2798,7 @@ export function AppDialog({
       return changeDialog("orderCheckout");
     }
     if (dialog === "orderCheckout") {
+      if (splitIssue) return setDialogError(splitIssue);
       setSaving(true);
       try {
         // O encerramento grava o que foi realmente executado e marca a OS como
@@ -2763,7 +2814,8 @@ export function AppDialog({
             total: checkoutTotal,
             status: "Entrega",
             tone: statusTone("Entrega"),
-            paymentMethod,
+            paymentMethod: splitPayment ? (effectivePayments[0]?.method ?? paymentMethod) : paymentMethod,
+            ...(splitPayment ? { payments: effectivePayments } : {}),
             closed: true,
             closedAt: new Date().toLocaleDateString("pt-BR"),
             // Só a data não basta para o caixa: ele precisa saber a hora para
@@ -2773,15 +2825,18 @@ export function AppDialog({
           }, stockDeltas(target, reserved));
           // Imprime já com o que foi conferido no checkout, e não com os itens
           // antigos que ainda estão no `currentOrder` desta renderização.
-          if (isCreditPayment(paymentMethod)) {
+          // Só o pedaço fiado vira cobrança: numa OS dividida entre PIX e
+          // nota a prazo, cobrar o total de novo seria cobrar duas vezes.
+          const aPrazoOS = splitPayment ? creditTotal(effectivePayments) : (isCreditPayment(paymentMethod) ? checkoutTotal : 0);
+          if (aPrazoOS > 0) {
             // Mesma situação da venda: a OS já foi encerrada e não dá para
             // voltar atrás, então a falha é reportada em vez de engolida.
             try {
               await createReceivableFor({
                 person: currentOrder.customer,
                 personId: currentOrder.clientId,
-                description: `Ordem de serviço ${currentOrder.id} · ${currentOrder.bike}`,
-                amount: checkoutTotal,
+                description: `Ordem de serviço ${currentOrder.id} · ${currentOrder.bike}${splitPayment ? " · parte a prazo" : ""}`,
+                amount: aPrazoOS,
                 origin: "Ordem de serviço",
                 sourceId: currentOrder.id,
               });
@@ -2923,9 +2978,12 @@ export function AppDialog({
       setSaving(true);
       try {
         if (discountProblem(cartSubtotal, discount)) return setDialogError(discountProblem(cartSubtotal, discount));
+        // Divisão que não fecha ao centavo vira falta no caixa depois.
+        if (splitIssue) return setDialogError(splitIssue);
         const saleId = await registerSale({
           origin: "PDV",
-          method: paymentMethod,
+          method: splitPayment ? (effectivePayments[0]?.method ?? paymentMethod) : paymentMethod,
+          payments: splitPayment ? effectivePayments : undefined,
           subtotal: cartSubtotal,
           discount,
           total: cartTotal,
@@ -2941,9 +2999,11 @@ export function AppDialog({
         });
         setCart([]);
         setDiscount(0);
+        setSplitPayment(false); setSplitFirstAmount(""); setCashReceived("");
+        const comoPagou = splitPayment ? ` em ${paymentLabel(effectivePayments)}` : "";
         return finish(discount > 0
-          ? `Venda ${saleId} de ${formatBRL(cartTotal)} registrada com ${formatBRL(discount)} de desconto e estoque baixado.`
-          : `Venda ${saleId} de ${formatBRL(cartTotal)} registrada e estoque baixado.`);
+          ? `Venda ${saleId} de ${formatBRL(cartTotal)}${comoPagou} registrada com ${formatBRL(discount)} de desconto e estoque baixado.`
+          : `Venda ${saleId} de ${formatBRL(cartTotal)}${comoPagou} registrada e estoque baixado.`);
       } catch (error) {
         return setDialogError(error instanceof Error ? error.message : "Não foi possível registrar a venda.");
       } finally {
@@ -2997,7 +3057,11 @@ export function AppDialog({
         amount: expenseCost,
         dueDate: expensePaymentMode === "Pagar depois" ? expenseDueDate.split("-").reverse().join("/") : new Date().toLocaleDateString("pt-BR"),
         status: expensePaymentMode === "Pagar depois" ? "Agendado" : "Pago",
-        method: expensePaymentMode === "Caixa" ? "Dinheiro" : expensePaymentMode === "Banco" ? "Banco Inter" : "A definir",
+        // Agendado: vale a forma prevista escolhida, em vez de "A definir"
+        // fixo — quem lança já sabe se vai pagar em boleto ou PIX.
+        method: expensePaymentMode === "Caixa" ? "Dinheiro" : expensePaymentMode === "Banco" ? "Banco Inter" : expensePlannedMethod,
+        supplierId: expenseSupplierId || undefined,
+        supplierName: suppliers.find((supplier) => supplier.id === expenseSupplierId)?.name,
         // A hora do pagamento é o que prende o gasto à sessão de caixa certa:
         // só a data não distingue dois caixas abertos no mesmo dia.
         paidAt: expensePaymentMode === "Pagar depois" ? undefined : new Date().toISOString(),
@@ -3122,7 +3186,7 @@ export function AppDialog({
                     <label className="field field-full"><span>Problema relatado pelo cliente</span><textarea value={osProblem} onChange={(event) => setOsProblem(event.target.value)} placeholder="Descreva o problema relatado ou serviço solicitado"/></label>
                     <label className="field"><span>Prioridade</span><select value={currentPriority} onChange={(event) => setOsPriority(event.target.value)}>{orderPriorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
                     <label className="field"><span>Previsão de entrega</span><input type="date" value={osDelivery} onChange={(event) => setOsDelivery(event.target.value)}/>{settings?.defaultDeliveryDays ? <small className="field-help">Prazo padrão da oficina: {settings.defaultDeliveryDays}</small> : null}</label>
-                    <label className="field"><span>Odômetro conferido?</span><select><option>Sim</option><option>Não</option></select></label>
+                    <label className="field"><span>Odômetro conferido?</span><select value={osMileageChecked} onChange={(event) => setOsMileageChecked(event.target.value)}><option>Sim</option><option>Não</option></select></label>
                   </div>
                   <div className="mechanic-assignment">
                     <div><strong>Mecânicos responsáveis</strong><small>Todos os selecionados poderão atualizar a situação desta OS.</small></div>
@@ -3276,9 +3340,22 @@ export function AppDialog({
               <button className={paymentMethod === method ? "selected" : ""} key={method} onClick={() => setPaymentMethod(method)}><span>{method === "PIX" ? "PX" : method.slice(0, 2).toUpperCase()}</span><strong>{method}</strong>{paymentMethod === method ? <i>✓</i> : null}</button>
             ); })}</div>
             <label className="toggle-row"><input type="checkbox" checked={splitPayment} onChange={(event) => setSplitPayment(event.target.checked)}/><span/><div><strong>Dividir pagamento</strong><small>Use duas ou mais formas na mesma venda</small></div></label>
-            {splitPayment ? <div className="split-payment-grid"><label className="field"><span>Primeira forma</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option></select></label><label className="field"><span>Valor</span><input placeholder="R$ 0,00"/></label><label className="field"><span>Segunda forma</span><select><option>Crédito</option><option>PIX</option><option>Dinheiro</option></select></label><label className="field"><span>Restante</span><input placeholder="R$ 0,00"/></label></div> : null}
+            {splitPayment ? <><div className="split-payment-grid">
+              <label className="field"><span>Primeira forma</span><select value={splitFirstMethod} onChange={(event) => setSplitFirstMethod(event.target.value)}>{activePaymentMethods.map((m) => <option key={m.name}>{m.name}</option>)}</select></label>
+              <label className="field"><span>Valor</span><input inputMode="decimal" value={splitFirstAmount} onChange={(event) => setSplitFirstAmount(event.target.value)} placeholder="R$ 0,00"/></label>
+              <label className="field"><span>Segunda forma</span><select value={splitSecondMethod} onChange={(event) => setSplitSecondMethod(event.target.value)}>{activePaymentMethods.map((m) => <option key={m.name}>{m.name}</option>)}</select></label>
+              {/* O restante é calculado: é assim que se divide no balcão
+                  ("R$ 50 no dinheiro, o resto no PIX"), e impede a soma não
+                  fechar por erro de digitação. */}
+              <label className="field"><span>Restante</span><input value={formatBRL(splitSecondValue)} readOnly/></label>
+            </div>
+            <div className="machine-fee-summary">
+              <div><span>Total da venda</span><strong>{formatBRL(paymentGross)}</strong></div>
+              <div><span>Entra na gaveta</span><strong>{formatBRL(drawerTotal(splitParts))}</strong><small>Só a parte em dinheiro</small></div>
+              <div><span>{paymentCreditAmount > 0 ? "Fica a prazo" : "Vai para a conta"}</span><strong>{formatBRL(paymentCreditAmount > 0 ? paymentCreditAmount : paymentGross - drawerTotal(splitParts) - paymentCreditAmount)}</strong><small>{paymentCreditAmount > 0 ? "Vira conta a receber" : "PIX e cartão"}</small></div>
+            </div></> : null}
             {["Débito", "Crédito"].includes(paymentMethod) ? <><div className="form-grid payment-extra"><label className="field"><span>Maquininha utilizada</span><select value={selectedMachine?.id ?? ""} onChange={(event) => setSelectedMachineId(event.target.value)}>{activePaymentMachines.map((machine) => <option value={machine.id} key={machine.id}>{machine.name}{machine.primary ? " · principal" : ""}</option>)}</select></label>{paymentMethod === "Crédito" ? <label className="field"><span>Parcelas</span><select value={paymentInstallments} onChange={(event) => setPaymentInstallments(Number(event.target.value))}>{Array.from({ length: 12 }, (_, index) => index + 1).map((installment) => <option value={installment} key={installment}>{installment}x</option>)}</select></label> : <label className="field"><span>Recebimento</span><input value={selectedMachine?.settlementDays === 0 ? "Na hora" : `D+${selectedMachine?.settlementDays ?? 1}`} readOnly/></label>}</div><div className="machine-fee-summary"><div><span>Valor bruto</span><strong>{formatBRL(paymentGross)}</strong></div><div><span>Taxa da {selectedMachine?.name ?? "máquina"}</span><strong>− {formatBRL(paymentFeeAmount)}</strong><small>{paymentFeeRate.toFixed(2).replace(".", ",")}%</small></div><div><span>Valor líquido</span><strong>{formatBRL(paymentGross - paymentFeeAmount)}</strong></div></div></> : null}
-            {paymentMethod === "Dinheiro" ? <div className="form-grid payment-extra"><label className="field"><span>Valor recebido</span><input placeholder="R$ 0,00"/></label><div className="change-box"><span>Troco</span><strong>R$ 0,00</strong></div></div> : null}
+            {cashDue > 0 ? <div className="form-grid payment-extra"><label className="field"><span>Valor recebido</span><input inputMode="decimal" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={formatBRL(cashDue)}/></label><div className="change-box"><span>Troco</span><strong>{formatBRL(changeDue)}</strong></div></div> : null}
             {paymentMethod === "Nota a prazo" ? <div className="credit-warning"><Icon name="alert" size={18}/><div><strong>Venda a prazo</strong><small>Cliente obrigatório. Vencimento registrado no contas a receber.</small></div></div> : null}
             {paymentMethod === "Troca de serviços" ? <div className="trade-payment-card"><div className="trade-payment-head"><span><Icon name="users" size={18}/></span><div><strong>Compensar com trabalho ou serviço</strong><small>Quita o débito sem lançar entrada em dinheiro no caixa.</small></div></div><div className="form-grid"><label className="field field-full"><span>Serviço recebido do cliente</span><input value={tradeServiceDescription} onChange={(event) => setTradeServiceDescription(event.target.value)} placeholder="Ex.: Serviço combinado com o cliente"/></label><label className="field"><span>Valor acordado</span><input type="number" min="0" value={tradeValue} onChange={(event) => setTradeValue(event.target.value)}/></label><label className="field"><span>Valor compensado agora</span><input value={formatBRL(Math.min(Number(tradeValue) || 0, paymentGross))} readOnly/></label></div><div className="trade-cash-note"><Icon name="check" size={16}/><span>Entrada em caixa: <strong>R$ 0,00</strong>. A movimentação ficará no histórico financeiro como compensação.</span></div></div> : null}
           </div>
@@ -3350,7 +3427,7 @@ export function AppDialog({
                 {expenseCategory === "Peça comprada fora do estoque" ? <>
                   <label className="field field-full"><span>Nome da peça comprada</span><input value={expensePart} onChange={(event) => setExpensePart(event.target.value)} placeholder="Ex.: Retificador CG 160"/></label>
                   <label className="field"><span>Ordem de serviço</span><select value={expenseOrder} onChange={(event) => setExpenseOrder(event.target.value)}>{orders?.length ? orders.map((o) => <option key={o.id} value={o.id}>{o.id} · {o.customer}</option>) : null}<option value="Sem vínculo">Sem vínculo com OS</option></select></label>
-                  <label className="field"><span>Fornecedor / onde comprou</span><select>{activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name}</option>)}<option>Outro fornecedor</option></select></label>
+                  <label className="field"><span>Fornecedor / onde comprou</span><select value={expenseSupplierId} onChange={(event) => setExpenseSupplierId(event.target.value)}>{activeSuppliers.map((supplier) => <option value={supplier.id} key={supplier.id}>{supplier.name}</option>)}<option>Outro fornecedor</option></select></label>
                   <label className="field"><span>Preço de custo</span><input type="number" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="0,00"/></label>
                   <label className="field"><span>Preço cobrado do cliente</span><input type="number" value={expenseSale} onChange={(event) => setExpenseSale(event.target.value)} placeholder="0,00"/></label>
                 </> : expenseCategory === "Pagamento de funcionário" ? <>
@@ -3362,7 +3439,7 @@ export function AppDialog({
                   <label className="field"><span>Valor do gasto</span><input type="number" value={expenseAmount} onChange={(event) => setExpenseAmount(event.target.value)} placeholder="0,00"/></label>
                   <label className="field"><span>Fornecedor ou favorecido</span><input placeholder="Opcional"/></label>
                 </>}
-                {expensePaymentMode === "Pagar depois" ? <><label className="field"><span>Data de vencimento</span><input type="date" value={expenseDueDate} onChange={(event) => setExpenseDueDate(event.target.value)}/></label><label className="field"><span>Forma prevista</span><select><option>PIX</option><option>Boleto</option><option>Transferência</option><option>A definir</option></select></label></> : <><label className="field"><span>{expensePaymentMode === "Caixa" ? "Caixa de saída" : "Conta bancária"}</span><select><option>{expensePaymentMode === "Caixa" ? "Caixa balcão" : "Banco Inter PJ"}</option><option>Banco Bradesco PJ</option></select></label><label className="field"><span>Data do pagamento</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label></>}
+                {expensePaymentMode === "Pagar depois" ? <><label className="field"><span>Data de vencimento</span><input type="date" value={expenseDueDate} onChange={(event) => setExpenseDueDate(event.target.value)}/></label><label className="field"><span>Forma prevista</span><select value={expensePlannedMethod} onChange={(event) => setExpensePlannedMethod(event.target.value)}><option>PIX</option><option>Boleto</option><option>Transferência</option><option>A definir</option></select></label></> : <><label className="field"><span>{expensePaymentMode === "Caixa" ? "Caixa de saída" : "Conta bancária"}</span><select><option>{expensePaymentMode === "Caixa" ? "Caixa balcão" : "Banco Inter PJ"}</option><option>Banco Bradesco PJ</option></select></label><label className="field"><span>Data do pagamento</span><input type="date" defaultValue={new Date().toISOString().split("T")[0]}/></label></>}
               </div>
             </div>
             {expenseCategory === "Peça comprada fora do estoque" ? <div className="emergency-part-summary"><div><span>Custo da peça</span><strong>{formatBRL(expenseCost)}</strong></div><div><span>Cobrado do cliente</span><strong>{formatBRL(expenseCharged)}</strong></div><div className={expenseMargin >= 0 ? "positive" : "negative"}><span>Margem bruta</span><strong>{formatBRL(expenseMargin)}</strong><small>{expenseCost > 0 ? `${((expenseMargin / expenseCost) * 100).toFixed(1).replace(".", ",")}% sobre o custo` : "Informe o custo"}</small></div></div> : null}
@@ -3567,9 +3644,19 @@ export function AppDialog({
                 <div className="form-label">Como o cliente vai acertar?</div>
                 <div className="payment-methods checkout-methods">{activePaymentMethods.map((methodConfig) => { const method = methodConfig.name; return <button className={paymentMethod === method ? "selected" : ""} key={method} onClick={() => setPaymentMethod(method)}><span>{method === "PIX" ? "PX" : method === "Troca de serviços" ? "TS" : method.slice(0, 2).toUpperCase()}</span><strong>{method}</strong>{paymentMethod === method ? <i>✓</i> : null}</button>; })}</div>
                 <label className="toggle-row checkout-split"><input type="checkbox" checked={splitPayment} onChange={(event) => setSplitPayment(event.target.checked)}/><span/><div><strong>Dividir ou receber parcialmente</strong><small>O saldo restante pode virar uma conta a receber.</small></div></label>
-                {splitPayment ? <div className="split-payment-grid"><label className="field"><span>Primeira forma</span><select><option>PIX</option><option>Dinheiro</option><option>Débito</option><option>Troca de serviços</option></select></label><label className="field"><span>Valor recebido</span><input defaultValue={formatBRL(checkoutTotal / 2)}/></label><label className="field"><span>Segunda forma</span><select><option>Crédito</option><option>PIX</option><option>Dinheiro</option><option>Deixar saldo pendente</option></select></label><label className="field"><span>Restante</span><input defaultValue={formatBRL(checkoutTotal / 2)}/></label></div> : null}
+                {splitPayment ? <><div className="split-payment-grid">
+                  <label className="field"><span>Primeira forma</span><select value={splitFirstMethod} onChange={(event) => setSplitFirstMethod(event.target.value)}>{activePaymentMethods.map((m) => <option key={m.name}>{m.name}</option>)}</select></label>
+                  <label className="field"><span>Valor recebido</span><input inputMode="decimal" value={splitFirstAmount} onChange={(event) => setSplitFirstAmount(event.target.value)} placeholder="R$ 0,00"/></label>
+                  <label className="field"><span>Segunda forma</span><select value={splitSecondMethod} onChange={(event) => setSplitSecondMethod(event.target.value)}>{activePaymentMethods.map((m) => <option key={m.name}>{m.name}</option>)}</select></label>
+                  <label className="field"><span>Restante</span><input value={formatBRL(splitSecondValue)} readOnly/></label>
+                </div>
+                <div className="machine-fee-summary">
+                  <div><span>Total da OS</span><strong>{formatBRL(paymentGross)}</strong></div>
+                  <div><span>Entra na gaveta</span><strong>{formatBRL(drawerTotal(splitParts))}</strong><small>Só a parte em dinheiro</small></div>
+                  <div><span>{paymentCreditAmount > 0 ? "Fica a prazo" : "Vai para a conta"}</span><strong>{formatBRL(paymentCreditAmount > 0 ? paymentCreditAmount : paymentGross - drawerTotal(splitParts) - paymentCreditAmount)}</strong><small>{paymentCreditAmount > 0 ? "Vira conta a receber" : "PIX e cartão"}</small></div>
+                </div></> : null}
                 {["Débito", "Crédito"].includes(paymentMethod) ? <><div className="form-grid payment-extra"><label className="field"><span>Maquininha utilizada</span><select value={selectedMachine?.id ?? ""} onChange={(event) => setSelectedMachineId(event.target.value)}>{activePaymentMachines.map((machine) => <option value={machine.id} key={machine.id}>{machine.name}{machine.primary ? " · principal" : ""}</option>)}</select></label>{paymentMethod === "Crédito" ? <label className="field"><span>Parcelas</span><select value={paymentInstallments} onChange={(event) => setPaymentInstallments(Number(event.target.value))}>{Array.from({ length: 12 }, (_, index) => index + 1).map((installment) => <option value={installment} key={installment}>{installment}x</option>)}</select></label> : <label className="field"><span>Recebimento</span><input value={selectedMachine?.settlementDays === 0 ? "Na hora" : `D+${selectedMachine?.settlementDays ?? 1}`} readOnly/></label>}</div><div className="machine-fee-summary"><div><span>Valor bruto</span><strong>{formatBRL(paymentGross)}</strong></div><div><span>Taxa da {selectedMachine?.name ?? "máquina"}</span><strong>− {formatBRL(paymentFeeAmount)}</strong><small>{paymentFeeRate.toFixed(2).replace(".", ",")}%</small></div><div><span>Valor líquido</span><strong>{formatBRL(paymentGross - paymentFeeAmount)}</strong></div></div></> : null}
-                {paymentMethod === "Dinheiro" ? <div className="form-grid payment-extra"><label className="field"><span>Valor entregue pelo cliente</span><input defaultValue={formatBRL(checkoutTotal)}/></label><div className="change-box"><span>Troco calculado</span><strong>R$ 0,00</strong></div></div> : null}
+                {cashDue > 0 ? <div className="form-grid payment-extra"><label className="field"><span>Valor entregue pelo cliente</span><input inputMode="decimal" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={formatBRL(cashDue)}/></label><div className="change-box"><span>Troco calculado</span><strong>{formatBRL(changeDue)}</strong></div></div> : null}
                 {paymentMethod === "Nota a prazo" ? <div className="credit-warning"><Icon name="alert" size={18}/><div><strong>Registrar saldo a receber</strong><small>Defina o vencimento e mantenha a OS tecnicamente encerrada.</small></div></div> : null}
                 {paymentMethod === "Troca de serviços" ? <div className="trade-payment-card"><div className="trade-payment-head"><span><Icon name="users" size={18}/></span><div><strong>Compensação por troca de serviços</strong><small>O combinado quita a OS sem entrar como dinheiro recebido.</small></div></div><div className="form-grid"><label className="field field-full"><span>Trabalho ou serviço recebido</span><input value={tradeServiceDescription} onChange={(event) => setTradeServiceDescription(event.target.value)} placeholder="Ex.: Desenvolvimento do sistema da oficina"/></label><label className="field"><span>Valor acordado / crédito disponível</span><input type="number" min="0" value={tradeValue} onChange={(event) => setTradeValue(event.target.value)}/></label><label className="field"><span>Compensado nesta OS</span><input value={formatBRL(tradeCompensated)} readOnly/></label><label className="field field-full"><span>Observações</span><textarea value={tradeNotes} onChange={(event) => setTradeNotes(event.target.value)} placeholder="Descreva o acordo e o que ainda falta entregar, se houver."/></label></div><div className="trade-balance-grid"><div><span>Total da OS</span><strong>{formatBRL(checkoutTotal)}</strong></div><div><span>Entrada em dinheiro</span><strong>R$ 0,00</strong></div><div><span>{tradeRemaining > 0 ? "Saldo ainda devido" : "Crédito restante da troca"}</span><strong>{formatBRL(tradeRemaining > 0 ? tradeRemaining : tradeCreditRemaining)}</strong></div></div><div className="trade-cash-note"><Icon name="check" size={16}/><span>A baixa será identificada como <strong>Troca de serviços</strong> no financeiro e no histórico do cliente.</span></div></div> : null}
                 <div className="print-ready-strip"><Icon name="file" size={19}/><div><strong>Impressão automática em 3 vias</strong><small>1 · Mecânico &nbsp; 2 · Caixa &nbsp; 3 · Cliente</small></div><span>80mm</span></div>

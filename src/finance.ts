@@ -1,4 +1,4 @@
-import type { AccountRecord, AccountSettlement, ExpenseRecord, MovementRecord, OrderRecord, SaleRecord, ServiceOrderItem } from "./types";
+import type { AccountRecord, AccountSettlement, ExpenseRecord, MovementRecord, OrderRecord, SalePayment, SaleRecord, ServiceOrderItem } from "./types";
 
 /**
  * Cálculos do financeiro da oficina, em um lugar só.
@@ -28,6 +28,89 @@ export function isCashPayment(method: string | undefined): boolean {
 
 export function isCreditPayment(method: string | undefined): boolean {
   return (method ?? "").trim() === "Nota a prazo";
+}
+
+// ---------------------------------------------------------------------------
+// Pagamento dividido
+// ---------------------------------------------------------------------------
+
+/**
+ * As partes do pagamento de uma venda ou OS, sempre como lista.
+ *
+ * É o adaptador que faz todo o resto do sistema funcionar sem saber se o
+ * pagamento foi dividido — e, principalmente, sem quebrar as vendas antigas,
+ * que têm só `paymentMethod` e nenhuma lista. Uma venda antiga vira uma lista
+ * de um item só.
+ */
+export function paymentsOf(record: { total?: number; paymentMethod?: string; payments?: SalePayment[]; fee?: number; machineName?: string; installments?: number }): SalePayment[] {
+  const parts = record.payments ?? [];
+  if (parts.length) return parts;
+  return [{
+    method: record.paymentMethod ?? "",
+    amount: record.total ?? 0,
+    fee: record.fee ?? 0,
+    machineName: record.machineName,
+    installments: record.installments,
+  }];
+}
+
+/** Quanto entrou em espécie — o único valor que a gaveta do caixa deve esperar. */
+export function drawerTotal(payments: SalePayment[]): number {
+  return round2(payments.filter((part) => part.method.trim() === "Dinheiro").reduce((total, part) => total + part.amount, 0));
+}
+
+/** Quanto ficou a prazo, e por isso vira conta a receber em vez de dinheiro agora. */
+export function creditTotal(payments: SalePayment[]): number {
+  return round2(payments.filter((part) => isCreditPayment(part.method)).reduce((total, part) => total + part.amount, 0));
+}
+
+/**
+ * Quanto virou dinheiro de fato, em qualquer forma (espécie, PIX, cartão).
+ *
+ * Fica de fora o que foi a prazo e o que foi trocado por serviço: nenhum dos
+ * dois colocou dinheiro em lugar nenhum no momento da venda.
+ */
+export function settledTotal(payments: SalePayment[]): number {
+  return round2(payments.filter((part) => isCashPayment(part.method)).reduce((total, part) => total + part.amount, 0));
+}
+
+/** Soma das taxas de maquininha das partes no cartão. */
+export function feeTotal(payments: SalePayment[]): number {
+  return round2(payments.reduce((total, part) => total + (part.fee ?? 0), 0));
+}
+
+/**
+ * O que impede o pagamento dividido de ser aceito.
+ *
+ * A soma das partes tem que fechar com o total, ao centavo. Aceitar diferença
+ * seria gravar uma venda que não bate com o que o cliente pagou — e a sobra ou
+ * falta apareceria no fechamento do caixa como se fosse erro de alguém.
+ */
+export function splitProblem(total: number, payments: SalePayment[]): string {
+  const validas = payments.filter((part) => part.amount > 0);
+  if (validas.length < 2) return "Informe as duas formas com valor maior que zero.";
+  if (validas.some((part) => !part.method.trim())) return "Escolha a forma de cada parte do pagamento.";
+  const soma = round2(validas.reduce((sum, part) => sum + part.amount, 0));
+  const alvo = round2(total);
+  if (soma !== alvo) {
+    const falta = round2(alvo - soma);
+    return falta > 0
+      ? `Faltam ${brl(falta)} para fechar o total de ${brl(alvo)}.`
+      : `As partes somam ${brl(soma)}, ${brl(-falta)} a mais que o total.`;
+  }
+  return "";
+}
+
+/** Descrição curta do pagamento, para listas e cupons: "PIX + Dinheiro". */
+export function paymentLabel(payments: SalePayment[]): string {
+  const validas = payments.filter((part) => part.amount > 0);
+  if (validas.length <= 1) return validas[0]?.method ?? "";
+  return validas.map((part) => part.method).join(" + ");
+}
+
+/** Troco a devolver quando o cliente entrega mais do que deve. */
+export function changeFor(due: number, received: number): number {
+  return round2(Math.max(0, received - due));
 }
 
 /** Data de hoje no formato dd/mm/aaaa, o mesmo que os registros gravam. */
@@ -73,6 +156,10 @@ export type FinanceEntry = {
   method: string;
   /** Custo das peças desta entrada. */
   cost: number;
+  /** Quanto desta venda virou dinheiro agora (o resto ficou a prazo). */
+  settled: number;
+  /** Quanto ficou a prazo e virou conta a receber. */
+  credit: number;
 };
 
 /**
@@ -137,7 +224,12 @@ function itemsCost(items: ServiceOrderItem[] | undefined): number {
 }
 
 function saleEntry(sale: SaleRecord): FinanceEntry {
-  const fee = sale.fee ?? 0;
+  const parts = paymentsOf(sale);
+  const dividido = Boolean(sale.payments?.length);
+  const fee = dividido ? feeTotal(parts) : (sale.fee ?? 0);
+  // `settled` é o que virou dinheiro AGORA. Numa venda dividida entre PIX e
+  // nota a prazo, só a parte do PIX entrou; o resto virou conta a receber.
+  const settled = dividido ? settledTotal(parts) : (isCashPayment(sale.paymentMethod) ? sale.total : 0);
   return {
     id: sale.id,
     source: sale.origin === "PDV" ? "Venda do balcão" : "Serviço rápido",
@@ -145,15 +237,20 @@ function saleEntry(sale: SaleRecord): FinanceEntry {
     description: sale.items.map((item) => item.name).join(", ") || sale.origin,
     date: sale.date,
     total: sale.total,
-    net: sale.net ?? sale.total - fee,
+    net: dividido ? round2(settled - fee) : (sale.net ?? sale.total - fee),
     fee,
-    method: sale.paymentMethod,
+    method: paymentLabel(parts) || sale.paymentMethod,
     cost: itemsCost(sale.items),
+    settled,
+    credit: dividido ? creditTotal(parts) : (isCreditPayment(sale.paymentMethod) ? sale.total : 0),
   };
 }
 
 function orderEntry(order: OrderRecord): FinanceEntry {
   const total = order.total ?? 0;
+  const parts = paymentsOf(order);
+  const dividido = Boolean(order.payments?.length);
+  const settled = dividido ? settledTotal(parts) : (isCashPayment(order.paymentMethod) ? total : 0);
   return {
     id: order.id,
     source: "Ordem de serviço",
@@ -163,27 +260,33 @@ function orderEntry(order: OrderRecord): FinanceEntry {
     total,
     // A OS não guarda taxa de maquininha: o encerramento registra a forma de
     // pagamento, e o desconto da máquina é acompanhado pelas vendas do PDV.
-    net: total,
+    net: settled,
     fee: 0,
-    method: order.paymentMethod ?? "",
+    method: paymentLabel(parts) || (order.paymentMethod ?? ""),
     cost: itemsCost(order.items),
+    settled,
+    credit: dividido ? creditTotal(parts) : (isCreditPayment(order.paymentMethod) ? total : 0),
   };
 }
 
-/** Tudo que já virou dinheiro: vendas e OS encerradas em forma de pagamento à vista. */
-export function revenueEntries(sales: SaleRecord[], orders: OrderRecord[]): FinanceEntry[] {
-  return [
-    ...sales.map(saleEntry),
-    ...orders.filter((order) => order.closed).map(orderEntry),
-  ].filter((entry) => isCashPayment(entry.method));
+function allEntries(sales: SaleRecord[], orders: OrderRecord[]): FinanceEntry[] {
+  return [...sales.map(saleEntry), ...orders.filter((order) => order.closed).map(orderEntry)];
 }
 
-/** Vendas e OS fechadas em "Nota a prazo": o serviço saiu, o dinheiro ainda não entrou. */
+/**
+ * Tudo que já virou dinheiro.
+ *
+ * Uma venda dividida entre PIX e nota a prazo entra aqui pela parte do PIX E
+ * na lista de a receber pela parte fiada — as duas coisas são verdade ao mesmo
+ * tempo, e é isso que o "dividir pagamento" significa.
+ */
+export function revenueEntries(sales: SaleRecord[], orders: OrderRecord[]): FinanceEntry[] {
+  return allEntries(sales, orders).filter((entry) => entry.settled > 0);
+}
+
+/** Vendas e OS com parte a prazo: o serviço saiu, esse pedaço do dinheiro não entrou. */
 export function receivableEntries(sales: SaleRecord[], orders: OrderRecord[]): FinanceEntry[] {
-  return [
-    ...sales.map(saleEntry),
-    ...orders.filter((order) => order.closed).map(orderEntry),
-  ].filter((entry) => isCreditPayment(entry.method));
+  return allEntries(sales, orders).filter((entry) => entry.credit > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -370,13 +473,16 @@ export function financeSummary(
   const revenue = revenueEntries(sales, orders);
   const revenueToday = revenue.filter((entry) => entry.date === today);
 
-  const sum = (entries: FinanceEntry[], field: "total" | "net" | "fee" | "cost") => entries.reduce((total, entry) => total + entry[field], 0);
+  const sum = (entries: FinanceEntry[], field: "total" | "net" | "fee" | "cost" | "settled") => entries.reduce((total, entry) => total + entry[field], 0);
 
-  const grossTotal = sum(revenue, "total");
+  // "settled", e não "total": numa venda dividida, a parte fiada ainda não é
+  // dinheiro. Ela entra no faturamento quando o cliente pagar, pela baixa da
+  // conta a receber — somar as duas coisas contaria o mesmo dinheiro duas vezes.
+  const grossTotal = sum(revenue, "settled");
   const receivedTotal = sum(revenue, "net");
   const cardFees = sum(revenue, "fee");
   const partsCost = sum(revenue, "cost");
-  const grossMonth = revenue.filter((entry) => isSameMonth(entry.date)).reduce((total, entry) => total + entry.total, 0);
+  const grossMonth = revenue.filter((entry) => isSameMonth(entry.date)).reduce((total, entry) => total + entry.settled, 0);
 
   const paidExpenseRecords = expenses.filter((expense) => expense.status === "Pago");
   const paidExpenses = paidExpenseRecords.reduce((total, expense) => total + expense.amount, 0);
@@ -409,7 +515,7 @@ export function financeSummary(
 
   return {
     receivedToday,
-    grossToday: sum(revenueToday, "total") + settlementTotal(receivedSettlements, true),
+    grossToday: sum(revenueToday, "settled") + settlementTotal(receivedSettlements, true),
     salesTodayCount: revenueToday.length + receivedSettlements.filter((settlement) => settlement.date === today).length,
     receivedTotal: totalReceived,
     grossTotal,

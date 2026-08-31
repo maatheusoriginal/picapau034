@@ -11,6 +11,8 @@ import {
   accountOpen,
   accountPaid,
   accountStatus,
+  changeFor,
+  creditTotal,
   discountPercent,
   discountProblem,
   financeSummary,
@@ -18,11 +20,16 @@ import {
   movementIncome,
   movementProblem,
   openAccounts,
+  paymentLabel,
+  paymentsOf,
   payableEntries,
   payableStatus,
   receivableEntries,
   receivableAccountEntries,
+  drawerTotal,
+  settledTotal,
   splitInstallments,
+  splitProblem,
   totalAfterDiscount,
 } from "../src/finance";
 import type { AccountRecord, ExpenseRecord, MovementRecord, OrderRecord, SaleRecord } from "../src/types";
@@ -90,6 +97,10 @@ const movimentacoes = [
   { id: "MOV-0003", kind: "entrada", amount: 100, category: "Aporte do dono", method: "PIX", description: "Capital", date: ontem, at: new Date(Date.now() - 86400000).toISOString() },
 ] as unknown as MovementRecord[];
 
+// PIX + dinheiro, e dinheiro + fiado: os dois casos que a oficina faz.
+const divididas = [{ method: "PIX", amount: 100 }, { method: "Dinheiro", amount: 50 }];
+const comFiado = [{ method: "Dinheiro", amount: 80 }, { method: "Nota a prazo", amount: 120 }];
+
 const s = financeSummary(sales, orders, expenses, accounts);
 const sm = financeSummary(sales, orders, expenses, accounts, movimentacoes);
 const conta = accounts[1]!;
@@ -144,6 +155,35 @@ const esperado = {
   "as demais ficam iguais": [`${parcelas[1]!.amount}-${parcelas[2]!.amount}`, "33.33-33.33"],
   "parcela única não quebra": [splitInstallments(50, 1, hoje).length, 1],
   "as parcelas são numeradas em ordem": [parcelas.map((p) => p.installment).join(""), "123"],
+
+  // --- Pagamento dividido ---
+  // Venda de R$ 150: R$ 100 no PIX e R$ 50 em dinheiro.
+  "a venda antiga vira uma parte só": [paymentsOf({ total: 90, paymentMethod: "PIX" }).length, 1],
+  "e mantém a forma que tinha": [paymentsOf({ total: 90, paymentMethod: "PIX" })[0]!.method, "PIX"],
+  "a venda dividida mantém as partes": [paymentsOf({ total: 150, payments: divididas }).length, 2],
+  "só a parte em espécie vai para a gaveta": [drawerTotal(divididas), 50],
+  "PIX e dinheiro viraram dinheiro de verdade": [settledTotal(divididas), 150],
+  "e nada ficou a prazo": [creditTotal(divididas), 0],
+  // Venda de R$ 200: R$ 80 em dinheiro e R$ 120 fiado.
+  "com parte fiada, a gaveta só espera o dinheiro": [drawerTotal(comFiado), 80],
+  "o fiado não conta como recebido": [settledTotal(comFiado), 80],
+  "e vira conta a receber": [creditTotal(comFiado), 120],
+  "o rótulo mostra as duas formas": [paymentLabel(divididas), "PIX + Dinheiro"],
+  "pagamento único não vira rótulo composto": [paymentLabel(paymentsOf({ total: 90, paymentMethod: "PIX" })), "PIX"],
+
+  // A soma tem que fechar ao centavo, senão a diferença vira falta no caixa.
+  "as partes precisam fechar o total": [splitProblem(150, divididas), ""],
+  "faltando, avisa quanto falta": [splitProblem(200, divididas).includes("Faltam"), true],
+  "sobrando, avisa que passou": [splitProblem(100, divididas).includes("a mais"), true],
+  "uma parte só não é divisão": [splitProblem(50, [{ method: "PIX", amount: 50 }]).includes("duas formas"), true],
+  "parte sem forma escolhida é recusada": [splitProblem(150, [{ method: "", amount: 100 }, { method: "Dinheiro", amount: 50 }]).includes("Escolha a forma"), true],
+  "centavo de diferença já barra": [splitProblem(150.01, divididas).includes("Faltam"), true],
+
+  // --- Troco ---
+  "troco é o que passou do devido": [changeFor(45, 50), 5],
+  "valor exato não gera troco": [changeFor(45, 45), 0],
+  "recebendo menos, não há troco negativo": [changeFor(45, 20), 0],
+  "troco com centavos": [changeFor(45.5, 100), 54.5],
 
   // --- Desconto na venda ---
   "desconto abate do subtotal": [totalAfterDiscount(100, 15), 85],
