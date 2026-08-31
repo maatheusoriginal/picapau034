@@ -1,5 +1,5 @@
-import type { Request, Response } from "express";
 import type { UserRecord } from "firebase-admin/auth";
+import { header, type ApiRequest, type ApiResponse } from "./http";
 import { firebaseAdmin } from "./firebase-admin";
 import { allFirebasePermissions, allUserRoles, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../src/types";
 
@@ -42,9 +42,9 @@ function permissionValues(data: unknown, role: UserRole, employeeId: string): Us
   return data.filter((item): item is UserPermission => typeof item === "string" && permissions.includes(item as UserPermission));
 }
 
-async function callerFrom(request: Request) {
+async function callerFrom(request: ApiRequest) {
   const { auth, db } = firebaseAdmin();
-  const authorization = request.header("authorization") ?? "";
+  const authorization = header(request, "authorization");
   if (!authorization.startsWith("Bearer ")) throw new ApiError(401, "unauthenticated", "Entre no sistema para continuar.");
 
   let decoded;
@@ -110,7 +110,7 @@ async function listAllAuthenticationUsers() {
   return users;
 }
 
-function sendError(response: Response, error: unknown) {
+function sendError(response: ApiResponse, error: unknown) {
   if (error instanceof ApiError) {
     response.status(error.status).json({ error: { code: error.code, message: error.message } });
     return;
@@ -132,7 +132,7 @@ function sendError(response: Response, error: unknown) {
   });
 }
 
-export async function getAdminUsers(request: Request, response: Response) {
+export async function getAdminUsers(request: ApiRequest, response: ApiResponse) {
   try {
     await callerFrom(request);
     const { db } = firebaseAdmin();
@@ -179,7 +179,7 @@ export async function getAdminUsers(request: Request, response: Response) {
   }
 }
 
-export async function postAdminUsers(request: Request, response: Response) {
+export async function postAdminUsers(request: ApiRequest, response: ApiResponse) {
   try {
     const callerUid = await callerFrom(request);
     const body = (request.body ?? {}) as UserInput;
