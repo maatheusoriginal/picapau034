@@ -1,5 +1,5 @@
-import { getAdminUsers, postAdminUsers } from "../../server/admin-users";
-import type { ApiRequest, ApiResponse } from "../../server/http";
+import { getAdminUsers, postAdminUsers } from "../../server/admin-users.js";
+import type { ApiRequest, ApiResponse } from "../../server/http.js";
 
 /**
  * Listar (GET) e criar/editar/apagar (POST) usuários.

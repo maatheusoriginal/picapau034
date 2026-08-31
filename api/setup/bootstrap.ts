@@ -1,5 +1,5 @@
-import { bootstrapSuperAdmin } from "../../server/bootstrap";
-import type { ApiRequest, ApiResponse } from "../../server/http";
+import { bootstrapSuperAdmin } from "../../server/bootstrap.js";
+import type { ApiRequest, ApiResponse } from "../../server/http.js";
 
 /** Cria o primeiro Super Admin. Só aceita POST, como no servidor Express. */
 export default async function handler(request: ApiRequest, response: ApiResponse) {

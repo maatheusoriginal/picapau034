@@ -40,6 +40,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:import` | Confere a leitura da planilha de estoque |
 | `npm run check:cash` | Confere o caixa: o esperado na gaveta e a conferência do fechamento |
 | `npm run check:permissions` | Confere o que cada cargo recebe por padrão |
+| `npm run check:api-imports` | Confere se as funções da Vercel conseguem carregar |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -100,6 +101,7 @@ scripts/
   check-import.ts    Confere a leitura da planilha de estoque
   check-cash.ts      Confere o caixa e a conferência do fechamento
   check-permissions.ts Confere as permissões padrão de cada cargo
+  check-api-imports.ts Confere as extensões .js dos imports das funções
 firestore.rules      Regras de segurança do banco
 ```
 
@@ -473,6 +475,21 @@ navegador de qualquer visitante.
 variáveis de ambiente. `INITIAL_SUPER_ADMIN_EMAIL` é o e-mail que pode concluir
 a configuração inicial.
 
+### Imports precisam da extensão `.js`
+
+O projeto é ESM (`"type": "module"`) e a Vercel compila as funções **sem
+empacotá-las**. Nesse modo o Node exige a extensão nos imports entre arquivos:
+
+```ts
+import { getAdminUsers } from "../../server/admin-users.js";  // certo
+import { getAdminUsers } from "../../server/admin-users";     // 500 em produção
+```
+
+Sem a extensão, o typecheck passa, o build passa, o deploy sobe — e a função
+morre no primeiro acesso com `ERR_MODULE_NOT_FOUND`. Nem `tsx` nem o Vite pegam
+isso, porque os dois resolvem sem extensão. `npm run check:api-imports` confere
+`api/` e `server/` e falha se faltar alguma.
+
 ### Como diagnosticar
 
 Abra `https://SEU-ENDERECO/api/health`:
@@ -521,6 +538,7 @@ sessões anteriores daquele usuário.
 - [ ] `npm run check:import` sem falhas
 - [ ] `npm run check:cash` sem falhas
 - [ ] `npm run check:permissions` sem falhas
+- [ ] `npm run check:api-imports` sem falhas
 - [ ] `npm run build` conclui sem erros
 - [ ] Variáveis `VITE_FIREBASE_*` configuradas no ambiente de produção
 - [ ] `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` e `INITIAL_SUPER_ADMIN_EMAIL` cadastradas
