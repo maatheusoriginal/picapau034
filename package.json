@@ -18,7 +18,8 @@
     "check:cash": "tsx scripts/check-cash.ts",
     "check:permissions": "tsx scripts/check-permissions.ts",
     "check:api-imports": "tsx scripts/check-api-imports.ts",
-    "check:mechanic": "tsx scripts/check-mechanic.ts"
+    "check:mechanic": "tsx scripts/check-mechanic.ts",
+    "check:backup": "tsx scripts/check-backup.ts"
   },
   "dependencies": {
     "express": "4.21.2",

@@ -672,4 +672,8 @@ export type SettingsConfig = {
   printFormat: string;
   printThreeCopies: boolean;
   defaultWhatsappMessage: string;
+  /** ISO 8601 da última cópia de segurança baixada. Fica aqui, e não no
+   *  navegador, para valer em qualquer aparelho: guardado localmente, o
+   *  celular acharia que nunca houve backup feito no computador. */
+  lastBackupAt?: string;
 };

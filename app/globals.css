@@ -346,6 +346,9 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 /* Faixa com o que falta configurar, no topo do painel administrativo. */
 .admin-pending { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 13px; padding: 13px 15px; border: 1px solid #efdcb4; border-radius: 12px; background: #fdf7ec; color: #8a6420; }
 .admin-pending strong { display: block; font-size: 11px; }
+/* Mesma faixa, em verde, quando a cópia de segurança está em dia. Reaproveita
+   a estrutura do aviso âmbar em vez de criar um segundo componente. */
+.admin-pending.backup-ok { border-color: #cde7d8; background: #f1faf5; color: #3c725c; }
 .admin-pending small { display: block; margin-top: 3px; color: #a08040; font-size: 9px; }
 .admin-pending > div:first-of-type { flex: 1; min-width: 180px; }
 .admin-pending-actions { display: flex; flex-wrap: wrap; gap: 7px; }
