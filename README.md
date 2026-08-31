@@ -41,6 +41,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:cash` | Confere o caixa: o esperado na gaveta e a conferência do fechamento |
 | `npm run check:permissions` | Confere o que cada cargo recebe por padrão |
 | `npm run check:api-imports` | Confere se as funções da Vercel conseguem carregar |
+| `npm run check:mechanic` | Confere o quadro do mecânico (o que é dele e o que está livre) |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -93,6 +94,7 @@ src/
   documents.ts       OS impressa, cupom e mensagem de WhatsApp (funções puras)
   import.ts          Leitura da planilha de estoque (funções puras)
   cash.ts            Caixa: o dinheiro em espécie da gaveta (funções puras)
+  mechanic.ts        Quadro do mecânico: minhas OS e as da oficina (funções puras)
   components/        Modais de cadastro e a área de Configurações
 scripts/
   check-finance.ts   Confere as contas do financeiro
@@ -102,6 +104,7 @@ scripts/
   check-cash.ts      Confere o caixa e a conferência do fechamento
   check-permissions.ts Confere as permissões padrão de cada cargo
   check-api-imports.ts Confere as extensões .js dos imports das funções
+  check-mechanic.ts  Confere o quadro do mecânico
 firestore.rules      Regras de segurança do banco
 ```
 
@@ -504,6 +507,54 @@ Sem as rotas, a tela de usuários ainda **lista** quem já tem perfil (ela lê o
 Firestore direto) e mostra um aviso — foi assim que este problema apareceu. Mas
 criar e editar falham.
 
+## Quadro do mecânico
+
+Quem entra com o perfil **Mecânico** vê, em "Ordens de serviço", um quadro no
+lugar da tabela de seis colunas. O dono e o balcão continuam com a tabela: eles
+precisam da visão da oficina inteira; o mecânico precisa de duas respostas, no
+celular, com uma mão suja de graxa.
+
+| Seção | O que traz |
+| --- | --- |
+| **Minhas ordens** | As OS atribuídas a ele, abertas |
+| **Na oficina** | As demais OS abertas — o que ele pode puxar |
+
+A segunda seção existe por um motivo concreto: quando a peça de uma OS não
+chegou, o mecânico não fica parado, puxa outra para adiantar. Sem enxergar o que
+está livre, ou ele fica ocioso ou vai perguntar para alguém.
+
+### Um toque muda a situação
+
+Cada linha traz o passo seguinte, sem abrir a OS:
+
+| Situação | Botão | Vai para |
+| --- | --- | --- |
+| Recepção, Avaliação, Aprovação | Iniciar serviço | Em serviço |
+| Em serviço | Marcar pronta | Entrega |
+| Entrega | — | (só "Abrir") |
+
+"Abrir" continua levando ao diálogo completo, com todas as situações, peças,
+impressão e WhatsApp. O botão de um toque cobre o caso comum; o diálogo cobre o
+resto.
+
+**Pegar uma OS da oficina acrescenta o mecânico à equipe** — não substitui quem
+já estava. Duas pessoas na mesma moto é comum, e apagar o responsável anterior
+faria a oficina perder de vista quem começou o serviço. Com "um mecânico por OS"
+configurado, assumir passa a ser troca, que é o que a configuração pede.
+
+A baixa de estoque segue a mesma regra do diálogo da OS, inclusive a
+configuração "baixar peças só quando o serviço começa" — a conta é a mesma
+função, não uma cópia, senão a peça sairia duas vezes ou nenhuma dependendo de
+por onde a situação foi mudada.
+
+### Vínculo com o funcionário
+
+O quadro sabe o que é "dele" comparando o **funcionário vinculado ao usuário**
+com os mecânicos da OS. Usuário sem vínculo não tem nada em "Minhas ordens" — a
+tela avisa isso explicitamente, porque a causa é o cadastro do usuário e não a
+falta de serviço. O vínculo é feito em **Usuários e acessos → Vincular ao
+funcionário**.
+
 ## Modelo de segurança
 
 Esconder um botão na tela não é segurança. O bloqueio real está em três camadas:
@@ -539,6 +590,7 @@ sessões anteriores daquele usuário.
 - [ ] `npm run check:cash` sem falhas
 - [ ] `npm run check:permissions` sem falhas
 - [ ] `npm run check:api-imports` sem falhas
+- [ ] `npm run check:mechanic` sem falhas
 - [ ] `npm run build` conclui sem erros
 - [ ] Variáveis `VITE_FIREBASE_*` configuradas no ambiente de produção
 - [ ] `FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON` e `INITIAL_SUPER_ADMIN_EMAIL` cadastradas

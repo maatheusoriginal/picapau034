@@ -5,6 +5,7 @@ import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "..
 import { accountOpen, accountStatus, discountPercent, discountProblem, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, receivableAccountEntries, splitInstallments, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
+import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking } from "../src/mechanic";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
 import { openWhatsapp, printDocument } from "./printing";
@@ -1462,6 +1463,9 @@ function ModuleWorkspace({
   accounts,
   cashSessions,
   movements,
+  viewerEmployeeId,
+  viewerIsMechanic,
+  onAdvanceOrder,
   openSettings,
   settingsTab,
   settings,
@@ -1502,6 +1506,9 @@ function ModuleWorkspace({
   accounts: AccountRecord[];
   cashSessions: CashSession[];
   movements: MovementRecord[];
+  viewerEmployeeId: string;
+  viewerIsMechanic: boolean;
+  onAdvanceOrder: (order: OrderRecord, status: ServiceOrderStatus, mechanicIds: string[]) => Promise<void>;
   openSettings: (tab: SettingsTab) => void;
   settingsTab: SettingsTab;
   settings: Partial<SettingsConfig> | null;
@@ -1523,6 +1530,86 @@ function ModuleWorkspace({
     </Suspense>
   );
   if (active === "Administração") return <AdminWorkspace navigate={navigate} openSettings={openSettings} settings={settings} users={users} products={products} orders={orders} clients={clients} motorcycles={motorcycles} sales={sales} expenses={expenses} accounts={accounts} categories={categories} quickServices={quickServices} partners={partners} paymentMachines={paymentMachines} paymentMethods={paymentMethods} suppliers={suppliers}/>;
+
+  /**
+   * O quadro do mecânico substitui a tabela de seis colunas.
+   *
+   * Só para quem é mecânico: o dono e o balcão precisam da visão da oficina
+   * inteira. O mecânico precisa de duas respostas — o que é meu e o que tem
+   * para pegar — em uma tela que funcione no celular, com uma mão.
+   */
+  if (active === "Ordens de serviço" && viewerIsMechanic) {
+    const board = mechanicBoard(orders, viewerEmployeeId);
+    const resumo = mechanicSummary(board);
+    const allowMultiple = settings?.allowMultipleMechanics !== false;
+    const busca = query.trim().toLowerCase();
+    const filtrar = (list: OrderRecord[]) => list.filter((order) =>
+      `${order.id} ${order.customer} ${order.bike} ${order.plate}`.toLowerCase().includes(busca));
+
+    const linha = (order: OrderRecord) => {
+      const row = boardRow(order, viewerEmployeeId);
+      const equipe = users.filter((user) => (order.mechanicIds ?? []).includes(user.id)).map((user) => user.name);
+      return (
+        <div className="registry-row" key={order.id}>
+          <span className="registry-avatar">{order.plate ? order.plate.slice(0, 2) : order.id.slice(-2)}</span>
+          <span>
+            <strong>{order.customer}</strong>
+            <small>{order.id} · {order.bike}{order.plate ? ` · ${order.plate}` : ""}{!row.mine && equipe.length ? ` · ${equipe.join(" + ")}` : ""}</small>
+            <span className={`status ${statusTone(order.status)}`}><i/>{order.status}</span>
+          </span>
+          <div className="order-actions">
+            <button onClick={() => openDialog("order", order.id)}>Abrir</button>
+            {row.action && row.target ? (
+              <button onClick={() => void onAdvanceOrder(order, row.target!, mechanicsAfterTaking(order, viewerEmployeeId, allowMultiple))
+                .then(() => notify(row.mine ? `${order.id}: ${row.target}.` : `${order.id} agora é sua.`))
+                .catch((error) => notify(error instanceof Error ? error.message : "Não foi possível atualizar a OS."))}>{row.action}</button>
+            ) : null}
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <>
+        <div className="module-heading">
+          <div><p>Oficina</p><h1>Minhas ordens</h1><span>O que está com você e o que a oficina tem para pegar.</span></div>
+          <span className="system-healthy"><i/><b>{resumo.working} na bancada agora</b></span>
+        </div>
+
+        {!viewerEmployeeId ? (
+          <div className="admin-pending">
+            <Icon name="alert" size={20}/>
+            <div><strong>Sua conta não está ligada a um funcionário</strong><small>Por isso nenhuma OS aparece como sua. Peça ao administrador para vincular seu usuário ao seu cadastro de funcionário em Usuários e acessos.</small></div>
+          </div>
+        ) : null}
+
+        <div className="module-summary">
+          <article><span>Fazendo agora</span><strong>{resumo.working}</strong><small>{resumo.working > 0 ? "Na sua bancada" : "Nada em andamento"}</small></article>
+          <article><span>Suas, a começar</span><strong>{resumo.waiting}</strong><small>{resumo.ready > 0 ? `${resumo.ready} pronta(s) aguardando o cliente` : "Nenhuma esperando"}</small></article>
+          <article><span>Na oficina</span><strong>{resumo.available}</strong><small>{resumo.available > 0 ? "Disponíveis para pegar" : "Nenhuma outra aberta"}</small></article>
+        </div>
+
+        <section className="panel module-panel">
+          <div className="list-toolbar">
+            <label className="mini-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar OS, cliente ou placa"/></label>
+          </div>
+          <div className="summary-title"><span>Minhas ordens</span><b>{board.mine.length} ABERTA(S)</b></div>
+          <div className="registry-list">
+            {filtrar(board.mine).length ? filtrar(board.mine).map(linha)
+              : <div className="pdv-empty"><span><Icon name="wrench" size={20}/></span><strong>{board.mine.length ? "Nada bate com a busca" : "Nenhuma OS com você"}</strong><p>{board.mine.length ? "Apague a busca para ver as suas." : "Pegue uma da oficina, logo abaixo."}</p></div>}
+          </div>
+        </section>
+
+        <section className="panel module-panel">
+          <div className="summary-title"><span>Na oficina · para pegar</span><b>{board.shop.length} DISPONÍVEL(IS)</b></div>
+          <div className="registry-list">
+            {filtrar(board.shop).length ? filtrar(board.shop).map(linha)
+              : <div className="pdv-empty"><span><Icon name="check" size={20}/></span><strong>{board.shop.length ? "Nada bate com a busca" : "Oficina em dia"}</strong><p>{board.shop.length ? "Apague a busca para ver todas." : "Nenhuma outra OS aberta agora."}</p></div>}
+          </div>
+        </section>
+      </>
+    );
+  }
 
   if (active === "Ordens de serviço" || active === "Orçamentos") {
     const isBudget = active === "Orçamentos";
@@ -3806,6 +3893,30 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts, movements), [sales, orders, expenses, accounts, movements]);
   // O cartão da Visão geral mostra a gaveta quando há caixa aberto: é o número
   // que a pessoa vai conferir, e não o saldo acumulado do negócio.
+  /**
+   * Avança a OS a partir do quadro do mecânico, em um toque.
+   *
+   * Usa exatamente a mesma regra de estoque do diálogo da OS — inclusive a
+   * configuração "baixar peças só quando o serviço começa". Duplicar essa
+   * conta aqui faria a peça sair do estoque duas vezes ou nenhuma, dependendo
+   * de por onde a situação foi mudada.
+   */
+  const advanceOrder = useCallback(async (order: OrderRecord, status: ServiceOrderStatus, mechanicIds: string[]) => {
+    const deductStockOnlyWhenStarted = workshopSettings?.deductStockOnlyWhenUsed !== false;
+    const partsOfOrder = mergeParts((order.items ?? [])
+      .filter((item) => item.type === "Peça" && item.productId)
+      .map((item) => ({ productId: item.productId!, quantity: item.quantity ?? 1 })));
+    const reserved = (order.deductedItems ?? []) as ReservedPart[];
+    const target = shouldReserveStock(status, deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOfOrder : [];
+    await saveOrderWithStock(order.id, {
+      status,
+      tone: statusTone(status),
+      mechanicIds,
+      mechanic: users.find((user) => user.id === mechanicIds[0])?.name ?? order.mechanic,
+      deductedItems: target,
+    }, stockDeltas(target, reserved));
+  }, [workshopSettings, users]);
+
   const dashboardCash = openSession(cashSessions);
   const dashboardDrawer = cashSummary(dashboardCash, { sales, orders, expenses, accounts }).expected;
 
@@ -4058,7 +4169,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
+            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>
