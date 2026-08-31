@@ -82,6 +82,7 @@ app/
   globals.css        Estilos da aplicação
   firebase/client.ts Toda a conversa com o Firebase no navegador
   printing.ts        Envia o documento para a impressora e abre o WhatsApp
+  ErrorBoundary.tsx  Rede de segurança: evita a tela branca e recupera versão nova
 server/
   index.ts           Express: rotas da API e entrega da interface
   admin-users.ts     API administrativa de usuários (criar, editar, senha, apagar)
@@ -591,6 +592,42 @@ com os mecânicos da OS. Usuário sem vínculo não tem nada em "Minhas ordens" 
 tela avisa isso explicitamente, porque a causa é o cadastro do usuário e não a
 falta de serviço. O vínculo é feito em **Usuários e acessos → Vincular ao
 funcionário**.
+
+## Tela branca e versões novas
+
+Não existia nenhuma rede de segurança: qualquer exceção durante a renderização
+fazia o React desmontar tudo, e a pessoa ficava olhando para uma tela branca —
+sem mensagem, sem botão, sem saída.
+
+A causa mais comum nem era bug de lógica. É o app ficar aberto no celular
+enquanto uma versão nova é publicada: a página velha continua pedindo pedaços de
+tela com o nome antigo (`ProductFormModal-D2cwv3J_.js`), que já não existem no
+servidor, e o import falha. Reproduzido bloqueando esse arquivo — dá tela branca
+com `Failed to fetch dynamically imported module`.
+
+`app/ErrorBoundary.tsx` cobre a aplicação inteira **e** cada formulário
+carregado sob demanda, então um modal que não carrega não derruba a tela atrás
+dele. Quando reconhece o caso de versão nova, recarrega a página **uma vez** —
+marcado em `sessionStorage` para nunca virar laço, e limpo quando o app abre
+inteiro, para o próximo deploy também se resolver sozinho. Se o
+`sessionStorage` estiver bloqueado (janela anônima), mostra a mensagem em vez de
+recarregar às cegas.
+
+## Responsividade
+
+O que foi conferido, renderizando cada tela em 360, 768 e 1440px: **18 telas e
+19 diálogos**, procurando queda, tela branca e elemento fora da área visível.
+
+- **Modais de cadastro**: os cinco formulários (produto, cliente, moto,
+  fornecedor, funcionário) usavam 30 classes que nunca existiram no
+  `globals.css` — apareciam sem janela, sem fundo e com o rótulo colado no
+  campo. Agora reaproveitam os mesmos valores do diálogo principal. No celular
+  ocupam a tela inteira, as grades de 2/3/4 colunas viram uma, e as abas rolam
+  na horizontal.
+- **Tabelas**: continuam roláveis, mas as colunas marcadas com `.col-secondary`
+  somem abaixo de 560px. Fica o que identifica a linha, o dinheiro, a situação
+  e a ação; sai o contexto (categoria, responsável, data de entrada, descrição).
+  Nada se perde — abrir o registro mostra tudo.
 
 ## Modelo de segurança
 
