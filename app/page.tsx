@@ -9,6 +9,7 @@ import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking } from "
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
 import { openWhatsapp, printDocument } from "./printing";
+import { clearReloadMark, ErrorBoundary } from "./ErrorBoundary";
 import type { SettingsTab } from "../src/components/SettingsWorkspace";
 
 // Carregados sob demanda: cada um só é montado quando o diálogo/aba
@@ -686,8 +687,8 @@ function QuickServiceWorkspace({ openDialog, quickServices }: { openDialog: (dia
       </div>
       <section className="panel module-panel">
         <div className="panel-header"><div><h2>Atendimentos de hoje</h2><p>Serviços concluídos diretamente no balcão</p></div><span className="status green"><i/>0 concluídos</span></div>
-        <div className="table-scroll"><table><thead><tr><th>Horário</th><th>Serviço</th><th>Produto</th><th>Pagamento</th><th>Valor</th><th>Status</th></tr></thead><tbody>
-          <tr><td colSpan={6} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhum atendimento expresso realizado hoje.</td></tr>
+        <div className="table-scroll"><table><thead><tr><th className="col-secondary">Horário</th><th>Serviço</th><th className="col-secondary">Produto</th><th className="col-secondary">Pagamento</th><th>Valor</th><th>Status</th></tr></thead><tbody>
+          <tr><td colSpan={6} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }} className="col-secondary">Nenhum atendimento expresso realizado hoje.</td></tr>
         </tbody></table></div>
       </section>
     </>
@@ -739,7 +740,7 @@ function FinanceWorkspace({
       <div className="finance-body-grid">
         <section className="panel finance-movements">
           <div className="panel-header"><div><h2>Últimos gastos</h2><p>Lançamentos manuais e despesas agendadas</p></div><button className="outline-button" onClick={() => openDialog("expense")}>Novo gasto</button></div>
-          <div className="table-scroll"><table><thead><tr><th>Gasto</th><th>Categoria</th><th>Pagamento</th><th>Valor</th><th>Status</th></tr></thead><tbody>{expenses.length ? expenses.map((expense) => <tr key={expense.id}><td><strong>{expense.description}</strong><span>{expense.id}{expense.order ? ` · ${expense.order}` : ""}</span></td><td>{expense.category}</td><td>{expense.method}<span>{expense.dueDate}</span></td><td><strong className="mono">{formatBRL(expense.amount)}</strong>{expense.charged ? <span className="margin-caption">Cobrado {formatBRL(expense.charged)}</span> : null}</td><td><span className={`status ${expense.status === "Pago" ? "green" : "amber"}`}><i/>{expense.status}</span></td></tr>) : <tr><td colSpan={5} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhum gasto registrado no momento.</td></tr>}</tbody></table></div>
+          <div className="table-scroll"><table><thead><tr><th>Gasto</th><th className="col-secondary">Categoria</th><th className="col-secondary">Pagamento</th><th>Valor</th><th>Status</th></tr></thead><tbody>{expenses.length ? expenses.map((expense) => <tr key={expense.id}><td><strong>{expense.description}</strong><span>{expense.id}{expense.order ? ` · ${expense.order}` : ""}</span></td><td className="col-secondary">{expense.category}</td><td className="col-secondary">{expense.method}<span>{expense.dueDate}</span></td><td><strong className="mono">{formatBRL(expense.amount)}</strong>{expense.charged ? <span className="margin-caption">Cobrado {formatBRL(expense.charged)}</span> : null}</td><td><span className={`status ${expense.status === "Pago" ? "green" : "amber"}`}><i/>{expense.status}</span></td></tr>) : <tr><td colSpan={5} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhum gasto registrado no momento.</td></tr>}</tbody></table></div>
         </section>
         <aside className="panel finance-quick-actions">
           <div className="panel-header"><div><h2>Atalhos financeiros</h2><p>Operações mais usadas</p></div></div>
@@ -794,7 +795,7 @@ function AccountsWorkspace({
       </div>
       <section className="panel module-panel">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder={`Buscar ${isReceivable ? "cliente" : "fornecedor"}, descrição ou código`}/></label><div className="filter-pills">{["Todos", "A vencer", "Vence hoje", "Atrasado"].map((filter) => <button className={accountFilter === filter ? "selected" : ""} key={filter} onClick={() => setAccountFilter(filter)}>{filter}</button>)}</div></div>
-        <div className="table-scroll"><table><thead><tr><th>{isReceivable ? "Cliente / Pagador" : "Fornecedor / Favorecido"}</th><th>Descrição</th><th>Vencimento</th><th>Valor original</th><th>Saldo</th><th>Status</th><th>Ação</th></tr></thead><tbody>{filteredRecords.length ? filteredRecords.map((record) => <tr key={record.id}><td><strong>{record.person}</strong><span className="mono">{record.id}</span></td><td><strong>{record.description}</strong><span>{isReceivable ? "Receita operacional" : "Despesa da oficina"}</span></td><td>{record.dueDate}</td><td className="mono">{formatBRL(record.original)}</td><td><strong className="mono">{formatBRL(record.open)}</strong></td><td><span className={`status ${record.status === "Atrasado" ? "red" : record.status === "Vence hoje" ? "amber" : record.status === "Parcial" ? "violet" : record.status === "Quitado" ? "green" : "blue"}`}><i/>{record.status}</span></td><td><button className="account-action" onClick={() => openDialog(isReceivable ? "settleReceivable" : "settlePayable", record.id)}>{isReceivable ? "Receber" : "Pagar"}</button></td></tr>) : <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhuma conta {isReceivable ? "a receber" : "a pagar"} cadastrada no momento.</td></tr>}</tbody></table></div>
+        <div className="table-scroll"><table><thead><tr><th>{isReceivable ? "Cliente / Pagador" : "Fornecedor / Favorecido"}</th><th className="col-secondary">Descrição</th><th>Vencimento</th><th className="col-secondary">Valor original</th><th>Saldo</th><th>Status</th><th>Ação</th></tr></thead><tbody>{filteredRecords.length ? filteredRecords.map((record) => <tr key={record.id}><td><strong>{record.person}</strong><span className="mono">{record.id}</span></td><td className="col-secondary"><strong>{record.description}</strong><span>{isReceivable ? "Receita operacional" : "Despesa da oficina"}</span></td><td>{record.dueDate}</td><td className="col-secondary mono">{formatBRL(record.original)}</td><td><strong className="mono">{formatBRL(record.open)}</strong></td><td><span className={`status ${record.status === "Atrasado" ? "red" : record.status === "Vence hoje" ? "amber" : record.status === "Parcial" ? "violet" : record.status === "Quitado" ? "green" : "blue"}`}><i/>{record.status}</span></td><td><button className="account-action" onClick={() => openDialog(isReceivable ? "settleReceivable" : "settlePayable", record.id)}>{isReceivable ? "Receber" : "Pagar"}</button></td></tr>) : <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhuma conta {isReceivable ? "a receber" : "a pagar"} cadastrada no momento.</td></tr>}</tbody></table></div>
       </section>
     </>
   );
@@ -884,7 +885,7 @@ function TeamWorkspace({ users, setUsers, openDialog, notify }: { users: UserCon
         }) : <div className="no-results" style={{ padding: "32px 16px", textAlign: "center" }}>Nenhum funcionário encontrado.</div>}</div>
       </section>
 
-      <Suspense fallback={null}>
+      <ErrorBoundary area="este formulário"><Suspense fallback={null}>
         <EmployeeFormModal
           isOpen={isEmployeeModalOpen}
           onClose={() => { setIsEmployeeModalOpen(false); setSelectedEmployeeForEdit(null); }}
@@ -893,7 +894,7 @@ function TeamWorkspace({ users, setUsers, openDialog, notify }: { users: UserCon
           notify={notify}
           allEmployees={users}
         />
-      </Suspense>
+      </Suspense></ErrorBoundary>
     </>
   );
 }
@@ -1183,16 +1184,16 @@ function UserAccessWorkspace({
         <div className="list-toolbar access-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar nome, e-mail, telefone ou funcionário"/></label><div className="access-filters"><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} aria-label="Filtrar por perfil"><option>Todos</option><option>Super Admin</option><option>Balcão</option><option>Mecânico</option></select><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} aria-label="Filtrar por situação"><option>Ativos</option><option>Sem perfil</option><option>Inativos</option><option>Todos</option></select></div></div>
         <div className="table-scroll">
           <table className="access-table">
-            <thead><tr><th>Usuário</th><th>Perfil</th><th>Funcionário</th><th>Permissões</th><th>Último acesso</th><th>Situação</th><th>Ações</th></tr></thead>
+            <thead><tr><th>Usuário</th><th>Perfil</th><th className="col-secondary">Funcionário</th><th className="col-secondary">Permissões</th><th className="col-secondary">Último acesso</th><th>Situação</th><th>Ações</th></tr></thead>
             <tbody>{loading && !managedUsers.length ? <tr><td colSpan={7}><div className="access-empty">Buscando contas do Authentication...</div></td></tr> : filteredUsers.length ? filteredUsers.map((user) => {
               const employee = employees.find((item) => item.id === user.employeeId);
               const initials = user.name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
               const lastAccess = user.lastSignInAt ? new Date(user.lastSignInAt) : null;
               return <tr key={user.uid} className={user.hasAccessProfile && !user.active ? "access-inactive" : ""}>
                 <td><div className="access-user-cell"><span className="registry-avatar">{initials || "US"}</span><div><strong>{user.name}{user.uid === currentUser?.uid ? <em>Você</em> : null}{!user.hasAccessProfile ? <em className="auth-only">Authentication</em> : null}</strong><small>{user.email || "E-mail não informado"}{user.phone ? ` · ${user.phone}` : ""}</small></div></div></td>
-                <td>{user.hasAccessProfile ? <span className={`access-role ${user.role === "Super Admin" ? "admin" : user.role === "Balcão" ? "counter" : "mechanic"}`}>{user.role}</span> : <span className="access-role pending">Definir perfil</span>}</td>
-                <td><strong>{employee?.name || user.employeeId || "Não vinculado"}</strong><span>{employee?.position || (user.employeeId ? "Cadastro da equipe" : "Acesso independente")}</span></td>
-                <td><strong>{user.hasAccessProfile ? user.role === "Super Admin" ? "Acesso total" : `${user.permissions.length} permissões` : "Nenhuma ainda"}</strong><span>{user.permissions.includes("orders.create") && user.hasAccessProfile ? "Pode abrir OS" : "Não abre nova OS"}</span></td>
+                <td className="col-secondary">{user.hasAccessProfile ? <span className={`access-role ${user.role === "Super Admin" ? "admin" : user.role === "Balcão" ? "counter" : "mechanic"}`}>{user.role}</span> : <span className="access-role pending">Definir perfil</span>}</td>
+                <td className="col-secondary"><strong>{employee?.name || user.employeeId || "Não vinculado"}</strong><span>{employee?.position || (user.employeeId ? "Cadastro da equipe" : "Acesso independente")}</span></td>
+                <td className="col-secondary"><strong>{user.hasAccessProfile ? user.role === "Super Admin" ? "Acesso total" : `${user.permissions.length} permissões` : "Nenhuma ainda"}</strong><span>{user.permissions.includes("orders.create") && user.hasAccessProfile ? "Pode abrir OS" : "Não abre nova OS"}</span></td>
                 <td><strong>{lastAccess && !Number.isNaN(lastAccess.getTime()) ? lastAccess.toLocaleDateString("pt-BR") : "Ainda não acessou"}</strong><span>{lastAccess && !Number.isNaN(lastAccess.getTime()) ? lastAccess.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "Senha temporária"}</span></td>
                 <td>{user.hasAccessProfile ? <button className={`access-status ${user.active ? "active" : "inactive"}`} disabled={busy} onClick={() => void toggleUser(user)}><i/>{user.active ? "Ativo" : "Inativo"}</button> : <button className="access-status pending" onClick={() => openEdit(user)}><i/>Sem acesso</button>}</td>
                 <td><div className="access-actions"><button onClick={() => openEdit(user)}>{user.hasAccessProfile ? "Editar" : "Liberar"}</button><button onClick={() => openPassword(user)}>Senha</button><button className="danger" disabled={user.uid === currentUser?.uid} title={user.uid === currentUser?.uid ? "Você não pode apagar a própria conta" : "Apagar usuário"} onClick={() => openDelete(user)}>Apagar</button></div></td>
@@ -1427,7 +1428,7 @@ function AdminWorkspace({
   );
 }
 
-function ModuleWorkspace({
+export function ModuleWorkspace({
   active,
   canOperate,
   canCreateOrders,
@@ -1525,9 +1526,9 @@ function ModuleWorkspace({
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} />;
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
   if (active === "Configurações") return (
-    <Suspense fallback={<LazyFallback />}>
+    <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
       <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify} initialTab={settingsTab}/>
-    </Suspense>
+    </Suspense></ErrorBoundary>
   );
   if (active === "Administração") return <AdminWorkspace navigate={navigate} openSettings={openSettings} settings={settings} users={users} products={products} orders={orders} clients={clients} motorcycles={motorcycles} sales={sales} expenses={expenses} accounts={accounts} categories={categories} quickServices={quickServices} partners={partners} paymentMachines={paymentMachines} paymentMethods={paymentMethods} suppliers={suppliers}/>;
 
@@ -1645,13 +1646,13 @@ function ModuleWorkspace({
           </div>
           <div className="table-scroll">
             <table>
-              <thead><tr><th>OS / Cliente</th><th>Motocicleta</th><th>Responsável</th><th>Entrada</th><th>Status</th><th>Ação</th></tr></thead>
+              <thead><tr><th>OS / Cliente</th><th className="col-secondary">Motocicleta</th><th className="col-secondary">Responsável</th><th className="col-secondary">Entrada</th><th>Status</th><th>Ação</th></tr></thead>
               <tbody>{filteredOrders.length > 0 ? filteredOrders.map((order) => (
                 <tr key={order.id}>
                   <td><strong className="order-id">{order.id}</strong><span>{order.customer}</span></td>
-                  <td><strong>{order.bike}</strong><span className="plate">{order.plate}</span></td>
-                  <td><span className="mechanic-avatar">{order.mechanic ? order.mechanic[0] : "M"}</span>{order.mechanic || "Não definido"}</td>
-                  <td>{order.time ? `Entrada: ${order.time}` : "Hoje"}</td>
+                  <td className="col-secondary"><strong>{order.bike}</strong><span className="plate">{order.plate}</span></td>
+                  <td className="col-secondary"><span className="mechanic-avatar">{order.mechanic ? order.mechanic[0] : "M"}</span>{order.mechanic || "Não definido"}</td>
+                  <td className="col-secondary">{order.time ? `Entrada: ${order.time}` : "Hoje"}</td>
                   <td><span className={`status ${statusTone(order.status)}`}><i />{isBudget && order.status === "Em serviço" ? "Aprovado" : order.status}</span></td>
                   <td><button className="outline-button" onClick={() => openDialog("order", order.id)}>Abrir</button></td>
                 </tr>
@@ -1700,14 +1701,14 @@ function ModuleWorkspace({
           </div>
           <div className="table-scroll">
             <table>
-              <thead><tr><th>Produto</th><th>Categoria</th><th>Saldo</th><th>Custo</th><th>Venda</th><th>Situação</th><th></th></tr></thead>
+              <thead><tr><th>Produto</th><th className="col-secondary">Categoria</th><th>Saldo</th><th className="col-secondary">Custo</th><th>Venda</th><th className="col-secondary">Situação</th><th></th></tr></thead>
               <tbody>{filteredProducts.length > 0 ? filteredProducts.map((product) => (
                 <tr key={product.code}>
                   <td><strong>{product.name}</strong><span className="mono">{product.code}</span></td>
-                  <td>{product.category}</td>
+                  <td className="col-secondary">{product.category}</td>
                   <td><strong className={product.stock <= product.minimum ? "danger-text" : ""}>{product.stock} un.</strong><span>Mín. {product.minimum}</span></td>
-                  <td className="mono">{product.cost}</td><td><strong className="mono">{product.price}</strong></td>
-                  <td><span className={`status ${product.status === "Normal" ? "green" : product.status === "Crítico" ? "amber" : "red"}`}><i/>{product.status}</span></td>
+                  <td className="col-secondary mono">{product.cost}</td><td><strong className="mono">{product.price}</strong></td>
+                  <td className="col-secondary"><span className={`status ${product.status === "Normal" ? "green" : product.status === "Crítico" ? "amber" : "red"}`}><i/>{product.status}</span></td>
                   <td><button className="row-button" aria-label={`Abrir ${product.name}`} onClick={() => canOperate ? openDialog("product", product.id) : notify("Seu perfil pode consultar o estoque, mas não alterar produtos.")}><Icon name="arrow" size={17}/></button></td>
                 </tr>
               )) : (
@@ -1801,7 +1802,7 @@ function ModuleWorkspace({
   );
 }
 
-function AppDialog({
+export function AppDialog({
   dialog,
   canOperate,
   step,
@@ -1886,7 +1887,7 @@ function AppDialog({
 
   if (dialog === "product") {
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
         <ProductFormModal
           isOpen={true}
           onClose={close}
@@ -1900,13 +1901,13 @@ function AppDialog({
           settings={settings}
           movementSources={{ stockEntries, sales, orders }}
         />
-      </Suspense>
+      </Suspense></ErrorBoundary>
     );
   }
 
   if (dialog === "supplier") {
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
         <SupplierFormModal
           isOpen={true}
           onClose={close}
@@ -1915,13 +1916,13 @@ function AppDialog({
           notify={notify || finish}
           allSuppliers={suppliers}
         />
-      </Suspense>
+      </Suspense></ErrorBoundary>
     );
   }
 
   if (dialog === "motorcycle") {
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
         <MotorcycleFormModal
           isOpen={true}
           onClose={close}
@@ -1932,13 +1933,13 @@ function AppDialog({
           allMotorcycles={motorcycles}
           brands={systemList(lists, "motorcycleBrands")}
         />
-      </Suspense>
+      </Suspense></ErrorBoundary>
     );
   }
 
   if (dialog === "client") {
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
         <ClientFormModal
           isOpen={true}
           onClose={close}
@@ -1947,13 +1948,13 @@ function AppDialog({
           notify={notify || finish}
           allClients={clients}
         />
-      </Suspense>
+      </Suspense></ErrorBoundary>
     );
   }
 
   if (dialog === "employee") {
     return (
-      <Suspense fallback={<LazyFallback />}>
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
         <EmployeeFormModal
           isOpen={true}
           onClose={close}
@@ -1961,7 +1962,7 @@ function AppDialog({
           notify={notify || finish}
           allEmployees={users}
         />
-      </Suspense>
+      </Suspense></ErrorBoundary>
     );
   }
 
@@ -3780,6 +3781,9 @@ function AuthGate({ session }: { session: ReturnType<typeof useFirebaseSession> 
 }
 
 function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof useFirebaseSession> }) {
+  // O app abriu inteiro: se houve recarregamento por versão nova, ele deu
+  // certo, e a marca precisa sair para o próximo deploy também se resolver.
+  useEffect(() => { clearReloadMark(); }, []);
   const currentUserName = firebaseSession.profile?.name?.trim() || firebaseSession.user?.displayName?.trim() || "Usuário";
   const currentUserInitials = currentUserName.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "US";
   const firebaseEnabled = firebaseSession.state === "connected" && Boolean(firebaseSession.profile);
@@ -4134,14 +4138,14 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
               </div>
               <div className="table-scroll">
                 <table>
-                  <thead><tr><th>OS / Cliente</th><th>Motocicleta</th><th>Mecânico</th><th>Entrada</th><th>Status</th><th></th></tr></thead>
+                  <thead><tr><th>OS / Cliente</th><th className="col-secondary">Motocicleta</th><th className="col-secondary">Mecânico</th><th className="col-secondary">Entrada</th><th>Status</th><th></th></tr></thead>
                   <tbody>
                     {orders.length ? orders.map((order) => (
                       <tr key={order.id}>
                         <td><strong className="order-id">{order.id}</strong><span>{order.customer}</span></td>
-                        <td><strong>{order.bike}</strong><span className="plate">{order.plate}</span></td>
-                        <td><span className="mechanic-avatar">{order.mechanic ? order.mechanic.slice(0, 1) : "M"}</span>{order.mechanic || "Não definido"}</td>
-                        <td>{order.time}</td>
+                        <td className="col-secondary"><strong>{order.bike}</strong><span className="plate">{order.plate}</span></td>
+                        <td className="col-secondary"><span className="mechanic-avatar">{order.mechanic ? order.mechanic.slice(0, 1) : "M"}</span>{order.mechanic || "Não definido"}</td>
+                        <td className="col-secondary">{order.time}</td>
                         <td><span className={`status ${statusTone(order.status)}`}><i />{order.status}</span></td>
                         <td><button className="row-button" aria-label={`Abrir ${order.id}`} onClick={() => openDialog("order", order.id)}><Icon name="arrow" size={17} /></button></td>
                       </tr>

@@ -1958,3 +1958,116 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   color: #8c8d91;
 }
 
+
+/* ===========================================================================
+   Modais de cadastro (produto, cliente, moto, fornecedor, funcionário)
+   ---------------------------------------------------------------------------
+   Estes cinco formulários foram escritos contra outra folha de estilo: usavam
+   30 classes que nunca existiram aqui. O resultado era um formulário sem
+   janela, sem fundo e com rótulo colado no campo — a tela de "adicionar
+   produto" era a pior delas.
+
+   Tudo abaixo reaproveita os mesmos valores do diálogo principal (.dialog-layer,
+   .dialog, .field) para os cadastros terem exatamente a mesma cara do resto do
+   sistema, em vez de uma segunda linguagem visual.
+   =========================================================================== */
+
+.dialog-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: rgba(10,10,12,.62); backdrop-filter: blur(4px); animation: fade-in .16s ease; }
+.dialog-window { width: min(560px, 100%); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,.25); border-radius: 17px; background: #fff; box-shadow: 0 28px 80px rgba(0,0,0,.28); animation: dialog-in .2s ease; }
+.dialog-window.large-dialog { width: min(820px, 100%); }
+
+.dialog-head { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 22px 16px; border-bottom: 1px solid #eceae7; }
+.dialog-head > div { min-width: 0; }
+/* Título e subtítulo são <strong> e <span> irmãos: sem display:block eles
+   ficam na mesma linha, colados ("Editar ProdutoCódigo: PRD-001"). */
+.dialog-head strong, .dialog-head span, .dialog-head p, .dialog-head h2, .dialog-head h3 { display: block; }
+.dialog-head h2, .dialog-head h3, .dialog-head strong { margin: 0 0 4px; font-size: 17px; letter-spacing: -.03em; }
+.dialog-head p, .dialog-head span { margin: 0; color: #88898d; font-size: 10px; line-height: 1.5; }
+.icon-close { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 8px; background: #f3f2f0; color: #76777a; font-size: 18px; line-height: 1; cursor: pointer; }
+.icon-close:hover { background: #eceae7; }
+
+/* Abas do formulário. Rolam na horizontal no celular em vez de espremer. */
+.dialog-tabs { flex: 0 0 auto; display: flex; gap: 6px; overflow-x: auto; padding: 11px 22px; border-bottom: 1px solid #eceae7; background: #faf9f7; scrollbar-width: none; }
+.dialog-tabs::-webkit-scrollbar { display: none; }
+.dialog-tabs button { flex: 0 0 auto; height: 30px; padding: 0 11px; border: 1px solid #e2e0dc; border-radius: 20px; background: white; color: #6d6e72; font-size: 9px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.dialog-tabs button.active { border-color: #dca7a3; background: #fff6f5; color: var(--red); }
+
+.form-section-stack { display: flex; flex-direction: column; gap: 14px; }
+.form-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+.form-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
+.form-grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; }
+
+.field-group { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.field-label { color: #55565a; font-size: 9px; font-weight: 750; }
+.field-label .req, .field-group .req { margin-left: 2px; color: var(--red); }
+.field-hint { color: #96969a; font-size: 8px; line-height: 1.5; }
+
+.dialog-input, .dialog-select, .dialog-textarea { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid #dcdad6; border-radius: 8px; outline: 0; background: #fff; color: #303135; font: inherit; font-size: 10px; transition: .15s; }
+.dialog-textarea { min-height: 76px; padding-top: 10px; resize: vertical; line-height: 1.5; }
+.dialog-input:focus, .dialog-select:focus, .dialog-textarea:focus { border-color: #cf9692; box-shadow: 0 0 0 3px rgba(214,40,40,.07); }
+.dialog-input:disabled, .dialog-select:disabled { background: #f4f2ef; color: #6c6a66; cursor: not-allowed; }
+.bold-number { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 700; }
+
+/* Bloco de precificação e o resumo de margem ao lado dele. */
+.pricing-box { padding: 15px; border: 1px solid #e4e2de; border-radius: 11px; background: #faf9f7; }
+.quick-badges-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.quick-badges-row .badge-btn { height: 24px; padding: 0 9px; border: 1px solid #e2e0dc; border-radius: 20px; background: white; color: #6d6e72; font-size: 8px; font-weight: 700; cursor: pointer; }
+.quick-badges-row .badge-btn.active { border-color: #dca7a3; background: #fff6f5; color: var(--red); }
+
+.profit-summary-card { display: grid; gap: 9px; margin-top: 13px; padding: 14px; border: 1px solid #d6e7de; border-radius: 11px; background: #f3faf6; }
+.profit-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.profit-item span { color: #6f8c80; font-size: 9px; }
+.profit-item strong { color: #2d6650; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.profit-percent { color: var(--green); }
+.profit-item .profit-negative { color: var(--red); }
+.profit-item.final-price { margin-top: 2px; padding-top: 10px; border-top: 1px solid #cfe4d9; }
+.profit-item.final-price span { color: #2d6650; font-weight: 750; }
+.profit-item.final-price strong { font-size: 15px; }
+
+/* Interruptor de "produto ativo" e "avisar estoque baixo". */
+.toggle-row-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #e3e1dd; border-radius: 10px; background: #faf9f7; }
+.toggle-row-card > div { min-width: 0; }
+.toggle-row-card strong { display: block; color: #444549; font-size: 9px; }
+.toggle-row-card small { display: block; margin-top: 3px; color: #929296; font-size: 8px; }
+.switch-toggle { position: relative; width: 38px; height: 21px; flex: 0 0 auto; display: inline-block; cursor: pointer; }
+.switch-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-toggle .slider { position: absolute; inset: 0; border-radius: 20px; background: #cccac6; transition: .18s; }
+.switch-toggle .slider::before { content: ""; position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgba(0,0,0,.18); transition: .18s; }
+.switch-toggle input:checked + .slider { background: var(--red); }
+.switch-toggle input:checked + .slider::before { transform: translateX(17px); }
+
+.empty-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 34px 18px; border: 1px dashed #dcdad6; border-radius: 11px; background: #faf9f7; color: #909094; font-size: 9px; text-align: center; }
+.plate-badge-indicator { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 20px; background: #edf5ff; color: var(--blue); font-size: 8px; font-weight: 750; }
+
+.dialog-actions-row { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 22px; border-top: 1px solid #eceae7; background: #faf9f7; }
+.dialog-actions-row > div { display: flex; align-items: center; gap: 8px; }
+.save-action-btn { white-space: nowrap; }
+
+/* Celular: grades de 2, 3 e 4 colunas viram uma só, e a janela usa a tela
+   inteira. Sem isto o formulário de produto ficava com campos de 60px. */
+@media (max-width: 720px) {
+  .dialog-backdrop { padding: 0; place-items: stretch; }
+  .dialog-window, .dialog-window.large-dialog { width: 100%; max-height: 100%; border-radius: 0; border: 0; }
+  .dialog-head, .dialog-tabs, .dialog-actions-row { padding-left: 15px; padding-right: 15px; }
+  .form-grid-2, .form-grid-3, .form-grid-4 { grid-template-columns: minmax(0, 1fr); gap: 11px; }
+  .dialog-actions-row { flex-wrap: wrap; }
+  .dialog-actions-row > div { flex: 1; }
+  .dialog-actions-row .save-action-btn { flex: 1; justify-content: center; }
+}
+
+/* ---------------------------------------------------------------------------
+   Tabelas no celular
+   ---------------------------------------------------------------------------
+   As tabelas continuam roláveis na horizontal (.table-scroll), então nada
+   ficava inacessível — mas ler a situação de uma OS exigia arrastar a tela
+   para o lado, o que ninguém faz com o celular na mão e a moto na frente.
+
+   As colunas marcadas com .col-secondary somem abaixo de 560px. O critério:
+   fica o que identifica a linha, o dinheiro, a situação e a ação; sai o
+   contexto (categoria, responsável, data de entrada, descrição). Nada é
+   perdido: abrir o registro mostra tudo.
+   --------------------------------------------------------------------------- */
+@media (max-width: 560px) {
+  .col-secondary { display: none; }
+  table th, table td { padding-left: 10px; padding-right: 10px; }
+}
