@@ -68,6 +68,32 @@ const passo = async (nome, fn) => {
   catch (e) { falhas++; console.log(`FALHA ${ordem}. ${nome}\n      ${String(e).replace(/^Error: /, "").split("\n").slice(0, 8).join("\n      ").slice(0, 700)}`);
     await foto("FALHA-" + nome.replace(/\W+/g,"-").slice(0,40)); }
 };
+/**
+ * Preenche a etapa 1 da OS: cliente e depois a moto.
+ *
+ * A etapa é dois blocos com um estado só de cada vez — procurando, encontrado
+ * ou cadastrando —, então o roteiro segue o mesmo caminho de quem atende:
+ * digita o nome, o botão de cadastrar aparece, e só então a moto libera.
+ */
+const preencherEtapa1 = async (dados) => {
+  await p.locator(".os-search input").first().fill(dados.nome);
+  await p.waitForTimeout(900);
+  await p.locator(".os-search-empty button").first().click();
+  await p.waitForTimeout(900);
+  await p.locator('.os-inline-form input[placeholder="Nome do cliente"]').fill(dados.nome);
+  await p.locator('.os-inline-form input[placeholder="(34) 99999-9999"]').fill(dados.telefone);
+  await p.waitForTimeout(500);
+  await p.locator('.os-inline-form.vehicle input[placeholder*="ABC-1234"]').fill(dados.placa);
+  await p.waitForTimeout(400);
+  const listas = p.locator(".os-inline-form.vehicle select");
+  await listas.nth(0).selectOption(dados.marca);
+  await p.waitForTimeout(600);
+  await listas.nth(1).selectOption(dados.modelo);
+  await p.waitForTimeout(600);
+  if (dados.versao) { await listas.nth(2).selectOption(dados.versao); await p.waitForTimeout(500); }
+  await p.waitForTimeout(300);
+};
+
 const ir = async (destino) => {
   const g = GRUPO[destino];
   const alvo = p.locator(g ? ".nav-subitem" : ".nav-item", { hasText: destino }).first();
@@ -167,12 +193,8 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
     await p.getByText(/Abrir OS completa/i).first().click();
     await p.waitForTimeout(1800);
   }
-  // Etapa 1 — moto e cliente. Sem placa a OS é (corretamente) recusada.
-  await p.getByPlaceholder("ABC-1234 ou ABC-1D23").fill("TES-1D23");
-  await p.getByPlaceholder("Nome do cliente").fill("Cliente de Teste");
-  await p.getByPlaceholder("(34) 99999-9999", { exact: true }).fill("34999998888");
-  await p.getByPlaceholder("Ex.: Honda CG 160 Fan").fill("Honda CG 160 Fan");
-  await p.waitForTimeout(500);
+  // Etapa 1 — cliente e depois a moto. Sem placa a OS é (corretamente) recusada.
+  await preencherEtapa1({ nome: "Cliente de Teste", telefone: "34999998888", placa: "TES-1D23", marca: "Honda", modelo: "CG 160", versao: "Fan" });
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1300);
   // Etapa 2 — origem: cliente direto já vem marcado.
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1300);
@@ -203,6 +225,7 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
   if (!os.motorcycleId) throw new Error("a OS não vinculou a motocicleta cadastrada");
   if ((await banco("clients")).length !== 1) throw new Error("o cliente novo não foi cadastrado");
   if ((await banco("motorcycles")).length !== 1) throw new Error("a moto nova não foi cadastrada");
+  if (!/Honda CG 160 Fan/.test(os.bike || "")) throw new Error(`moto gravada: "${os.bike}", esperado do catálogo`);
   if (!/OS-/.test(await txt())) throw new Error("a OS não aparece na lista da tela");
 });
 await foto("os-aberta");
@@ -537,9 +560,15 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
     await p.getByText(/Abrir OS completa/i).first().click();
     await p.waitForTimeout(1800);
   }
-  const atalhos = await p.locator(".os-full-register button").allInnerTexts();
-  if (atalhos.length !== 2) problemas.push(`${atalhos.length} atalho(s) de cadastro completo, esperado 2`);
-  await p.locator(".os-full-register button", { hasText: /cliente/i }).click();
+  // O cadastro completo fica dentro do bloco do cliente, como ação secundária:
+  // aparece quando a pessoa escolhe cadastrar, e não o tempo todo.
+  await p.locator(".os-search input").first().fill("Transportes Bom Dia");
+  await p.waitForTimeout(900);
+  await p.locator(".os-search-empty button").first().click();
+  await p.waitForTimeout(900);
+  const atalhos = await p.locator(".os-inline-actions .outline-button").allInnerTexts();
+  if (!atalhos.some((t) => /completo/i.test(t))) problemas.push(`sem atalho de cadastro completo: ${JSON.stringify(atalhos)}`);
+  await p.locator(".os-inline-actions .outline-button", { hasText: /completo/i }).first().click();
   await p.waitForTimeout(2500);
   const abas = await p.locator(".dialog-window .dialog-tabs button").allInnerTexts();
   if (!abas.some((t) => /Endereço/i.test(t))) problemas.push(`o cadastro completo não abriu: ${JSON.stringify(abas)}`);
@@ -590,11 +619,7 @@ await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no 
     await p.getByText(/Abrir OS completa/i).first().click();
     await p.waitForTimeout(1800);
   }
-  await p.getByPlaceholder("ABC-1234 ou ABC-1D23").fill("FLA-2C34");
-  await p.getByPlaceholder("Nome do cliente").fill("João Motoboy");
-  await p.getByPlaceholder("(34) 99999-9999", { exact: true }).fill("34988887777");
-  await p.getByPlaceholder("Ex.: Honda CG 160 Fan").fill("Honda Biz 125");
-  await p.waitForTimeout(400);
+  await preencherEtapa1({ nome: "João Motoboy", telefone: "34988887777", placa: "FLA-2C34", marca: "Honda", modelo: "Biz", versao: "125" });
   await p.locator(".dialog-footer .primary-button").click();
   await p.waitForTimeout(1400);
 
@@ -735,6 +760,59 @@ await passo("moto por marca, modelo e versão; código de barras gerado", async 
   await p.waitForTimeout(1200);
 
   if (problemas.length) throw new Error("moto e código de barras:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não mistura", async () => {
+  // O caminho mais usado no dia a dia, e o que estava mais confuso: a tela
+  // tinha busca por cliente, busca por placa e um formulário que aparecia
+  // sozinho, tudo junto.
+  const problemas = [];
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+
+  if ((await p.locator(".os-block").count()) !== 2) problemas.push("a etapa não tem os dois blocos");
+  if (await p.locator(".os-inline-form").count()) problemas.push("o formulário de cadastro apareceu sem ninguém pedir");
+  if (!/Escolha o cliente acima/.test(await p.locator(".os-block").nth(1).innerText()))
+    problemas.push("o bloco da moto não espera o cliente ser escolhido");
+
+  // Cliente do passo 6, procurado pelo nome.
+  await p.locator(".os-search input").first().fill("Cliente de Teste");
+  await p.waitForTimeout(1200);
+  const achado = await p.locator(".os-picked").innerText().catch(() => "");
+  if (!/Cliente de Teste/.test(achado)) problemas.push(`não achou o cliente: ${JSON.stringify(achado)}`);
+  if (!/1 moto cadastrada/.test(achado)) problemas.push(`não contou as motos dele: ${JSON.stringify(achado)}`);
+
+  // A moto dele aparece para escolher, e não um formulário em branco.
+  const motos = await p.locator(".vehicle-choice-list > button").allInnerTexts();
+  if (!motos.some((t) => /TES-1D23/.test(t))) problemas.push(`as motos do cliente não apareceram: ${JSON.stringify(motos)}`);
+  if (!motos.some((t) => /Outra moto/.test(t))) problemas.push("falta a opção de cadastrar outra moto");
+  await p.locator(".vehicle-choice-list > button", { hasText: "TES-1D23" }).first().click();
+  await p.waitForTimeout(700);
+  if ((await p.locator(".os-block.done").count()) !== 2) problemas.push("os dois blocos deviam estar marcados como prontos");
+
+  // "Outra moto" abre o cadastro rápido com as listas do catálogo.
+  await p.locator(".vehicle-choice-list > button", { hasText: "Outra moto" }).click();
+  await p.waitForTimeout(800);
+  if ((await p.locator(".os-inline-form.vehicle select").count()) < 2) problemas.push("a moto nova não veio com marca e modelo em lista");
+  await p.locator(".os-inline-form.vehicle .ghost-button").first().click();
+  await p.waitForTimeout(700);
+  if (!(await p.locator(".vehicle-choice-list").count())) problemas.push("voltar não trouxe as motos do cliente de volta");
+
+  // Trocar de cliente limpa a escolha, em vez de manter a moto do anterior.
+  await p.locator(".os-picked-change").click();
+  await p.waitForTimeout(800);
+  if (!(await p.locator(".os-search input").count())) problemas.push("trocar não voltou para a busca");
+  if (!/Escolha o cliente acima/.test(await p.locator(".os-block").nth(1).innerText()))
+    problemas.push("trocar de cliente deixou a moto do anterior escolhida");
+
+  await p.locator(".dialog-footer .ghost-button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+  if (problemas.length) throw new Error("etapa 1 da OS:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("em tela baixa, o botão de salvar continua alcançável", async () => {
