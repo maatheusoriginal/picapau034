@@ -2,6 +2,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories, isMechanicUser, orDefault, serviceOrderStatuses, statusTone, systemList } from "../src/types";
+import { NumberField } from "../src/components/NumberField";
 import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
@@ -3317,7 +3318,7 @@ export function AppDialog({
               <label className="field"><span>Valor do serviço</span><input type="number" value={quickServiceValue} onChange={(event) => setQuickServiceValue(event.target.value)}/></label>
               <label className="field"><span>Mecânico</span><select value={activeMechanics.some((mechanic) => mechanic.id === selectedQuickMechanicId) ? selectedQuickMechanicId : activeMechanics[0]?.id ?? ""} onChange={(event) => setSelectedQuickMechanicId(event.target.value)}>{activeMechanics.map((mechanic) => <option value={mechanic.id} key={mechanic.id}>{mechanic.name} · {mechanic.currentOrders} OS</option>)}</select></label>
               <label className="field field-full"><span>Produto ou peça utilizada</span><select value={quickProduct} onChange={(event) => setQuickProduct(event.target.value)}><option value="Sem produto">Sem produto</option>{products.map((p) => <option value={p.name} key={p.id}>{p.name}</option>)}</select></label>
-              {quickProduct !== "Sem produto" ? <><label className="field"><span>Quantidade</span><input type="number" min="1" value={quickQuantity} onChange={(event) => setQuickQuantity(Math.max(1, Number(event.target.value)))}/></label><label className="field"><span>Preço cobrado da peça</span><input type="number" value={quickPartValue} onChange={(event) => setQuickPartValue(event.target.value)}/></label></> : null}
+              {quickProduct !== "Sem produto" ? <><label className="field"><span>Quantidade</span><NumberField min={1} fallback={1} value={quickQuantity} onChange={setQuickQuantity}/></label><label className="field"><span>Preço cobrado da peça</span><input type="number" value={quickPartValue} onChange={(event) => setQuickPartValue(event.target.value)}/></label></> : null}
               <label className="field"><span>Cliente (opcional)</span><input placeholder="Nome ou telefone"/></label>
               <label className="field"><span>Moto / placa (opcional)</span><input placeholder="Ex.: CG 160 · ABC-1234"/></label>
               <label className="field"><span>Pagamento</span><select value={quickPayment} onChange={(event) => setQuickPayment(event.target.value)}>{activePaymentMethods.filter((method) => method.name !== "Faturamento parceiro").map((method) => <option key={method.id}>{method.name}</option>)}</select></label>
@@ -3445,8 +3446,8 @@ export function AppDialog({
                   <select value={item.productId} onChange={(event) => changePurchaseItem(index, { productId: event.target.value })}>
                     {products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
                   </select>
-                  <input type="number" min="1" value={item.quantity} onChange={(event) => changePurchaseItem(index, { quantity: Math.max(1, Number(event.target.value) || 1) })} placeholder="Qtd"/>
-                  <input type="number" min="0" step="0.01" value={item.unitCost || ""} onChange={(event) => changePurchaseItem(index, { unitCost: Math.max(0, Number(event.target.value) || 0) })} placeholder="R$ Custo"/>
+                  <NumberField min={1} fallback={1} value={item.quantity} onChange={(valor) => changePurchaseItem(index, { quantity: valor })} placeholder="Qtd"/>
+                  <NumberField min={0} step="0.01" fallback={0} blankValue={0} value={item.unitCost} onChange={(valor) => changePurchaseItem(index, { unitCost: valor })} placeholder="R$ Custo"/>
                   <strong>{formatBRL(item.quantity * item.unitCost)}</strong>
                   <button className="remove-item" onClick={() => removePurchaseItem(index)} aria-label="Remover item">×</button>
                 </div>

@@ -3,6 +3,7 @@ import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsCo
 import { defaultProductCategories, defaultSystemLists } from "../types";
 import { markupFromPrice, movementTotals, priceFromMarkup, productMovements } from "../inventory";
 import { saveFirestoreDoc } from "../../app/firebase/client";
+import { NumberField } from "./NumberField";
 
 interface ProductFormModalProps {
   isOpen: boolean;
@@ -407,12 +408,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 <div className="form-grid-3">
                   <label className="field-group">
                     <span className="field-label">Preço de Custo (R$)</span>
-                    <input
-                      type="number"
+                    <NumberField
                       step="0.01"
-                      min="0"
-                      value={cost === 0 ? "" : cost}
-                      onChange={(e) => handleCostChange(parseFloat(e.target.value) || 0)}
+                      min={0}
+                      fallback={0}
+                      blankValue={0}
+                    value={cost}
+                      onChange={(valor) => handleCostChange(valor)}
                       placeholder="0,00"
                       className="dialog-input bold-number"
                     />
@@ -420,11 +422,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
                   <div className="field-group">
                     <span className="field-label">Margem de Lucro (%)</span>
-                    <input
-                      type="number"
+                    <NumberField
                       step="1"
+                      fallback={0}
                       value={markup}
-                      onChange={(e) => handleMarkupChange(parseFloat(e.target.value) || 0)}
+                      onChange={(valor) => handleMarkupChange(valor)}
                       placeholder="45"
                       className="dialog-input bold-number"
                     />
@@ -444,13 +446,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
                   <label className="field-group">
                     <span className="field-label">Preço de Venda (R$) <b className="req">*</b></span>
-                    <input
-                      type="number"
+                    <NumberField
                       step="0.01"
-                      min="0.01"
+                      min={0.01}
                       required
-                      value={price === 0 ? "" : price}
-                      onChange={(e) => handlePriceChange(parseFloat(e.target.value) || 0)}
+                      fallback={0}
+                      blankValue={0}
+                    value={price}
+                      onChange={(valor) => handlePriceChange(valor)}
                       placeholder="0,00"
                       readOnly={priceFollowsMarkup}
                       className={`dialog-input bold-number highlight-price ${priceFollowsMarkup ? "is-derived" : ""}`}
@@ -492,31 +495,31 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               <div className="form-grid-3">
                 <label className="field-group">
                   <span className="field-label">Saldo Atual em Estoque</span>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumberField
+                    min={0}
+                    fallback={0}
                     value={stock}
-                    onChange={(e) => setStock(parseInt(e.target.value, 10) || 0)}
+                    onChange={(valor) => setStock(valor)}
                     className="dialog-input bold-number"
                   />
                 </label>
                 <label className="field-group">
                   <span className="field-label">Estoque Mínimo (Alerta)</span>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumberField
+                    min={0}
+                    fallback={0}
                     value={minimum}
-                    onChange={(e) => setMinimum(parseInt(e.target.value, 10) || 0)}
+                    onChange={(valor) => setMinimum(valor)}
                     className="dialog-input bold-number"
                   />
                 </label>
                 <label className="field-group">
                   <span className="field-label">Estoque Máximo sugerido</span>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumberField
+                    min={0}
+                    fallback={0}
                     value={maximum}
-                    onChange={(e) => setMaximum(parseInt(e.target.value, 10) || 0)}
+                    onChange={(valor) => setMaximum(valor)}
                     className="dialog-input"
                   />
                 </label>
