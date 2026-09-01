@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { SupplierConfig } from "../types";
 import { saveFirestoreDoc } from "../../app/firebase/client";
+import { NumberField } from "./NumberField";
 
 interface SupplierFormModalProps {
   isOpen: boolean;
@@ -293,11 +294,11 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
               <div className="form-grid-3">
                 <label className="field-group">
                   <span className="field-label">Prazo Médio de Entrega (dias)</span>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumberField
+                    min={0}
+                    fallback={0}
                     value={deliveryDays}
-                    onChange={(e) => setDeliveryDays(parseInt(e.target.value, 10) || 0)}
+                    onChange={(valor) => setDeliveryDays(valor)}
                     className="dialog-input bold-number"
                   />
                   <small className="field-hint">0 = Entrega no mesmo dia</small>
@@ -314,12 +315,13 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                 </label>
                 <label className="field-group">
                   <span className="field-label">Valor de Pedido Mínimo (R$)</span>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumberField
+                    min={0}
                     step="0.01"
-                    value={minimumOrder === 0 ? "" : minimumOrder}
-                    onChange={(e) => setMinimumOrder(parseFloat(e.target.value) || 0)}
+                    fallback={0}
+                    blankValue={0}
+                    value={minimumOrder}
+                    onChange={(valor) => setMinimumOrder(valor)}
                     placeholder="0,00"
                     className="dialog-input"
                   />

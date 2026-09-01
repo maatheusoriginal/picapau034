@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { ClientRecord } from "../types";
 import { saveFirestoreDoc } from "../../app/firebase/client";
+import { NumberField } from "./NumberField";
 
 interface ClientFormModalProps {
   isOpen: boolean;
@@ -272,12 +273,12 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                 <div className="alert-card" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                   <label className="field-group">
                     <span className="field-label">Limite de Crédito Autorizado (R$)</span>
-                    <input
-                      type="number"
+                    <NumberField
                       step="0.01"
-                      min="0"
+                      min={0}
+                      fallback={0}
                       value={creditLimit}
-                      onChange={(e) => setCreditLimit(parseFloat(e.target.value) || 0)}
+                      onChange={(valor) => setCreditLimit(valor)}
                       placeholder="500,00"
                       className="dialog-input bold-number"
                     />

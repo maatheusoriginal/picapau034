@@ -419,6 +419,67 @@ await passo("Configurações: avisar em português e gravar o que foi mudado", a
   if (problemas.length) throw new Error("Configurações:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("campo de número deixa apagar o valor", async () => {
+  // O defeito: `onChange={(e) => setValor(parseFloat(e.target.value) || 0)}`.
+  // Apagar fazia o campo voltar para 0 na mesma tecla, e o número digitado em
+  // seguida entrava depois dele — "020" no lugar de 20.
+  const problemas = [];
+  await p.locator(".nav-item", { hasText: "Configurações" }).first().click();
+  await p.waitForTimeout(2200);
+  await p.locator(".settings-tab-button", { hasText: "Serviços" }).first().click();
+  await p.waitForTimeout(1300);
+  await p.locator("button").filter({ hasText: /Novo Serviço Rápido/ }).first().click();
+  await p.waitForTimeout(1800);
+
+  const preco = p.locator(".dialog input[type=number]").first();
+  await preco.click();
+  await p.keyboard.press("Control+a");
+  await p.keyboard.press("Backspace");
+  await p.waitForTimeout(250);
+  const vazio = await preco.inputValue();
+  if (vazio !== "") problemas.push(`apagar deixou "${vazio}" no campo, esperado vazio`);
+
+  await p.keyboard.type("20");
+  await p.waitForTimeout(350);
+  const digitado = await preco.inputValue();
+  if (digitado !== "20") problemas.push(`digitar 20 deu "${digitado}"`);
+
+  // Sair do campo vazio cai no padrão declarado, e não num zero silencioso
+  // onde a tela esperava outra coisa.
+  await preco.click();
+  await p.keyboard.press("Control+a");
+  await p.keyboard.press("Backspace");
+  await p.locator(".dialog input[type=text]").first().click();
+  await p.waitForTimeout(500);
+  const aoSair = await preco.inputValue();
+  if (aoSair !== "0") problemas.push(`sair vazio deixou "${aoSair}", esperado o padrão do campo`);
+  await p.locator(".dialog button", { hasText: /^Cancelar$/ }).first().click();
+  await p.waitForTimeout(1000);
+
+  // No cadastro de peça os campos conversam entre si: mudar o custo recalcula
+  // o preço enquanto se digita. O campo novo não pode quebrar isso.
+  await ir("Produtos e estoque");
+  await p.getByRole("button", { name: /Adicionar produto/i }).first().click();
+  await p.waitForTimeout(2200);
+  await p.locator(".dialog-tabs button", { hasText: /Preços/ }).click();
+  await p.waitForTimeout(700);
+  const custo = p.locator(".dialog-window input[type=number]").first();
+  await custo.click();
+  await p.keyboard.type("25");
+  await p.waitForTimeout(400);
+  await p.keyboard.press("Control+a");
+  await p.keyboard.press("Backspace");
+  await p.keyboard.type("30");
+  await p.waitForTimeout(700);
+  const precos = await p.locator(".dialog-window input[type=number]").evaluateAll((els) => els.map((e) => e.value));
+  if (precos[0] !== "30") problemas.push(`custo ficou "${precos[0]}", esperado 30`);
+  if (precos[2] !== "48") problemas.push(`preço ficou "${precos[2]}", esperado 48 (custo 30 + margem 60%)`);
+  await p.locator(".dialog-window button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1000);
+
+  if (problemas.length) throw new Error("campo de número:\n      - " + problemas.join("\n      - "));
+});
+
 await passo("em tela baixa, o botão de salvar continua alcançável", async () => {
   // O <form> dos modais de Configurações fica entre o .dialog e o rodapé. Sem
   // ser uma coluna flexível, o corpo crescia com o conteúdo, estourava o

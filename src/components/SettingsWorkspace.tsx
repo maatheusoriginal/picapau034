@@ -11,6 +11,7 @@ import type {
 } from "../types";
 import { categoryGroups, defaultPaymentMethods, defaultProductCategories, defaultSystemLists, orDefault, systemList, systemListLabels } from "../types";
 import { saveFirestoreDoc, deleteFirestoreDoc, observeFirestoreDoc } from "../../app/firebase/client";
+import { NumberField } from "./NumberField";
 
 interface SettingsWorkspaceProps {
   quickServices: QuickServiceConfig[];
@@ -711,19 +712,19 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
               </label>
               <label className="settings-field">
                 <span className="settings-field-label">Próximo Número</span>
-                <input
-                  type="number"
+                <NumberField
+                  fallback={1001}
                   value={generalSettings.nextOsNumber}
-                  onChange={(e) => setGeneralSettings({ ...generalSettings, nextOsNumber: parseInt(e.target.value, 10) || 1001 })}
+                  onChange={(valor) => setGeneralSettings({ ...generalSettings, nextOsNumber: valor })}
                   className="settings-input bold-val"
                 />
               </label>
               <label className="settings-field">
                 <span className="settings-field-label">Garantia Padrão (Dias)</span>
-                <input
-                  type="number"
+                <NumberField
+                  fallback={90}
                   value={generalSettings.defaultWarrantyDays}
-                  onChange={(e) => setGeneralSettings({ ...generalSettings, defaultWarrantyDays: parseInt(e.target.value, 10) || 90 })}
+                  onChange={(valor) => setGeneralSettings({ ...generalSettings, defaultWarrantyDays: valor })}
                   className="settings-input"
                 />
               </label>
@@ -1104,11 +1105,11 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
             <div className="settings-grid-3">
               <label className="settings-field">
                 <span className="settings-field-label">Estoque Mínimo Padrão</span>
-                <input
-                  type="number"
-                  min="0"
+                <NumberField
+                  min={0}
+                  fallback={2}
                   value={generalSettings.defaultMinStock}
-                  onChange={(e) => setGeneralSettings({ ...generalSettings, defaultMinStock: parseInt(e.target.value, 10) || 2 })}
+                  onChange={(valor) => setGeneralSettings({ ...generalSettings, defaultMinStock: valor })}
                   className="settings-input bold-val"
                 />
                 <span className="settings-hint">Quantidade mínima para disparo de alerta de reposição</span>
@@ -1116,11 +1117,11 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 
               <label className="settings-field">
                 <span className="settings-field-label">Margem de Lucro Sugerida (%)</span>
-                <input
-                  type="number"
-                  min="0"
+                <NumberField
+                  min={0}
+                  fallback={45}
                   value={generalSettings.suggestedMarkup}
-                  onChange={(e) => setGeneralSettings({ ...generalSettings, suggestedMarkup: parseInt(e.target.value, 10) || 45 })}
+                  onChange={(valor) => setGeneralSettings({ ...generalSettings, suggestedMarkup: valor })}
                   className="settings-input bold-val"
                 />
                 <span className="settings-hint">Aplicada automaticamente sobre o custo de novos produtos</span>
@@ -1332,23 +1333,23 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                 <div className="settings-grid-2">
                   <label className="settings-field">
                     <span className="settings-field-label">Preço da Mão de Obra (R$) <b className="req">*</b></span>
-                    <input
-                      type="number"
+                    <NumberField
                       step="0.01"
-                      min="0"
+                      min={0}
                       required
+                      fallback={0}
                       value={qsLabor}
-                      onChange={(e) => setQsLabor(parseFloat(e.target.value) || 0)}
+                      onChange={(valor) => setQsLabor(valor)}
                       className="settings-input bold-val"
                     />
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Duração Estimada (Minutos)</span>
-                    <input
-                      type="number"
-                      min="1"
+                    <NumberField
+                      min={1}
+                      fallback={15}
                       value={qsDuration}
-                      onChange={(e) => setQsDuration(parseInt(e.target.value, 10) || 15)}
+                      onChange={(valor) => setQsDuration(valor)}
                       className="settings-input"
                     />
                   </label>
@@ -1590,23 +1591,23 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                 <div className="settings-grid-2">
                   <label className="settings-field">
                     <span className="settings-field-label">Taxa Débito (%)</span>
-                    <input
-                      type="number"
+                    <NumberField
                       step="0.01"
-                      min="0"
+                      min={0}
+                      fallback={0}
                       value={machDebit}
-                      onChange={(e) => setMachDebit(parseFloat(e.target.value) || 0)}
+                      onChange={(valor) => setMachDebit(valor)}
                       className="settings-input bold-val"
                     />
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Taxa Crédito 1x (%)</span>
-                    <input
-                      type="number"
+                    <NumberField
                       step="0.01"
-                      min="0"
+                      min={0}
+                      fallback={0}
                       value={machCred1}
-                      onChange={(e) => setMachCred1(parseFloat(e.target.value) || 0)}
+                      onChange={(valor) => setMachCred1(valor)}
                       className="settings-input bold-val"
                     />
                   </label>
@@ -1615,23 +1616,23 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                 <div className="settings-grid-2">
                   <label className="settings-field">
                     <span className="settings-field-label">Crédito 2x a 6x (%)</span>
-                    <input
-                      type="number"
+                    <NumberField
                       step="0.01"
-                      min="0"
+                      min={0}
+                      fallback={0}
                       value={machCred2}
-                      onChange={(e) => setMachCred2(parseFloat(e.target.value) || 0)}
+                      onChange={(valor) => setMachCred2(valor)}
                       className="settings-input"
                     />
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Crédito 7x a 12x (%)</span>
-                    <input
-                      type="number"
+                    <NumberField
                       step="0.01"
-                      min="0"
+                      min={0}
+                      fallback={0}
                       value={machCred7}
-                      onChange={(e) => setMachCred7(parseFloat(e.target.value) || 0)}
+                      onChange={(valor) => setMachCred7(valor)}
                       className="settings-input"
                     />
                   </label>
@@ -1639,11 +1640,11 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 
                 <label className="settings-field">
                   <span className="settings-field-label">Prazo de Liquidação / Repasse (Dias)</span>
-                  <input
-                    type="number"
-                    min="0"
+                  <NumberField
+                    min={0}
+                    fallback={1}
                     value={machDays}
-                    onChange={(e) => setMachDays(parseInt(e.target.value, 10) || 1)}
+                    onChange={(valor) => setMachDays(valor)}
                     className="settings-input"
                   />
                 </label>
@@ -1718,12 +1719,12 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Desconto em Mão de Obra (%)</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
+                    <NumberField
+                      min={0}
+                      max={100}
+                      fallback={0}
                       value={partDiscount}
-                      onChange={(e) => setPartDiscount(parseFloat(e.target.value) || 0)}
+                      onChange={(valor) => setPartDiscount(valor)}
                       className="settings-input bold-val"
                     />
                   </label>

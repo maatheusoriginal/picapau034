@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { UserConfig } from "../types";
 import { saveFirestoreDoc } from "../../app/firebase/client";
+import { NumberField } from "./NumberField";
 
 interface EmployeeFormModalProps {
   isOpen: boolean;
@@ -280,12 +281,13 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
                 <label className="field-group">
                   <span className="field-label">Salário Base (R$)</span>
-                  <input
-                    type="number"
+                  <NumberField
                     step="0.01"
-                    min="0"
-                    value={baseSalary === 0 ? "" : baseSalary}
-                    onChange={(e) => setBaseSalary(parseFloat(e.target.value) || 0)}
+                    min={0}
+                    fallback={0}
+                    blankValue={0}
+                    value={baseSalary}
+                    onChange={(valor) => setBaseSalary(valor)}
                     placeholder="0,00"
                     className="dialog-input bold-number"
                   />
@@ -293,12 +295,12 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
                 <label className="field-group">
                   <span className="field-label">Dia de Pagamento</span>
-                  <input
-                    type="number"
-                    min="1"
-                    max="31"
+                  <NumberField
+                    min={1}
+                    max={31}
+                    fallback={5}
                     value={paymentDay}
-                    onChange={(e) => setPaymentDay(parseInt(e.target.value, 10) || 5)}
+                    onChange={(valor) => setPaymentDay(valor)}
                     className="dialog-input"
                   />
                   <small className="field-hint">Ex: Dia 5 de cada mês</small>
@@ -308,13 +310,13 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               <div className="form-grid-2">
                 <label className="field-group">
                   <span className="field-label">Comissão em Serviços (%)</span>
-                  <input
-                    type="number"
+                  <NumberField
                     step="0.5"
-                    min="0"
-                    max="100"
+                    min={0}
+                    max={100}
+                    fallback={0}
                     value={serviceCommission}
-                    onChange={(e) => setServiceCommission(parseFloat(e.target.value) || 0)}
+                    onChange={(valor) => setServiceCommission(valor)}
                     className="dialog-input bold-number"
                   />
                   <small className="field-hint">Percentual sobre a mão de obra das OS executadas</small>
@@ -322,13 +324,13 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
                 <label className="field-group">
                   <span className="field-label">Comissão em Peças / Vendas (%)</span>
-                  <input
-                    type="number"
+                  <NumberField
                     step="0.5"
-                    min="0"
-                    max="100"
+                    min={0}
+                    max={100}
+                    fallback={0}
                     value={productCommission}
-                    onChange={(e) => setProductCommission(parseFloat(e.target.value) || 0)}
+                    onChange={(valor) => setProductCommission(valor)}
                     className="dialog-input"
                   />
                   <small className="field-hint">Percentual sobre peças vendidas no balcão ou OS</small>

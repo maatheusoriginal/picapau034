@@ -45,6 +45,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:backup` | Confere o que a cópia de segurança leva e quando ela avisa |
 | `npm run check:hooks` | Confere se nenhum componente declara hook depois de um `return` antecipado |
 | `npm run check:firestore-data` | Confere que nenhum campo vazio (`undefined`) escapa para o Firestore |
+| `npm run check:number-input` | Confere que o campo de número deixa apagar o que está escrito |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -762,6 +763,41 @@ onde o próximo campo opcional voltaria a escapar. Campo ausente é diferente de
 campo nulo: com `merge: true`, omitir preserva o que já estava gravado, que é o
 comportamento certo para "não informado". `npm run check:firestore-data` prova
 que zero, texto vazio, `false` e `null` continuam gravando — só `undefined` sai.
+
+## Campos de número
+
+Todo campo numérico do sistema era controlado direto por um número:
+
+```tsx
+onChange={(e) => setValor(parseFloat(e.target.value) || 0)}
+```
+
+Apagar o conteúdo faz `parseFloat("")` virar `NaN`, o `|| 0` devolve zero **na
+mesma tecla**, e o campo volta a mostrar `0` antes de a pessoa terminar de
+digitar. O que ela digita em seguida entra depois do zero — `020` no lugar de
+`20` — e a única saída é selecionar tudo e substituir. Eram 25 campos assim, em
+sete telas: preço da mão de obra, taxas da maquininha, salário, comissão,
+estoque mínimo, margem, quantidade e custo da entrada, limite de crédito.
+
+`src/components/NumberField.tsx` guarda o **texto** como estado próprio, separado
+do valor que vale. O campo pode ficar vazio ou com um número pela metade (`1,`,
+`-`) enquanto se digita; o valor continua subindo a cada tecla, para as telas
+que reagem na hora — no cadastro de peça, mudar o custo recalcula o preço —; e
+só ao sair do campo o texto é normalizado. Campo deixado vazio cai no padrão
+declarado (`fallback`), que é o mesmo número do antigo `|| N`, e não num zero
+silencioso.
+
+`blankValue` cobre os formulários que já mostravam vazio no lugar do zero para
+o placeholder `0,00` continuar visível — faziam isso à mão com
+`value={custo === 0 ? "" : custo}`, o que resolvia só a aparência.
+
+As regras ficam em `src/number-input.ts` e `npm run check:number-input` confere
+as 31: que vazio, `1,` e `-` são estados válidos no meio da digitação; que
+`20` aparece como `20` e nunca `020`; que sair vazio cai no padrão mas sair com
+`0` digitado mantém o zero; e que `min`/`max` continuam valendo.
+
+Os campos que guardam texto puro (valor do gasto, valor da conta, mão de obra
+avulsa) nunca tiveram o defeito e foram deixados como estavam.
 
 ## Responsividade
 
