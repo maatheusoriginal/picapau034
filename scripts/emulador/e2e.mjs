@@ -357,6 +357,68 @@ await passo("abrir cada aba do menu sem quebrar a tela", async () => {
   if (quebradas.length) throw new Error("abas com falha: " + quebradas.join(", "));
 });
 
+await passo("Configurações: avisar em português e gravar o que foi mudado", async () => {
+  await p.locator(".nav-item", { hasText: "Configurações" }).first().click();
+  await p.waitForTimeout(2500);
+  const problemas = [];
+
+  // Nenhuma aba pode ficar cortada: a barra rolava e sobrava um botão com só
+  // o contador ("0") aparecendo, sem nome nenhum.
+  const rotulos = await p.locator(".settings-tab-button").allInnerTexts();
+  if (rotulos.length !== 8) problemas.push(`${rotulos.length} abas, esperado 8`);
+  if (!rotulos.every((t) => /[A-Za-zÀ-ú]/.test(t))) problemas.push("aba sem nome visível: " + JSON.stringify(rotulos));
+  const foraDaTela = await p.locator(".settings-tab-button").evaluateAll((els) =>
+    els.filter((e) => { const b = e.getBoundingClientRect(); return b.right > window.innerWidth + 1 || b.x < -1; }).map((e) => e.innerText.replace(/\n/g, " ")));
+  if (foraDaTela.length) problemas.push("aba fora da tela: " + foraDaTela.join(", "));
+
+  // Salvar sem o obrigatório precisa dizer o que falta, em português, e ficar
+  // na tela. Era o aviso do navegador, em inglês, que sumia sozinho — e por
+  // isso parecia que a aba simplesmente não salvava.
+  await p.locator(".settings-tab-button", { hasText: "Serviços" }).first().click();
+  await p.waitForTimeout(1400);
+  await p.locator("button").filter({ hasText: /Novo Serviço Rápido/ }).first().click();
+  await p.waitForTimeout(1800);
+  const aviso = await p.locator(".settings-modal-error").innerText().catch(() => "");
+  await p.locator("button").filter({ hasText: /Salvar Serviço/ }).first().click();
+  await p.waitForTimeout(1200);
+  const depois = await p.locator(".settings-modal-error").innerText().catch(() => "");
+  if (aviso) problemas.push("o aviso já aparecia antes de tentar salvar");
+  if (!/nome ao serviço/i.test(depois)) problemas.push(`aviso do modal: ${JSON.stringify(depois)}`);
+
+  // A categoria do serviço saiu do texto livre para a lista cadastrada.
+  const categorias = await p.locator(".dialog select").first().locator("option").allInnerTexts();
+  if (categorias.length < 4) problemas.push(`categoria com ${categorias.length} opção(ões)`);
+
+  await p.locator(".dialog input[type=text]").first().fill("Troca de óleo 1L");
+  await p.waitForTimeout(400);
+  await p.locator("button").filter({ hasText: /Salvar Serviço/ }).first().click();
+  await p.waitForTimeout(3500);
+  if ((await banco("quickServices")).length !== 1) problemas.push("o serviço rápido não gravou");
+
+  // Formas de pagamento não tinham tela nenhuma; e gravar a primeira precisa
+  // levar junto as seis padrão, senão elas somem da hora de receber.
+  await p.locator(".settings-tab-button", { hasText: "Pagamentos" }).first().click();
+  await p.waitForTimeout(1400);
+  const formas = await p.locator(".settings-card").first().locator("tbody tr").count();
+  if (formas < 6) problemas.push(`${formas} forma(s) de pagamento listada(s), esperado 6`);
+  await p.locator("button").filter({ hasText: /Nova Forma de Pagamento/ }).first().click();
+  await p.waitForTimeout(1800);
+  await p.locator(".dialog input[type=text]").first().fill("Vale-combustível");
+  await p.waitForTimeout(400);
+  await p.locator("button").filter({ hasText: /Salvar Forma/ }).first().click();
+  await p.waitForTimeout(3500);
+  const gravadas = (await banco("paymentMethods")).length;
+  if (gravadas !== 7) problemas.push(`${gravadas} forma(s) no banco, esperado 7 (as 6 padrão + a nova)`);
+
+  // O modelo da impressora era texto livre.
+  await p.locator(".settings-tab-button", { hasText: "Impressão" }).first().click();
+  await p.waitForTimeout(1400);
+  const impressoras = await p.locator(".settings-card select").first().locator("option").count();
+  if (impressoras < 8) problemas.push(`lista de impressoras com ${impressoras} opção(ões)`);
+
+  if (problemas.length) throw new Error("Configurações:\n      - " + problemas.join("\n      - "));
+});
+
 await passo("abrir cada formulário de cadastro sem quebrar a tela", async () => {
   const formularios = [
     ["Produtos e estoque", /Adicionar produto/i],

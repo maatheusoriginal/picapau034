@@ -9,7 +9,7 @@ import type {
   SettingsConfig,
   SystemLists,
 } from "../types";
-import { categoryGroups, defaultSystemLists, systemList, systemListLabels } from "../types";
+import { categoryGroups, defaultPaymentMethods, defaultProductCategories, defaultSystemLists, orDefault, systemList, systemListLabels } from "../types";
 import { saveFirestoreDoc, deleteFirestoreDoc, observeFirestoreDoc } from "../../app/firebase/client";
 
 interface SettingsWorkspaceProps {
@@ -46,6 +46,30 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [isSavingGeneral, setIsSavingGeneral] = useState(false);
+
+  // O que falta preencher, dito em português e dentro do próprio formulário.
+  //
+  // Antes a validação era a do navegador (`required`), que avisa no idioma do
+  // navegador — "Please fill out this field." numa oficina brasileira —, some
+  // sozinha em poucos segundos e não fica registrada em lugar nenhum. Quem
+  // esquecia o nome do serviço clicava em "Salvar", via a tela não fazer nada e
+  // concluía, com razão, que a aba não salvava.
+  const [erroModal, setErroModal] = useState("");
+
+  // Modelos térmicos comuns nas oficinas brasileiras.
+  const impressorasConhecidas = [
+    "Elgin i9 / Não Fiscal", "Elgin i7", "Bematech MP-4200 TH", "Bematech MP-100S TH",
+    "Epson TM-T20X", "Daruma DR800", "Tanca TP-650", "Sem impressora térmica",
+  ];
+
+  // A mesma lista que o cadastro de peça e a tela de estoque enxergam.
+  const categoriasDeProduto = orDefault(
+    categories.filter((item) => item.active !== false && item.group === "Produtos"),
+    defaultProductCategories,
+  ).map((item) => item.name);
+  const avisoModal = erroModal
+    ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erroModal}</span></div>
+    : null;
 
   // General Settings State
   const [generalSettings, setGeneralSettings] = useState<SettingsConfig>({
@@ -180,15 +204,15 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
       setQsRequired(true);
       setQsActive(true);
     }
+    setErroModal("");
     setIsQuickServiceModalOpen(true);
   };
 
   const handleSaveQuickService = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!qsName.trim()) {
-      notify("Informe o nome do serviço rápido.");
-      return;
-    }
+    if (!qsName.trim()) return setErroModal("Dê um nome ao serviço rápido — é por ele que o balcão encontra o atendimento.");
+    if (!(Number(qsLabor) > 0)) return setErroModal("Informe o preço da mão de obra. Sem valor, o balcão não tem o que cobrar.");
+    setErroModal("");
 
     const qsId = editingQuickService?.id || `QS-${Date.now()}`;
     const newService: QuickServiceConfig = {
@@ -211,7 +235,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
       setIsQuickServiceModalOpen(false);
     } catch (err: unknown) {
       console.error(err);
-      notify("Erro ao salvar serviço rápido.");
+      setErroModal("Não foi possível salvar. Verifique a conexão e tente de novo.");
     }
   };
 
@@ -246,15 +270,16 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
       setCatGroup("Produtos");
       setCatActive(true);
     }
+    setErroModal("");
     setIsCategoryModalOpen(true);
   };
 
   const handleSaveCategory = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!catName.trim()) {
-      notify("Informe o nome da categoria.");
-      return;
-    }
+    if (!catName.trim()) return setErroModal("Dê um nome à categoria.");
+    if (categories.some((item) => item.id !== editingCategory?.id && item.name.trim().toLowerCase() === catName.trim().toLowerCase() && item.group === catGroup))
+      return setErroModal(`Já existe uma categoria "${catName.trim()}" em ${catGroup}.`);
+    setErroModal("");
 
     const catId = editingCategory?.id || `CAT-${Date.now()}`;
     const newCat: CategoryConfig = {
@@ -274,7 +299,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
       setIsCategoryModalOpen(false);
     } catch (err: unknown) {
       console.error(err);
-      notify("Erro ao salvar categoria.");
+      setErroModal("Não foi possível salvar. Verifique a conexão e tente de novo.");
     }
   };
 
@@ -287,6 +312,83 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
     } catch (err: unknown) {
       console.error(err);
       notify("Erro ao excluir categoria.");
+    }
+  };
+
+  // Formas de pagamento. Existiam na coleção paymentMethods e no diálogo de
+  // recebimento, mas não havia nenhuma tela para cadastrar ou desligar uma —
+  // a oficina não conseguia, por exemplo, parar de aceitar nota a prazo.
+  const [editingMethod, setEditingMethod] = useState<PaymentMethodConfig | null>(null);
+  const [isMethodModalOpen, setIsMethodModalOpen] = useState(false);
+  const [methName, setMethName] = useState("");
+  const [methUsesMachine, setMethUsesMachine] = useState(false);
+  const [methActive, setMethActive] = useState(true);
+
+  // Instalação nova nasce sem nenhuma forma cadastrada: mostrar a lista vazia
+  // faria parecer que a oficina não aceita nada. Estes são os mesmos padrões
+  // que a tela de recebimento já usa.
+  const formasDePagamento = orDefault(paymentMethods, defaultPaymentMethods);
+
+  const openMethodModal = (method?: PaymentMethodConfig) => {
+    setErroModal("");
+    if (method) {
+      setEditingMethod(method);
+      setMethName(method.name);
+      setMethUsesMachine(method.usesMachine === true);
+      setMethActive(method.active !== false);
+    } else {
+      setEditingMethod(null);
+      setMethName("");
+      setMethUsesMachine(false);
+      setMethActive(true);
+    }
+    setIsMethodModalOpen(true);
+  };
+
+  const handleSaveMethod = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!methName.trim()) return setErroModal("Dê um nome à forma de pagamento.");
+    if (formasDePagamento.some((item) => item.id !== editingMethod?.id && item.name.trim().toLowerCase() === methName.trim().toLowerCase()))
+      return setErroModal(`Já existe uma forma de pagamento chamada "${methName.trim()}".`);
+    setErroModal("");
+    const methId = editingMethod?.id || `PM-${Date.now()}`;
+    const novaForma: PaymentMethodConfig = {
+      id: methId,
+      name: methName.trim(),
+      usesMachine: methUsesMachine,
+      active: methActive,
+    };
+    try {
+      // A primeira gravação precisa materializar os padrões TAMBÉM no banco.
+      // Gravar só a forma nova deixaria a coleção com um documento só, e aí
+      // Dinheiro, PIX, Débito, Crédito, Nota a prazo e Troca — que a tela de
+      // venda mostrava por padrão enquanto a coleção estava vazia —
+      // desapareceriam da hora de receber.
+      const base = paymentMethods.length ? paymentMethods : defaultPaymentMethods;
+      const lista = [...base.filter((item) => item.id !== methId), novaForma];
+      await Promise.all(lista.map((item) => saveFirestoreDoc("paymentMethods", item.id, item)));
+      setPaymentMethods(lista);
+      notify(editingMethod ? "Forma de pagamento atualizada!" : "Forma de pagamento cadastrada!");
+      setIsMethodModalOpen(false);
+    } catch (err: unknown) {
+      console.error(err);
+      setErroModal("Não foi possível salvar. Verifique a conexão e tente de novo.");
+    }
+  };
+
+  const handleDeleteMethod = async (id: string) => {
+    if (!confirm("Remover esta forma de pagamento? Ela deixa de aparecer na hora de receber.")) return;
+    try {
+      // Mesmo motivo do salvar: apagar uma das padrão enquanto a coleção está
+      // vazia precisa gravar as outras, senão some tudo em vez de uma.
+      const restantes = (paymentMethods.length ? paymentMethods : defaultPaymentMethods).filter((item) => item.id !== id);
+      if (!paymentMethods.length) await Promise.all(restantes.map((item) => saveFirestoreDoc("paymentMethods", item.id, item)));
+      await deleteFirestoreDoc("paymentMethods", id);
+      setPaymentMethods(restantes);
+      notify("Forma de pagamento removida.");
+    } catch (err: unknown) {
+      console.error(err);
+      notify("Erro ao remover a forma de pagamento.");
     }
   };
 
@@ -324,15 +426,14 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
       setMachPrimary(false);
       setMachActive(true);
     }
+    setErroModal("");
     setIsMachineModalOpen(true);
   };
 
   const handleSaveMachine = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!machName.trim()) {
-      notify("Informe o nome ou operadora da maquininha.");
-      return;
-    }
+    if (!machName.trim()) return setErroModal("Dê um nome à maquininha — é assim que ela aparece na hora de receber.");
+    setErroModal("");
 
     const machId = editingMachine?.id || `MACH-${Date.now()}`;
     const newMach: PaymentMachineConfig = {
@@ -357,7 +458,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
       setIsMachineModalOpen(false);
     } catch (err: unknown) {
       console.error(err);
-      notify("Erro ao salvar maquininha.");
+      setErroModal("Não foi possível salvar. Verifique a conexão e tente de novo.");
     }
   };
 
@@ -398,15 +499,14 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
       setPartCycle("Quinzenal (Dias 15 e 30)");
       setPartActive(true);
     }
+    setErroModal("");
     setIsPartnerModalOpen(true);
   };
 
   const handleSavePartner = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!partName.trim()) {
-      notify("Informe o nome da empresa ou frota parceira.");
-      return;
-    }
+    if (!partName.trim()) return setErroModal("Informe o nome da empresa ou frota parceira.");
+    setErroModal("");
 
     const partId = editingPartner?.id || `PART-${Date.now()}`;
     const newPartner: PartnerConfig = {
@@ -428,7 +528,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
       setIsPartnerModalOpen(false);
     } catch (err: unknown) {
       console.error(err);
-      notify("Erro ao salvar parceiro.");
+      setErroModal("Não foi possível salvar. Verifique a conexão e tente de novo.");
     }
   };
 
@@ -483,7 +583,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
           className={`settings-tab-button ${activeTab === "payments" ? "active" : ""}`}
           onClick={() => setActiveTab("payments")}
         >
-          Pagamentos & Taxas <b>{paymentMachines.length}</b>
+          Pagamentos & Taxas <b>{formasDePagamento.length}</b>
         </button>
         <button
           type="button"
@@ -517,7 +617,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 
       {/* TAB 1: GERAL & OS */}
       {activeTab === "general" && (
-        <form onSubmit={handleSaveGeneral} className="settings-card">
+        <form noValidate onSubmit={handleSaveGeneral} className="settings-card">
           <div className="settings-card-header">
             <div>
               <h2>Identificação da Oficina & Parâmetros de OS</h2>
@@ -812,6 +912,56 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 
       {/* TAB 4: PAGAMENTOS E TAXAS */}
       {activeTab === "payments" && (
+        <>
+        <div className="settings-card">
+          <div className="settings-card-header">
+            <div>
+              <h2>Formas de Pagamento Aceitas</h2>
+              <p>O que aparece na hora de receber, no balcão e no fechamento da OS</p>
+            </div>
+            <button type="button" className="primary-button" onClick={() => openMethodModal()}>
+              + Nova Forma de Pagamento
+            </button>
+          </div>
+
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Forma de Pagamento</th>
+                  <th>Passa na maquininha</th>
+                  <th>Situação</th>
+                  <th style={{ textAlign: "right" }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {formasDePagamento.map((method) => (
+                  <tr key={method.id}>
+                    <td><strong>{method.name}</strong></td>
+                    <td>{method.usesMachine ? "Sim — desconta a taxa da operadora" : "Não"}</td>
+                    <td>
+                      {method.active === false
+                        ? <span className="status-badge">Desligada</span>
+                        : <span className="status-badge green">Aceita</span>}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      <div style={{ display: "inline-flex", gap: "6px" }}>
+                        <button type="button" className="table-action-btn" onClick={() => openMethodModal(method)}>Editar</button>
+                        <button type="button" className="table-action-btn delete" onClick={() => handleDeleteMethod(method.id)}>Excluir</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {paymentMethods.length === 0 && (
+            <p className="settings-hint" style={{ padding: "0 22px 18px" }}>
+              Estas são as formas que já vêm prontas. Editar ou cadastrar qualquer uma grava a lista da sua oficina.
+            </p>
+          )}
+        </div>
+
         <div className="settings-card">
           <div className="settings-card-header">
             <div>
@@ -873,6 +1023,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
             </table>
           </div>
         </div>
+        </>
       )}
 
       {/* TAB 5: PARCEIROS E FROTAS */}
@@ -938,7 +1089,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 
       {/* TAB 6: ESTOQUE E REPOSIÇÃO */}
       {activeTab === "stock" && (
-        <form onSubmit={handleSaveGeneral} className="settings-card">
+        <form noValidate onSubmit={handleSaveGeneral} className="settings-card">
           <div className="settings-card-header">
             <div>
               <h2>Regras de Estoque e Margem Padrão</h2>
@@ -1063,7 +1214,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 
       {/* TAB 7: IMPRESSÃO & WHATSAPP */}
       {activeTab === "print" && (
-        <form onSubmit={handleSaveGeneral} className="settings-card">
+        <form noValidate onSubmit={handleSaveGeneral} className="settings-card">
           <div className="settings-card-header">
             <div>
               <h2>Impressão de Comprovantes & Mensagens no WhatsApp</h2>
@@ -1078,13 +1229,32 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
             <div className="settings-grid-3">
               <label className="settings-field">
                 <span className="settings-field-label">Modelo da Impressora Térmica</span>
-                <input
-                  type="text"
-                  value={generalSettings.thermalPrinter}
-                  onChange={(e) => setGeneralSettings({ ...generalSettings, thermalPrinter: e.target.value })}
-                  className="settings-input"
-                  placeholder="Ex: Elgin i9 / Bematech MP-4200"
-                />
+                {/*
+                  Era um campo de texto livre, e digitar o modelo não muda nada:
+                  quem imprime é o navegador, pelo driver instalado no
+                  computador. O campo serve para a oficina saber qual aparelho
+                  está no balcão — então vira uma lista dos modelos comuns no
+                  Brasil, com "Outra" para quem tiver algo fora da lista.
+                */}
+                <select
+                  value={impressorasConhecidas.includes(generalSettings.thermalPrinter ?? "") ? generalSettings.thermalPrinter : "Outra"}
+                  onChange={(e) => setGeneralSettings({ ...generalSettings, thermalPrinter: e.target.value === "Outra" ? "" : e.target.value })}
+                  className="settings-select"
+                >
+                  {impressorasConhecidas.map((modelo) => <option key={modelo} value={modelo}>{modelo}</option>)}
+                  <option value="Outra">Outra (digitar abaixo)</option>
+                </select>
+                {!impressorasConhecidas.includes(generalSettings.thermalPrinter ?? "") && (
+                  <input
+                    type="text"
+                    value={generalSettings.thermalPrinter ?? ""}
+                    onChange={(e) => setGeneralSettings({ ...generalSettings, thermalPrinter: e.target.value })}
+                    className="settings-input"
+                    placeholder="Digite o modelo da sua impressora"
+                    style={{ marginTop: "8px" }}
+                  />
+                )}
+                <span className="settings-hint">Serve de referência para o balcão. Quem imprime é o driver instalado no computador.</span>
               </label>
 
               <label className="settings-field">
@@ -1143,8 +1313,9 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
               </div>
               <button aria-label="Fechar" onClick={() => setIsQuickServiceModalOpen(false)}>×</button>
             </header>
-            <form onSubmit={handleSaveQuickService}>
+            <form noValidate onSubmit={handleSaveQuickService}>
               <div className="dialog-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {avisoModal}
                 <label className="settings-field">
                   <span className="settings-field-label">Nome do Serviço <b className="req">*</b></span>
                   <input
@@ -1185,13 +1356,26 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 
                 <label className="settings-field">
                   <span className="settings-field-label">Linha / Categoria de Peça Requerida</span>
-                  <input
-                    type="text"
-                    value={qsCategory}
+                  {/*
+                    Era um campo de texto livre. Digitar "Lubrificantes" onde a
+                    categoria cadastrada é "Lubrificantes e Fluidos" fazia o
+                    balcão não encontrar peça nenhuma para o serviço — e não
+                    havia nada na tela explicando o porquê. Agora só sai daqui
+                    categoria que existe no cadastro.
+                  */}
+                  <select
+                    value={categoriasDeProduto.includes(qsCategory) ? qsCategory : ""}
                     onChange={(e) => setQsCategory(e.target.value)}
-                    placeholder="Ex: Lubrificantes e Fluidos / Freios e Rodas"
-                    className="settings-input"
-                  />
+                    className="settings-select"
+                  >
+                    <option value="">Qualquer peça do estoque</option>
+                    {categoriasDeProduto.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                  </select>
+                  <span className="settings-hint">
+                    {qsCategory && !categoriasDeProduto.includes(qsCategory)
+                      ? `Este serviço estava preso à categoria "${qsCategory}", que não existe mais no cadastro. Escolha uma da lista.`
+                      : "Só aparecem as categorias cadastradas na aba Categorias."}
+                  </span>
                 </label>
 
                 <div className="settings-toggle-box">
@@ -1238,6 +1422,66 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
         </div>
       )}
 
+      {/* MODAL DA FORMA DE PAGAMENTO */}
+      {isMethodModalOpen && (
+        <div className="dialog-layer" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsMethodModalOpen(false); }}>
+          <section className="dialog" style={{ maxWidth: "500px" }} role="dialog" aria-modal="true">
+            <header className="dialog-header">
+              <div>
+                <span>Formas de pagamento</span>
+                <h2>{editingMethod ? "Editar Forma de Pagamento" : "Nova Forma de Pagamento"}</h2>
+                <p>O que a oficina aceita receber no balcão e na entrega da OS</p>
+              </div>
+              <button aria-label="Fechar" onClick={() => setIsMethodModalOpen(false)}>×</button>
+            </header>
+            <form noValidate onSubmit={handleSaveMethod}>
+              <div className="dialog-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {avisoModal}
+                <label className="settings-field">
+                  <span className="settings-field-label">Nome <b className="req">*</b></span>
+                  <input
+                    type="text"
+                    value={methName}
+                    onChange={(e) => setMethName(e.target.value)}
+                    placeholder="Ex.: PIX, Dinheiro, Crédito, Nota a prazo"
+                    className="settings-input"
+                    autoFocus
+                  />
+                  <span className="settings-hint">É este nome que aparece no botão da tela de recebimento.</span>
+                </label>
+
+                <div className="settings-toggle-box">
+                  <div>
+                    <strong>Passa na maquininha</strong>
+                    <span>Desconta a taxa da operadora do valor que entra</span>
+                  </div>
+                  <label className="switch-toggle-btn">
+                    <input type="checkbox" checked={methUsesMachine} onChange={(e) => setMethUsesMachine(e.target.checked)} />
+                    <span className="switch-toggle-slider"></span>
+                  </label>
+                </div>
+
+                <div className="settings-toggle-box">
+                  <div>
+                    <strong>Aceita hoje</strong>
+                    <span>Desligue para parar de oferecer sem apagar o histórico</span>
+                  </div>
+                  <label className="switch-toggle-btn">
+                    <input type="checkbox" checked={methActive} onChange={(e) => setMethActive(e.target.checked)} />
+                    <span className="switch-toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <footer className="dialog-footer">
+                <button type="button" className="ghost-button" onClick={() => setIsMethodModalOpen(false)}>Cancelar</button>
+                <button type="submit" className="primary-button">Salvar Forma</button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      )}
+
       {/* CATEGORY MODAL */}
       {isCategoryModalOpen && (
         <div className="dialog-layer" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setIsCategoryModalOpen(false); }}>
@@ -1250,8 +1494,9 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
               </div>
               <button aria-label="Fechar" onClick={() => setIsCategoryModalOpen(false)}>×</button>
             </header>
-            <form onSubmit={handleSaveCategory}>
+            <form noValidate onSubmit={handleSaveCategory}>
               <div className="dialog-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {avisoModal}
                 <label className="settings-field">
                   <span className="settings-field-label">Nome da Categoria <b className="req">*</b></span>
                   <input
@@ -1326,8 +1571,9 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
               </div>
               <button aria-label="Fechar" onClick={() => setIsMachineModalOpen(false)}>×</button>
             </header>
-            <form onSubmit={handleSaveMachine}>
+            <form noValidate onSubmit={handleSaveMachine}>
               <div className="dialog-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {avisoModal}
                 <label className="settings-field">
                   <span className="settings-field-label">Nome / Identificação da Maquininha <b className="req">*</b></span>
                   <input
@@ -1443,8 +1689,9 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
               </div>
               <button aria-label="Fechar" onClick={() => setIsPartnerModalOpen(false)}>×</button>
             </header>
-            <form onSubmit={handleSavePartner}>
+            <form noValidate onSubmit={handleSavePartner}>
               <div className="dialog-body" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {avisoModal}
                 <label className="settings-field">
                   <span className="settings-field-label">Nome da Empresa / Frota <b className="req">*</b></span>
                   <input
@@ -1509,7 +1756,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 
       {/* TAB 8: LISTAS DO SISTEMA */}
       {activeTab === "lists" && (
-        <form onSubmit={handleSaveLists} className="settings-card">
+        <form noValidate onSubmit={handleSaveLists} className="settings-card">
           <div className="settings-card-header">
             <div>
               <h2>Listas do Sistema</h2>

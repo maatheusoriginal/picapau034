@@ -1501,13 +1501,16 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 }
 
 /* Tab Navigation */
+/* As abas rolavam na horizontal e cortavam os rótulos: sobrava um botão
+   mostrando só o contador ("0"), sem nome nenhum. No computador elas agora
+   quebram em duas linhas e aparecem inteiras; a rolagem fica só no celular,
+   onde não cabem mesmo. */
 .settings-tabs-bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  overflow-x: auto;
-  padding: 4px 2px 16px;
-  scrollbar-width: thin;
+  padding: 4px 2px 18px;
 }
 
 .settings-tab-button {
@@ -1568,6 +1571,35 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   box-shadow: 0 3px 12px rgba(24, 24, 27, 0.025);
   overflow: hidden;
   margin-bottom: 24px;
+}
+
+/* O que falta preencher, em português e dentro do próprio formulário —
+   no lugar do aviso do navegador, que vinha em inglês e sumia sozinho. */
+.settings-modal-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #f3c9c9;
+  border-radius: 11px;
+  background: #fdf4f4;
+  color: #a32626;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.settings-modal-error b {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--red);
+  color: #ffffff;
+  font-size: 11px;
 }
 
 .settings-card-header {
@@ -1691,6 +1723,9 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 
 @media (max-width: 720px) {
   .settings-grid-4, .settings-grid-3, .settings-grid-2 { grid-template-columns: 1fr; }
+  /* No celular a quebra em duas linhas viraria uma parede de botões: volta a
+     rolar na horizontal, mas agora com o rótulo inteiro visível. */
+  .settings-tabs-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
   .settings-card-header { flex-direction: column; align-items: flex-start; gap: 12px; }
   .settings-card-header .primary-button { width: 100%; }
 }
@@ -1703,10 +1738,13 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   width: 100%;
 }
 
+/* Era `justify-content: space-between`: o asterisco de campo obrigatório era
+   jogado para a outra ponta da linha, longe do nome do campo, e parecia
+   pertencer ao campo vizinho. Agora fica colado no texto. */
 .settings-field-label {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 2px;
   font-size: 11px;
   font-weight: 750;
   color: #444549;
