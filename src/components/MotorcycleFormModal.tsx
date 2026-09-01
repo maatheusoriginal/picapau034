@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import type { ClientRecord, MotorcycleRecord } from "../types";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { defaultSystemLists } from "../types";
+import { fullModelName, modelsOf, splitModelName, versionsOf } from "../motorcycle-catalog";
 
 interface MotorcycleFormModalProps {
   isOpen: boolean;
@@ -40,6 +41,10 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   const [plate, setPlate] = useState("");
   const [brand, setBrand] = useState("Honda");
   const [model, setModel] = useState("");
+  // O modelo é gravado como um texto só ("CG 160 Fan") — é o que a OS imprime
+  // e o que a busca procura. Estes dois estados são só a escolha na tela.
+  const [catalogModel, setCatalogModel] = useState("");
+  const [catalogVersion, setCatalogVersion] = useState("");
   const [year, setYear] = useState("");
   const [color, setColor] = useState("");
   const [ownerId, setOwnerId] = useState("");
@@ -52,6 +57,12 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   // Marcas vindas de Configurações → Listas do sistema, com a lista de fábrica
   // como padrão enquanto a oficina não ajustar a dela.
   const brandOptions = brands.length ? brands : defaultSystemLists.motorcycleBrands;
+  // Modelos e versões da marca escolhida. Marca fora do catálogo (ou "Outra")
+  // devolve lista vazia e o campo continua sendo texto livre — nenhuma moto
+  // fica de fora por não estar na lista.
+  const modelOptions = modelsOf(brand);
+  const versionOptions = versionsOf(brand, catalogModel);
+  const modeloForaDoCatalogo = modelOptions.length === 0 || (model.trim() !== "" && catalogModel === "");
 
   const colorOptions = [
     "Preta",
@@ -73,6 +84,13 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
       setPlate(editingMotorcycle.plate || "");
       setBrand(editingMotorcycle.brand || "Honda");
       setModel(editingMotorcycle.model || "");
+      {
+        // Moto cadastrada antes do catálogo volta separada, para as listas
+        // abrirem já na escolha certa.
+        const partes = splitModelName(editingMotorcycle.brand || "Honda", editingMotorcycle.model || "");
+        setCatalogModel(partes.model);
+        setCatalogVersion(partes.version);
+      }
       setYear(editingMotorcycle.year || "");
       setColor(editingMotorcycle.color || "");
       setOwnerId(editingMotorcycle.ownerId || "");
@@ -85,6 +103,8 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
       setPlate("");
       setBrand("Honda");
       setModel("");
+      setCatalogModel("");
+      setCatalogVersion("");
       setYear(`${new Date().getFullYear()}`);
       setColor("Preta");
       setOwnerId(preselectedClientId || (clients[0] ? clients[0].id : ""));
@@ -246,7 +266,15 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                 <span className="field-label">Marca / Fabricante <b className="req">*</b></span>
                 <select
                   value={brand}
-                  onChange={(e) => setBrand(e.target.value)}
+                  onChange={(e) => {
+                    // Trocar de marca limpa o modelo: "CG 160" não existe na
+                    // Yamaha, e deixar o anterior gravaria uma moto que não
+                    // existe.
+                    setBrand(e.target.value);
+                    setCatalogModel("");
+                    setCatalogVersion("");
+                    setModel("");
+                  }}
                   className="dialog-select"
                 >
                   {brandOptions.map((b) => (
@@ -255,16 +283,67 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                 </select>
               </label>
 
-              <label className="field-group" style={{ gridColumn: "span 2" }}>
-                <span className="field-label">Modelo e Versão <b className="req">*</b></span>
-                <input
-                  type="text"
-                  required
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="Ex: CG 160 Fan ESDI / Fazer 250 ABS"
-                  className="dialog-input"
-                />
+              {/*
+                Marca → modelo → versão. O modelo era texto livre, e a mesma
+                moto entrava como "CG 160 Fan", "cg160 fan" e "CG FAN 160" — o
+                histórico da moto e a busca por modelo paravam de funcionar.
+                Marca fora do catálogo continua com o campo livre: nenhuma moto
+                fica de fora por não estar na lista.
+              */}
+              <label className="field-group">
+                <span className="field-label">Modelo <b className="req">*</b></span>
+                {modelOptions.length > 0 ? (
+                  <select
+                    value={modeloForaDoCatalogo ? "__outro__" : catalogModel}
+                    onChange={(e) => {
+                      const escolhido = e.target.value;
+                      if (escolhido === "__outro__") { setCatalogModel(""); setCatalogVersion(""); setModel(" "); return; }
+                      setCatalogModel(escolhido);
+                      setCatalogVersion("");
+                      setModel(fullModelName(escolhido, ""));
+                    }}
+                    className="dialog-select"
+                  >
+                    <option value="">Escolha o modelo</option>
+                    {modelOptions.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                    <option value="__outro__">Outro (digitar)</option>
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    placeholder="Ex: CG 160 Fan"
+                    className="dialog-input"
+                  />
+                )}
+              </label>
+
+              <label className="field-group">
+                <span className="field-label">Versão</span>
+                {modelOptions.length > 0 && !modeloForaDoCatalogo && versionOptions.length > 0 ? (
+                  <select
+                    value={catalogVersion}
+                    onChange={(e) => { setCatalogVersion(e.target.value); setModel(fullModelName(catalogModel, e.target.value)); }}
+                    className="dialog-select"
+                  >
+                    <option value="">Sem versão específica</option>
+                    {versionOptions.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={modeloForaDoCatalogo ? model.trim() : catalogVersion}
+                    onChange={(e) => {
+                      if (modeloForaDoCatalogo) return setModel(e.target.value);
+                      setCatalogVersion(e.target.value);
+                      setModel(fullModelName(catalogModel, e.target.value));
+                    }}
+                    placeholder={modeloForaDoCatalogo ? "Ex: CG 160 Fan ESDI" : "Ex: ESDI"}
+                    className="dialog-input"
+                  />
+                )}
+                <span className="settings-hint">{model.trim() ? `Fica gravado como: ${model.trim()}` : "Marca → modelo → versão."}</span>
               </label>
             </div>
 

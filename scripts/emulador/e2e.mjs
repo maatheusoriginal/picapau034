@@ -669,6 +669,74 @@ await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no 
   if (problemas.length) throw new Error("empresa parceira:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("moto por marca, modelo e versão; código de barras gerado", async () => {
+  const problemas = [];
+
+  // O modelo era texto livre: a mesma moto entrava como "CG 160 Fan",
+  // "cg160 fan" e "CG FAN 160", e a busca por modelo parava de funcionar.
+  await ir("Motocicletas");
+  await p.getByRole("button", { name: /Cadastrar moto|Nova moto|Adicionar moto/i }).first().click();
+  await p.waitForTimeout(2200);
+  const rotulos = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
+  const marca = p.locator(".dialog-window select").nth(rotulos.findIndex((t) => /Marca/i.test(t)));
+  const modelo = p.locator(".dialog-window select").nth(rotulos.findIndex((t) => /^Modelo/i.test(t)));
+  if (!(await marca.count()) || !(await modelo.count())) problemas.push(`o formulário não tem marca e modelo em lista: ${JSON.stringify(rotulos)}`);
+
+  await marca.selectOption("Honda");
+  await p.waitForTimeout(700);
+  const daHonda = await modelo.locator("option").allInnerTexts();
+  if (!daHonda.some((t) => /CG 160/.test(t))) problemas.push(`Honda não trouxe os modelos dela: ${JSON.stringify(daHonda.slice(0, 5))}`);
+
+  // Trocar de marca precisa trocar a lista: "CG 160" não existe na Yamaha.
+  await marca.selectOption("Yamaha");
+  await p.waitForTimeout(700);
+  const daYamaha = await modelo.locator("option").allInnerTexts();
+  if (daYamaha.some((t) => /CG 160/.test(t))) problemas.push("trocar de marca manteve os modelos da anterior");
+  if (!daYamaha.some((t) => /Factor/.test(t))) problemas.push(`Yamaha não trouxe os modelos dela: ${JSON.stringify(daYamaha.slice(0, 5))}`);
+
+  await marca.selectOption("Honda");
+  await p.waitForTimeout(600);
+  await modelo.selectOption("CG 160");
+  await p.waitForTimeout(700);
+  const rotulos2 = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
+  const versao = p.locator(".dialog-window select").nth(rotulos2.findIndex((t) => /Versão/i.test(t)));
+  const versoes = await versao.locator("option").allInnerTexts();
+  if (!versoes.some((t) => /Fan/.test(t))) problemas.push(`CG 160 não trouxe as versões: ${JSON.stringify(versoes)}`);
+  await versao.selectOption("Fan");
+  await p.waitForTimeout(700);
+  const dica = await p.locator(".dialog-window .settings-hint").first().innerText().catch(() => "");
+  if (!/CG 160 Fan/.test(dica)) problemas.push(`não mostrou como fica gravado: ${JSON.stringify(dica)}`);
+  await p.locator(".dialog-window button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+
+  // Peça sem código de fábrica (adesivo, parafuso avulso): o botão gera um
+  // EAN-13 de circulação restrita, prefixo 2, que a leitora do balcão lê.
+  await ir("Produtos e estoque");
+  await p.getByRole("button", { name: /Adicionar produto/i }).first().click();
+  await p.waitForTimeout(2200);
+  const gerar = p.locator(".dialog-window .input-action-button");
+  if ((await gerar.count()) !== 1) problemas.push("não existe o botão de gerar código de barras");
+  else {
+    await gerar.click();
+    await p.waitForTimeout(700);
+    const ean = await p.locator('.dialog-window input[placeholder="789..."]').inputValue();
+    if (!/^\d{13}$/.test(ean)) problemas.push(`gerou "${ean}", esperado 13 dígitos`);
+    else {
+      if (ean[0] !== "2") problemas.push(`o código gerado começa com ${ean[0]}, esperado 2 (uso interno GS1)`);
+      const soma = ean.slice(0, 12).split("").reduce((total, digito, indice) => total + Number(digito) * (indice % 2 === 0 ? 1 : 3), 0);
+      if ((10 - (soma % 10)) % 10 !== Number(ean[12])) problemas.push(`o dígito verificador de ${ean} não confere`);
+    }
+    await gerar.click();
+    await p.waitForTimeout(700);
+    const outro = await p.locator('.dialog-window input[placeholder="789..."]').inputValue();
+    if (outro === ean) problemas.push("clicar de novo repetiu o mesmo código");
+  }
+  await p.locator(".dialog-window button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+
+  if (problemas.length) throw new Error("moto e código de barras:\n      - " + problemas.join("\n      - "));
+});
+
 await passo("em tela baixa, o botão de salvar continua alcançável", async () => {
   // O <form> dos modais de Configurações fica entre o .dialog e o rodapé. Sem
   // ser uma coluna flexível, o corpo crescia com o conteúdo, estourava o

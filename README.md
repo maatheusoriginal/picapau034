@@ -47,6 +47,8 @@ npm run dev             # http://localhost:3000
 | `npm run check:firestore-data` | Confere que nenhum campo vazio (`undefined`) escapa para o Firestore |
 | `npm run check:number-input` | Confere que o campo de número deixa apagar o que está escrito |
 | `npm run check:partner` | Confere o faturamento por empresa parceira (desconto, vencimento e caixa) |
+| `npm run check:barcode` | Confere o gerador de código de barras interno (EAN-13) |
+| `npm run check:motorcycle-catalog` | Confere o catálogo de marca, modelo e versão de moto |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -799,6 +801,48 @@ as 31: que vazio, `1,` e `-` são estados válidos no meio da digitação; que
 
 Os campos que guardam texto puro (valor do gasto, valor da conta, mão de obra
 avulsa) nunca tiveram o defeito e foram deixados como estavam.
+
+## Cadastro de moto: marca, modelo e versão
+
+O modelo era um campo de texto livre. A mesma moto entrava como "CG 160 Fan",
+"cg160 fan", "CG FAN 160" e "Honda CG 160" — e aí o histórico da moto, a busca
+por modelo e qualquer contagem de "quais motos mais atendemos" param de
+funcionar.
+
+`src/motorcycle-catalog.ts` traz o que roda em oficina de bairro no Brasil:
+Honda, Yamaha, Suzuki, Kawasaki, Haojue, Dafra, Shineray, Royal Enfield, BMW,
+Triumph e Harley-Davidson, cada uma com os seus modelos e versões. Escolher a
+marca troca a lista de modelos; escolher o modelo troca a de versões.
+
+Não é exaustivo de propósito: quem tiver uma moto fora da lista escolhe "Outro"
+e digita, e o texto vai gravado igual. O que fica no banco continua sendo um
+campo só — "CG 160 Fan" —, que é o que a OS imprime e o que a busca procura.
+Moto cadastrada antes disto abre com as listas já na escolha certa
+(`splitModelName` separa o texto gravado de volta em modelo e versão).
+
+`npm run check:motorcycle-catalog` confere as 26 regras, incluindo uma que já
+pegou um defeito: **toda marca do catálogo precisa estar na lista de marcas do
+cadastro**, senão a pessoa escolhe a marca e não aparece modelo nenhum.
+
+## Código de barras de peça sem código
+
+Nem toda peça vem com código de fábrica — adesivo, parafuso avulso, peça usada.
+Sem código, a leitora não serve e a venda volta a ser digitada à mão, que é onde
+o erro entra.
+
+O botão **Gerar**, ao lado do campo de código de barras, cria um EAN-13 válido.
+O padrão GS1 reserva os prefixos 20 a 29 para código de **circulação restrita**:
+vale dentro do estabelecimento e não conflita com nenhum produto de fabricante
+do mundo. Por isso o gerado começa com 2.
+
+Antes de devolver, o gerador confere se o código já está em uso no estoque —
+sortear sem olhar é o caminho para duas peças com o mesmo código, e aí a leitora
+traz a errada no balcão. O campo também avisa quando o código digitado à mão não
+passa na conferência do dígito verificador.
+
+`npm run check:barcode` confere as 24 regras: o dígito verificador contra EANs
+reais conhecidos, a recusa de código com um dígito trocado, e que o sorteio nos
+extremos (0 e 1) continua gerando código válido de 13 dígitos.
 
 ## Empresa parceira
 
