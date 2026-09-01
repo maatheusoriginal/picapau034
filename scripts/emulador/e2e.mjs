@@ -419,6 +419,55 @@ await passo("Configurações: avisar em português e gravar o que foi mudado", a
   if (problemas.length) throw new Error("Configurações:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("em tela baixa, o botão de salvar continua alcançável", async () => {
+  // O <form> dos modais de Configurações fica entre o .dialog e o rodapé. Sem
+  // ser uma coluna flexível, o corpo crescia com o conteúdo, estourava o
+  // max-height do .dialog e o rodapé — onde fica o "Salvar" — era cortado pelo
+  // overflow: hidden, fora da tela e sem barra de rolagem. Numa tela de 620px
+  // de altura o botão ficava 18px abaixo do fim da tela.
+  const contexto = await b.newContext({ viewport: { width: 1280, height: 620 } });
+  const baixa = await contexto.newPage();
+  const problemas = [];
+  try {
+    await baixa.goto(process.env.URL_TESTE ?? "http://127.0.0.1:5199/");
+    await baixa.waitForTimeout(2200);
+    await baixa.getByPlaceholder(/e-mail|email/i).first().fill("dono@picapau.test");
+    await baixa.locator('input[type="password"]').first().fill("teste123");
+    await baixa.getByRole("button", { name: /^Entrar$/ }).click();
+    await baixa.waitForTimeout(5000);
+    await baixa.locator(".nav-item", { hasText: "Configurações" }).first().click();
+    await baixa.waitForTimeout(2500);
+
+    const modais = [
+      ["Serviços", /Novo Serviço Rápido/, /Salvar Serviço/],
+      ["Categorias", /Nova Categoria/, /Salvar Categoria/],
+      ["Pagamentos", /Nova Forma de Pagamento/, /Salvar Forma/],
+      ["Pagamentos", /Nova Maquininha/, /Salvar Maquininha/],
+      ["Parceiros", /Novo Parceiro/, /Salvar Parceiro/],
+    ];
+    for (const [nomeAba, abrir, salvar] of modais) {
+      await baixa.locator(".settings-tab-button", { hasText: nomeAba }).first().click();
+      await baixa.waitForTimeout(1200);
+      await baixa.locator("button").filter({ hasText: abrir }).first().click();
+      await baixa.waitForTimeout(1600);
+      const alcance = await baixa.locator(".dialog button").filter({ hasText: salvar }).first().evaluate((el) => {
+        const caixa = el.getBoundingClientRect();
+        const noPonto = document.elementFromPoint(caixa.x + caixa.width / 2, caixa.y + caixa.height / 2);
+        return { dentro: caixa.bottom <= window.innerHeight && caixa.top >= 0,
+          clicavel: el.contains(noPonto) || noPonto === el,
+          fundo: Math.round(caixa.bottom), tela: window.innerHeight };
+      }).catch(() => null);
+      if (!alcance) problemas.push(`${salvar.source}: botão não encontrado`);
+      else if (!alcance.dentro || !alcance.clicavel) problemas.push(`${salvar.source}: termina em ${alcance.fundo}px numa tela de ${alcance.tela}px`);
+      await baixa.locator(".dialog button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+      await baixa.waitForTimeout(900);
+    }
+  } finally {
+    await contexto.close();
+  }
+  if (problemas.length) throw new Error("rodapé fora do alcance:\n      - " + problemas.join("\n      - "));
+});
+
 await passo("abrir cada formulário de cadastro sem quebrar a tela", async () => {
   const formularios = [
     ["Produtos e estoque", /Adicionar produto/i],

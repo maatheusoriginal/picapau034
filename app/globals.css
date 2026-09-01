@@ -383,6 +383,15 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .dialog-layer { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: rgba(10,10,12,.62); backdrop-filter: blur(4px); animation: fade-in .16s ease; }
 .dialog { width: min(520px, 100%); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,.25); border-radius: 17px; background: #fff; box-shadow: 0 28px 80px rgba(0,0,0,.28); animation: dialog-in .2s ease; }
 .dialog.dialog-wide { width: min(760px, 100%); }
+/* Os modais das Configurações põem um <form> entre o .dialog e o
+   .dialog-body/.dialog-footer. Sem estas três linhas o <form> é um bloco
+   comum: o corpo cresce com o conteúdo, estoura o max-height do .dialog, e o
+   rodapé — onde fica o "Salvar" — é cortado pelo overflow: hidden e some
+   fora da tela, sem barra de rolagem nenhuma. Em tela de 620px de altura o
+   botão de salvar ficava 18px abaixo do fim da tela, impossível de clicar.
+   Fazendo o form ser a coluna flexível, o corpo volta a rolar sozinho e o
+   rodapé fica sempre visível. */
+.dialog > form { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .dialog.dialog-checkout { width: min(980px, 100%); }
 .dialog-header { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 21px 23px 18px; border-bottom: 1px solid #eceae7; }
 .dialog-header span { color: var(--red); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
