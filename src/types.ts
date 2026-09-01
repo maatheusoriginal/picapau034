@@ -396,7 +396,9 @@ export const systemListLabels: Record<keyof SystemLists, { title: string; hint: 
 
 export const defaultSystemLists: SystemLists = {
   units: ["UN", "PC", "LT", "KG", "M", "PAR", "JG", "CX"],
-  motorcycleBrands: ["Honda", "Yamaha", "Suzuki", "Shineray", "Kawasaki", "Dafra", "BMW", "Triumph", "Royal Enfield", "Outra"],
+  // Precisa conter todas as marcas de src/motorcycle-catalog.ts: escolher uma
+  // marca que o catálogo não conhece não ofereceria modelo nenhum.
+  motorcycleBrands: ["Honda", "Yamaha", "Suzuki", "Kawasaki", "Haojue", "Dafra", "Shineray", "Royal Enfield", "BMW", "Triumph", "Harley-Davidson", "Outra"],
   partBrands: ["Motul", "Ipiranga", "Yamalube", "Mobil", "Lubrax", "Cobreq", "Fras-le", "NGK", "Bosch", "Magneti Marelli", "DID", "Riffel", "Vedamotors", "Pirelli", "Levorin", "Michelin", "Original Honda", "Original Yamaha"],
   cashAccounts: ["Caixa balcão", "Banco Inter"],
   orderPriorities: ["Normal", "Urgente", "Baixa"],

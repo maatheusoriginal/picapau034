@@ -25,6 +25,8 @@
     "check:firestore-data": "tsx scripts/check-firestore-data.ts",
     "check:number-input": "tsx scripts/check-number-input.ts",
     "check:partner": "tsx scripts/check-partner.ts",
+    "check:barcode": "tsx scripts/check-barcode.ts",
+    "check:motorcycle-catalog": "tsx scripts/check-motorcycle-catalog.ts",
     "e2e:emulador": "node scripts/emulador/e2e.mjs"
   },
   "dependencies": {

@@ -3,6 +3,7 @@ import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsCo
 import { defaultProductCategories, defaultSystemLists } from "../types";
 import { markupFromPrice, movementTotals, priceFromMarkup, productMovements } from "../inventory";
 import { nextSequentialId } from "../firestore-data";
+import { isInternalEan13, isValidEan13, uniqueInternalEan13 } from "../barcode";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
 
@@ -363,13 +364,43 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 </label>
                 <label className="field-group">
                   <span className="field-label">Código de barras (EAN)</span>
-                  <input
-                    type="text"
-                    value={barcode}
-                    onChange={(e) => setBarcode(e.target.value)}
-                    placeholder="789..."
-                    className="dialog-input"
-                  />
+                  {/*
+                    Nem toda peça vem com código de fábrica — adesivo, parafuso
+                    avulso, peça usada. Sem código, a leitora não serve e a
+                    venda volta a ser digitada à mão, que é onde o erro entra.
+                    O gerado começa com 2, faixa que o padrão GS1 reserva para
+                    código de circulação restrita: vale dentro da oficina e não
+                    conflita com produto de fabricante nenhum.
+                  */}
+                  <div className="input-with-action">
+                    <input
+                      type="text"
+                      value={barcode}
+                      onChange={(e) => setBarcode(e.target.value)}
+                      placeholder="789..."
+                      className="dialog-input"
+                    />
+                    <button
+                      type="button"
+                      className="input-action-button"
+                      title="Gerar um código interno para peça sem código de fábrica"
+                      onClick={() => {
+                        const codigo = uniqueInternalEan13(allProducts.map((peca) => peca.barcode ?? ""));
+                        if (!codigo) return setErro("Não foi possível gerar um código livre. Tente de novo.");
+                        setErro("");
+                        setBarcode(codigo);
+                      }}
+                    >
+                      Gerar
+                    </button>
+                  </div>
+                  <span className="settings-hint">
+                    {barcode && isInternalEan13(barcode)
+                      ? "Código interno da oficina. Imprima a etiqueta e cole na peça."
+                      : barcode && !isValidEan13(barcode)
+                        ? "Este código não passa na conferência do EAN-13. Confira a digitação ou gere um interno."
+                        : "Peça sem código de fábrica? Use Gerar."}
+                  </span>
                 </label>
                 <label className="field-group">
                   <span className="field-label">Cód. fabricante (Part Number)</span>
