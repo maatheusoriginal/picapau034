@@ -1653,6 +1653,89 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .partner-billing-total span { font-weight: 800; color: #22242a; }
 .partner-billing-total b { font-size: 16px; }
 
+/* Etapa 1 da OS: cliente e depois a moto, um bloco de cada vez.
+   Antes eram três caminhos sobrepostos na mesma tela — busca por cliente,
+   busca por placa e um formulário que aparecia sozinho — e quem abria a OS não
+   sabia por onde começar. */
+.os-step-blocks { display: grid; gap: 12px; }
+
+.os-block {
+  padding: 14px 15px;
+  border: 1px solid #e2e0dc;
+  border-radius: 12px;
+  background: #ffffff;
+  transition: border-color .16s ease, background .16s ease;
+}
+.os-block.done { border-color: #cde7d8; background: #fbfefc; }
+.os-block.waiting { background: #fafaf9; }
+.os-block.waiting .os-block-number { background: #eeece9; color: #a8a6a2; }
+
+.os-block-head { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
+.os-block-head > div { flex: 1; min-width: 0; }
+.os-block-head strong { display: block; font-size: 13px; color: #22242a; }
+.os-block-head small { display: block; margin-top: 3px; color: #8b8c90; font-size: 10px; line-height: 1.45; }
+
+.os-block-number {
+  width: 26px; height: 26px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--red); color: #ffffff;
+  font-size: 11px; font-weight: 800;
+}
+.os-block.done .os-block-number { background: var(--green); }
+
+.os-block-badge {
+  flex: 0 0 auto; padding: 4px 9px; border-radius: 20px;
+  font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+}
+.os-block-badge.ok { background: #e8f6ee; color: #2f7a48; }
+
+.os-search { display: grid; gap: 10px; }
+.os-search .mini-search { width: 100%; }
+
+.os-search-empty {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  padding: 11px 13px; border: 1px dashed #dcdad6; border-radius: 10px; background: #faf9f7;
+  color: #6f7075; font-size: 11px;
+}
+.os-search-empty .primary-button { display: inline-flex; align-items: center; gap: 7px; height: 36px; }
+
+.os-search-hint {
+  display: flex; align-items: center; gap: 9px;
+  padding: 11px 13px; border: 1px dashed #dcdad6; border-radius: 10px;
+  color: #929296; font-size: 11px; line-height: 1.45;
+}
+
+.os-picked {
+  display: flex; align-items: center; gap: 11px;
+  padding: 11px 13px; border: 1px solid #cde7d8; border-radius: 10px; background: #f4fbf7;
+}
+.os-picked > div { flex: 1; min-width: 0; }
+.os-picked strong { display: block; font-size: 13px; color: #2b3b32; }
+.os-picked small { display: block; margin-top: 3px; color: #6d7f75; font-size: 10px; }
+.os-picked-change {
+  flex: 0 0 auto; height: 32px; padding: 0 13px;
+  border: 1px solid #cadbd1; border-radius: 8px; background: #ffffff;
+  color: #3f6b52; font-size: 11px; font-weight: 750; cursor: pointer;
+}
+.os-picked-change:hover { border-color: #a9c9b8; background: #f0f8f3; }
+
+.os-inline-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.os-inline-form.vehicle { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.os-inline-actions {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 9px;
+}
+.os-inline-actions .outline-button { display: inline-flex; align-items: center; gap: 7px; }
+.os-inline-hint { color: #929296; font-size: 10px; line-height: 1.45; }
+.os-inline-form > .os-inline-hint { grid-column: 1 / -1; }
+
+@media (max-width: 720px) {
+  .os-inline-form, .os-inline-form.vehicle { grid-template-columns: 1fr; }
+  .os-search-empty { flex-direction: column; align-items: stretch; }
+  .os-search-empty .primary-button { width: 100%; justify-content: center; }
+}
+
 /* Atalho para o cadastro completo de cliente e moto sem sair da OS. */
 .os-full-register {
   display: flex;

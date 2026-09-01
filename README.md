@@ -802,6 +802,42 @@ as 31: que vazio, `1,` e `-` são estados válidos no meio da digitação; que
 Os campos que guardam texto puro (valor do gasto, valor da conta, mão de obra
 avulsa) nunca tiveram o defeito e foram deixados como estavam.
 
+## A primeira etapa da OS
+
+Esta tela tinha **três caminhos sobrepostos** ao mesmo tempo: uma busca por
+cliente, outra por placa, um formulário embutido que aparecia sozinho sempre que
+a busca não achava nada — inclusive com o campo ainda vazio — e ainda dois botões
+de cadastro completo. Quem abria a OS não sabia por onde começar nem em qual dos
+campos digitar.
+
+Agora são **dois blocos numerados, na ordem em que a oficina trabalha**:
+
+**1 · Cliente** — um campo de busca só, que aceita WhatsApp ou nome. Cada bloco
+tem um estado de cada vez:
+
+| Estado | O que aparece |
+| --- | --- |
+| Procurando | O campo e uma dica |
+| Não achou | "Nenhum cliente com X" + botão **Cadastrar cliente** |
+| Cadastrando | Nome e WhatsApp, com atalho para o cadastro completo |
+| Encontrado | O cliente, quantas motos tem, e um botão **Trocar** |
+
+**2 · Motocicleta** — fica esperando enquanto não há cliente ("Escolha o cliente
+acima primeiro"). Com o cliente escolhido, mostra as motos dele para clicar, mais
+"Outra moto". Cliente novo (ou "Outra moto") abre o cadastro rápido com **placa,
+marca, modelo, versão, ano e cor** — marca e modelo saindo do mesmo catálogo do
+cadastro completo, em vez de digitados à mão. O campo mostra "Fica gravado como:
+Honda Biz 125", e a moto é gravada com a marca separada do modelo, igual ao
+cadastro completo.
+
+### O `?? clients[0]` de novo
+
+Ao testar a tela nova, o bloco da moto mostrou as motos de **outro cliente**. A
+causa era a mesma da OS encerrada errada: `selectedCustomer` caía num
+`?? clients[0]` quando ninguém estava escolhido, e o bloco listava as motos do
+primeiro cliente da agenda. Escolher ninguém não pode significar "o primeiro da
+lista" — o fallback saiu.
+
 ## Cadastro de moto: marca, modelo e versão
 
 O modelo era um campo de texto livre. A mesma moto entrava como "CG 160 Fan",

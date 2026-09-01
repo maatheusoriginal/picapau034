@@ -4,6 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories, isMechanicUser, orDefault, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { NumberField } from "../src/components/NumberField";
 import { billableMotorcycles, billingDescription, isPartnerBilled, motorcycleLabel, nextBillingDate, partnerTotals, PARTNER_PAYMENT_METHOD } from "../src/partner";
+import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
 import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
@@ -2039,6 +2040,16 @@ export function AppDialog({
   const [newVehicleYear, setNewVehicleYear] = useState("");
   // A cor era um campo solto, sem estado: o que se digitava nele sumia.
   const [newVehicleColor, setNewVehicleColor] = useState("");
+  // Marca, modelo e versão do cadastro rápido da moto na OS. Eram digitados à
+  // mão: a mesma moto entrava escrita de três jeitos e o histórico dela se
+  // dividia. Saem do mesmo catálogo do cadastro completo.
+  // O bloco do cliente tem um estado só de cada vez: procurando, encontrado ou
+  // cadastrando. Antes o formulário de cadastro aparecia sozinho sempre que a
+  // busca não achava nada — inclusive com o campo ainda vazio.
+  const [osNewCustomer, setOsNewCustomer] = useState(false);
+  const [newVehicleBrand, setNewVehicleBrand] = useState("Honda");
+  const [newVehicleCatalogModel, setNewVehicleCatalogModel] = useState("");
+  const [newVehicleVersion, setNewVehicleVersion] = useState("");
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState("");
   // Importação de planilha: a prévia fica em pé até a pessoa confirmar, para
@@ -2231,10 +2242,17 @@ export function AppDialog({
   const selectedMechanics = activeMechanics.filter((user) => selectedMechanicIds.includes(user.id));
   const orderMechanics = activeMechanics.filter((user) => orderMechanicIds.includes(user.id));
   const selectedPartner = activePartners.find((partner) => partner.id === selectedPartnerId) ?? activePartners[0];
-  const selectedCustomer = clients.find((client) => client.id === selectedCustomerId) ?? clients[0];
+  // Sem o `?? clients[0]`: escolher ninguém não pode significar "o primeiro da
+  // lista". Era o que fazia o bloco da moto, ao cadastrar um cliente novo,
+  // mostrar as motos de OUTRO cliente para escolher.
+  const selectedCustomer = clients.find((client) => client.id === selectedCustomerId) ?? null;
   const lookupDigits = onlyDigits(customerLookup);
   const customerLookupMatch = clients.find((client) => (lookupDigits.length >= 8 && onlyDigits(client.phone).includes(lookupDigits)) || (!lookupDigits.length && customerLookup.trim().length >= 3 && client.name.toLowerCase().includes(customerLookup.toLowerCase())));
-  const customerMotorcycles = motorcycles.filter((motorcycle) => motorcycle.ownerId === selectedCustomer?.id);
+  // Cliente sendo cadastrado agora ainda não tem moto nenhuma: a lista vazia é
+  // o que faz o formulário da moto nova aparecer no lugar da escolha.
+  const customerMotorcycles = !osNewCustomer && selectedCustomer
+    ? motorcycles.filter((motorcycle) => motorcycle.ownerId === selectedCustomer.id)
+    : [];
   const selectedMotorcycle = motorcycles.find((motorcycle) => motorcycle.id === selectedMotorcycleId);
   const selectedEmployee = users.find((user) => user.id === expenseEmployeeId) ?? users[0];
   const selectedMachine = activePaymentMachines.find((machine) => machine.id === selectedMachineId) ?? activePaymentMachines.find((machine) => machine.primary) ?? activePaymentMachines[0];
@@ -2457,10 +2475,16 @@ export function AppDialog({
     // foi digitado não é um telefone — senão a OS sairia com "(34) 99999-9999"
     // no lugar do cliente.
     const typedIsPhone = onlyDigits(customerLookup).length >= 8;
-    const customerName = (customerLookupMatch?.name ?? newCustomerName).trim()
+    // Cadastrando um cliente novo, vale o nome digitado — mesmo que o telefone
+    // por acaso caia em algum cadastro parecido.
+    const customerName = (osNewCustomer ? newCustomerName : (customerLookupMatch?.name ?? newCustomerName)).trim()
       || (typedIsPhone ? "" : customerLookup.trim());
     const plate = formatPlate(osPlate || selectedMotorcycle?.plate || "");
-    const bike = (!newVehicleMode && selectedMotorcycle ? [selectedMotorcycle.brand, selectedMotorcycle.model].filter(Boolean).join(" ") : newVehicleModel).trim();
+    // A moto nova sai do catálogo: marca + modelo + versão viram um nome só,
+    // o mesmo texto que o cadastro completo grava.
+    const bike = (selectedMotorcycle && !newVehicleMode
+      ? [selectedMotorcycle.brand, selectedMotorcycle.model].filter(Boolean).join(" ")
+      : [newVehicleBrand, newVehicleModel].filter(Boolean).join(" ")).trim();
     if (!customerName) throw new Error("Informe o nome do cliente antes de abrir a ordem de serviço.");
     if (!bike && !plate) throw new Error("Informe a motocicleta ou a placa antes de abrir a ordem de serviço.");
 
@@ -2491,7 +2515,8 @@ export function AppDialog({
         ownerId: clientId,
         ownerName: customerName,
         plate,
-        model: bike,
+        brand: newVehicleBrand,
+        model: newVehicleModel.trim() || bike,
         year: newVehicleYear,
         color: newVehicleColor.trim(),
       });
@@ -3276,7 +3301,7 @@ export function AppDialog({
         {dialog === "osChoice" ? (
           <div className="dialog-body attendance-choice">
             <button onClick={() => changeDialog("quick")}><span className="attendance-icon fast"><Icon name="clock"/></span><div><b>É um serviço rápido</b><strong>Atendimento expresso</strong><small>Troca de óleo, lâmpada, regulagem ou ajuste concluído na hora. Cliente e moto são opcionais.</small><em>Ir para Serviço Rápido <Icon name="arrow" size={16}/></em></div></button>
-            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setOsPayer("owner"); setOsCourierName(""); setOsCourierPhone(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
+            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setOsNewCustomer(false); setNewVehicleBrand("Honda"); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setOsPayer("owner"); setOsCourierName(""); setOsCourierPhone(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
           </div>
         ) : null}
 
@@ -3290,23 +3315,129 @@ export function AppDialog({
             <div className="dialog-body">
               {step === 1 ? (
                 <div className="form-section">
-                  <div className="form-intro"><span className="form-icon"><Icon name="bike"/></span><div><h3>Localize o cliente e a moto</h3><p>WhatsApp e placa puxam automaticamente os cadastros já existentes.</p></div></div>
-                  <div className="lookup-grid">
-                    <section className="lookup-panel"><label className="field"><span>WhatsApp ou nome do cliente</span><div className="input-with-icon"><Icon name="search" size={17}/><input value={customerLookup} onChange={(event) => handleCustomerLookup(event.target.value)} placeholder="(34) 99999-9999 ou nome"/></div></label>{customerLookupMatch ? <div className="lookup-found"><span className="registry-avatar">{customerLookupMatch.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{customerLookupMatch.name}</strong><small>{customerLookupMatch.phone} · {customerLookupMatch.motorcycleIds.length} moto{customerLookupMatch.motorcycleIds.length === 1 ? "" : "s"} cadastrada{customerLookupMatch.motorcycleIds.length === 1 ? "" : "s"}</small></div><i>Encontrado</i></div> : <div className="lookup-empty"><Icon name="users" size={18}/><span>Nenhum cliente localizado. Você poderá cadastrá-lo sem sair da OS.</span></div>}</section>
-                    <section className="lookup-panel"><label className="field"><span>Placa</span><input value={osPlate} onChange={(event) => handleOsPlate(event.target.value)} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(osPlate)} · formatação automática</small></label>{selectedMotorcycle && normalizePlate(selectedMotorcycle.plate) === normalizePlate(osPlate) && !newVehicleMode ? <div className="lookup-found vehicle"><span className="registry-avatar">MT</span><div><strong>{selectedMotorcycle.model}</strong><small>{selectedMotorcycle.plate} · {selectedMotorcycle.year} · {selectedMotorcycle.color}</small></div><i>Cadastro encontrado</i></div> : <div className="lookup-empty"><Icon name="bike" size={18}/><span>Placa não cadastrada. Preencha os dados da nova moto abaixo.</span></div>}</section>
+                  {/*
+                    Esta etapa tinha três caminhos sobrepostos na mesma tela:
+                    uma busca por cliente, outra por placa, um formulário
+                    embutido que aparecia sozinho quando a busca não achava
+                    nada, e ainda os botões de cadastro completo. Quem abria a
+                    OS não sabia por onde começar nem em qual dos campos
+                    digitar.
+
+                    Agora são dois blocos, na ordem em que a oficina trabalha:
+                    primeiro o cliente, depois a moto dele. Cada um tem um
+                    estado só de cada vez — procurando, encontrado, ou
+                    cadastrando — e o de cadastrar aparece só quando a pessoa
+                    pede.
+                  */}
+                  <div className="os-step-blocks">
+                    <section className={`os-block ${(customerLookupMatch && !osNewCustomer) || (osNewCustomer && newCustomerName.trim()) ? "done" : ""}`}>
+                      <header className="os-block-head">
+                        <span className="os-block-number">1</span>
+                        <div><strong>Cliente</strong><small>Procure pelo WhatsApp ou pelo nome. Se não achar, cadastre aqui mesmo.</small></div>
+                        {customerLookupMatch && !osNewCustomer ? <span className="os-block-badge ok">Encontrado</span> : null}
+                      </header>
+
+                      {customerLookupMatch && !osNewCustomer ? (
+                        <div className="os-picked">
+                          <span className="registry-avatar">{customerLookupMatch.name.split(" ").map((parte) => parte[0]).slice(0, 2).join("")}</span>
+                          <div>
+                            <strong>{customerLookupMatch.name}</strong>
+                            <small>{customerLookupMatch.phone || "Sem telefone"} · {customerMotorcycles.length} moto{customerMotorcycles.length === 1 ? "" : "s"} cadastrada{customerMotorcycles.length === 1 ? "" : "s"}</small>
+                          </div>
+                          <button className="os-picked-change" onClick={() => { setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); }}>Trocar</button>
+                        </div>
+                      ) : osNewCustomer ? (
+                        <div className="os-inline-form">
+                          <label className="field"><span>Nome completo <b className="req">*</b></span><input value={newCustomerName} onChange={(event) => setNewCustomerName(event.target.value)} placeholder="Nome do cliente" autoFocus/></label>
+                          <label className="field"><span>WhatsApp</span><input value={customerLookup} onChange={(event) => setCustomerLookup(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label>
+                          <div className="os-inline-actions">
+                            <button className="ghost-button" onClick={() => { setOsNewCustomer(false); setNewCustomerName(""); setCustomerLookup(""); }}>Voltar para a busca</button>
+                            {canManageCustomers ? <button className="outline-button" onClick={() => setCadastroNaOs("cliente")}><Icon name="users" size={15}/>Cadastro completo</button> : null}
+                          </div>
+                          <small className="os-inline-hint">O cadastro completo tem CPF, endereço e crediário. Aqui bastam nome e WhatsApp para tocar a OS.</small>
+                        </div>
+                      ) : (
+                        <div className="os-search">
+                          <label className="mini-search"><Icon name="search" size={17}/><input value={customerLookup} onChange={(event) => handleCustomerLookup(event.target.value)} placeholder="WhatsApp ou nome do cliente"/></label>
+                          {customerLookup.trim().length >= 3 ? (
+                            <div className="os-search-empty">
+                              <span>Nenhum cliente com "{customerLookup.trim()}".</span>
+                              <button className="primary-button" onClick={() => { setOsNewCustomer(true); setNewCustomerName(onlyDigits(customerLookup) ? "" : customerLookup.trim()); if (onlyDigits(customerLookup)) setCustomerLookup(formatPhone(customerLookup)); else setCustomerLookup(""); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
+                            </div>
+                          ) : (
+                            <div className="os-search-hint"><Icon name="users" size={17}/><span>Digite o telefone ou o nome. Cliente novo? Digite o nome e o botão de cadastrar aparece.</span></div>
+                          )}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className={`os-block ${(selectedMotorcycle && !newVehicleMode) || (newVehicleMode && osPlate.trim()) ? "done" : ""} ${!customerLookupMatch && !osNewCustomer ? "waiting" : ""}`}>
+                      <header className="os-block-head">
+                        <span className="os-block-number">2</span>
+                        <div><strong>Motocicleta</strong><small>{customerMotorcycles.length && !newVehicleMode ? "Escolha a moto que está entrando." : "Placa, marca, modelo e versão."}</small></div>
+                        {selectedMotorcycle && !newVehicleMode ? <span className="os-block-badge ok">Escolhida</span> : null}
+                      </header>
+
+                      {!customerLookupMatch && !osNewCustomer ? (
+                        <div className="os-search-hint"><Icon name="bike" size={17}/><span>Escolha o cliente acima primeiro. A moto vem depois.</span></div>
+                      ) : (
+                        <>
+                          {customerMotorcycles.length > 0 && !newVehicleMode ? (
+                            <div className="vehicle-choice-list">
+                              {customerMotorcycles.map((motorcycle) => (
+                                <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
+                                  <span className="catalog-code">{(motorcycle.model || "MT").slice(0, 2).toUpperCase()}</span>
+                                  <div><strong>{[motorcycle.brand, motorcycle.model].filter(Boolean).join(" ")}</strong><small>{motorcycle.plate} · {motorcycle.year || "ano não informado"}</small></div>
+                                  {selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}
+                                </button>
+                              ))}
+                              <button className="new-vehicle-choice" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}>
+                                <span className="catalog-code">+</span>
+                                <div><strong>Outra moto</strong><small>Cadastrar uma moto nova</small></div>
+                              </button>
+                            </div>
+                          ) : null}
+
+                          {customerMotorcycles.length === 0 || newVehicleMode ? (
+                            <div className="os-inline-form vehicle">
+                              <label className="field"><span>Placa <b className="req">*</b></span><input value={osPlate} onChange={(event) => handleOsPlate(event.target.value)} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(osPlate)}</small></label>
+                              <label className="field"><span>Marca</span>
+                                <select value={newVehicleBrand} onChange={(event) => { setNewVehicleBrand(event.target.value); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setNewVehicleModel(""); }}>
+                                  {systemList(lists, "motorcycleBrands").map((marca) => <option key={marca}>{marca}</option>)}
+                                </select>
+                              </label>
+                              <label className="field"><span>Modelo</span>
+                                {modelsOf(newVehicleBrand).length ? (
+                                  <select value={newVehicleCatalogModel} onChange={(event) => { setNewVehicleCatalogModel(event.target.value); setNewVehicleVersion(""); setNewVehicleModel(fullModelName(event.target.value, "")); }}>
+                                    <option value="">Escolha o modelo</option>
+                                    {modelsOf(newVehicleBrand).map((modelo) => <option key={modelo} value={modelo}>{modelo}</option>)}
+                                  </select>
+                                ) : (
+                                  <input value={newVehicleModel} onChange={(event) => setNewVehicleModel(event.target.value)} placeholder="Ex.: CG 160 Fan"/>
+                                )}
+                              </label>
+                              <label className="field"><span>Versão</span>
+                                {versionsOf(newVehicleBrand, newVehicleCatalogModel).length ? (
+                                  <select value={newVehicleVersion} onChange={(event) => { setNewVehicleVersion(event.target.value); setNewVehicleModel(fullModelName(newVehicleCatalogModel, event.target.value)); }}>
+                                    <option value="">Sem versão específica</option>
+                                    {versionsOf(newVehicleBrand, newVehicleCatalogModel).map((versao) => <option key={versao} value={versao}>{versao}</option>)}
+                                  </select>
+                                ) : (
+                                  <input value={newVehicleVersion} onChange={(event) => { setNewVehicleVersion(event.target.value); setNewVehicleModel(fullModelName(newVehicleCatalogModel || newVehicleModel, event.target.value)); }} placeholder="Ex.: ESDI" disabled={!newVehicleCatalogModel && modelsOf(newVehicleBrand).length > 0}/>
+                                )}
+                              </label>
+                              <label className="field"><span>Ano / modelo</span><input value={newVehicleYear} onChange={(event) => setNewVehicleYear(event.target.value)} placeholder="2024 / 2025"/></label>
+                              <label className="field"><span>Cor</span><input value={newVehicleColor} onChange={(event) => setNewVehicleColor(event.target.value)} placeholder="Ex.: Vermelha"/></label>
+                              <div className="os-inline-actions">
+                                {customerMotorcycles.length > 0 ? <button className="ghost-button" onClick={() => { setNewVehicleMode(false); setOsPlate(""); }}>Voltar para as motos do cliente</button> : <span className="os-inline-hint">{newVehicleModel.trim() ? `Fica gravado como: ${[newVehicleBrand, newVehicleModel].filter(Boolean).join(" ")}` : "Marca → modelo → versão."}</span>}
+                                {canManageCustomers ? <button className="outline-button" onClick={() => setCadastroNaOs("moto")}><Icon name="bike" size={15}/>Cadastro completo</button> : null}
+                              </div>
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </section>
                   </div>
-                  {customerLookupMatch && customerMotorcycles.length > 1 && !newVehicleMode ? <div className="vehicle-choice-block"><div><strong>Qual moto está entrando?</strong><small>Este cliente possui mais de um veículo.</small></div><div className="vehicle-choice-list">{customerMotorcycles.map((motorcycle) => <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}><span className="catalog-code">{motorcycle.model.includes("Biz") ? "BZ" : "CG"}</span><div><strong>{motorcycle.model}</strong><small>{motorcycle.plate} · {motorcycle.year}</small></div>{selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}</button>)}<button className="new-vehicle-choice" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}><span className="catalog-code">+</span><div><strong>Nenhuma dessas</strong><small>Cadastrar uma nova moto para {selectedCustomer?.name || "cliente"}</small></div></button></div></div> : null}
-                  {newVehicleMode || !customerLookupMatch ? <div className="inline-create new-vehicle-form"><label className="field"><span>Nome completo do cliente</span><input value={newCustomerName} onChange={(event) => setNewCustomerName(event.target.value)} placeholder="Nome do cliente"/></label><label className="field"><span>WhatsApp</span><input value={onlyDigits(customerLookup) ? customerLookup : ""} onChange={(event) => setCustomerLookup(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label><label className="field"><span>Marca e modelo</span><input value={newVehicleModel} onChange={(event) => setNewVehicleModel(event.target.value)} placeholder="Ex.: Honda CG 160 Fan"/></label><label className="field"><span>Ano / modelo</span><input value={newVehicleYear} onChange={(event) => setNewVehicleYear(event.target.value)} placeholder="2024 / 2025"/></label><label className="field"><span>Cor</span><input value={newVehicleColor} onChange={(event) => setNewVehicleColor(event.target.value)} placeholder="Ex.: Vermelha"/></label></div> : null}
-                  {!newVehicleMode && customerLookupMatch ? <button className="soft-action" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}><Icon name="plus" size={17}/>Cadastrar outro veículo para este cliente</button> : null}
-                  {canManageCustomers ? (
-                    <div className="os-full-register">
-                      <small>Precisa dos dados completos — CPF, endereço, chassi, proprietário?</small>
-                      <div>
-                        <button className="outline-button" onClick={() => setCadastroNaOs("cliente")}><Icon name="users" size={16}/>Cadastro completo do cliente</button>
-                        <button className="outline-button" onClick={() => setCadastroNaOs("moto")}><Icon name="bike" size={16}/>Cadastro completo da moto</button>
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
               ) : null}
               {step === 2 ? (
