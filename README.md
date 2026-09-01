@@ -44,6 +44,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:mechanic` | Confere o quadro do mecânico (o que é dele e o que está livre) |
 | `npm run check:backup` | Confere o que a cópia de segurança leva e quando ela avisa |
 | `npm run check:hooks` | Confere se nenhum componente declara hook depois de um `return` antecipado |
+| `npm run check:firestore-data` | Confere que nenhum campo vazio (`undefined`) escapa para o Firestore |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -729,14 +730,38 @@ no texto da tela** — a tela pode mostrar o que quiser:
 | 4 | Venda no PDV com R$ 5 de desconto grava `total: 35` e a forma `Dinheiro` |
 | 5 | O estoque cai de 10 para 9 no banco |
 | 6 | OS completa com placa, problema e mão de obra; cliente e moto viram cadastro |
-| 7 | Sangria de R$ 50 entra na sessão de caixa |
-| 8 | A gaveta fecha em R$ 185 (200 + 35 − 50) e a conferência dá "Confere" |
-| 9 | Todas as coleções esperadas existem no banco |
-| 10 | As 16 abas do menu abrem sem quebrar a tela |
-| 11 | Os 5 formulários de cadastro abrem e fecham sem quebrar a tela |
+| 7 | A OS vai até a entrega, é recebida em dinheiro e encerrada |
+| 8 | Serviço rápido de R$ 80 recebido no balcão |
+| 9 | Entrada de estoque de 10 peças sobe o saldo de 9 para 19 |
+| 10 | Conta a receber de R$ 200 lançada |
+| 11 | Gasto de R$ 40 pago pelo caixa **gravado no banco** |
+| 12 | Sangria de R$ 50 entra na sessão de caixa |
+| 13 | A gaveta fecha em R$ 375 (200 + 35 + 150 + 80 − 40 − 50) com "Confere" |
+| 14 | Todas as coleções esperadas existem no banco |
+| 15 | As 16 abas do menu abrem sem quebrar a tela |
+| 16 | Os 5 formulários de cadastro abrem e fecham sem quebrar a tela |
 
 Foi assim que os dois defeitos de hooks acima apareceram: o passo 4 derrubava a
 aplicação inteira.
+
+### Campo vazio derrubava a gravação inteira
+
+O passo 11 pegou o defeito mais caro de todos. O formulário de gasto montava
+`supplierId: expenseSupplierId || undefined` — ou seja, `undefined` sempre que
+ninguém escolhia fornecedor, que é o caso comum. O Firestore recusa o documento
+inteiro quando encontra um `undefined`, e a gravação em lote é atômica.
+
+O resultado era silencioso e caro: a tela dizia "Gasto registrado e descontado do
+saldo da oficina", o saldo do caixa caía na hora, e **nada era gravado**. Quem
+recarregasse a página via o dinheiro de volta na gaveta, com a nota já paga — e o
+fechamento do caixa acusaria uma quebra que não existia.
+
+A limpeza agora fica em `src/firestore-data.ts`, aplicada em **todos** os
+caminhos de gravação de `app/firebase/client.ts` — não em cada formulário, que é
+onde o próximo campo opcional voltaria a escapar. Campo ausente é diferente de
+campo nulo: com `merge: true`, omitir preserva o que já estava gravado, que é o
+comportamento certo para "não informado". `npm run check:firestore-data` prova
+que zero, texto vazio, `false` e `null` continuam gravando — só `undefined` sai.
 
 ## Responsividade
 

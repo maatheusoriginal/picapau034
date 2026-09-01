@@ -41,7 +41,7 @@ const erros = [];
 p.on("pageerror", (e) => erros.push("PAGEERROR: " + String(e).split("\n")[0]));
 p.on("console", (m) => { if (m.type() === "error") erros.push("CONSOLE: " + m.text().split("\n")[0].slice(0, 220)); });
 
-let n = 0, falhas = 0;
+let n = 0, falhas = 0, ordem = 0;
 const foto = async (s) => { n++; await p.screenshot({ path: `${OUT}/e2e-${String(n).padStart(2,"0")}-${s}.png`, fullPage: true }); };
 const txt = () => p.evaluate(() => document.body.innerText);
 // A conferência de verdade é no banco: a tela pode mostrar o que quiser.
@@ -62,9 +62,10 @@ const banco = async (colecao) => {
 };
 const passo = async (nome, fn) => {
   const antes = erros.length;
+  ordem += 1;
   try { await fn(); const nov = [...new Set(erros.slice(antes))];
-    console.log(`OK    ${nome}${nov.length ? "\n      ⚠ " + nov.join("\n      ⚠ ") : ""}`); }
-  catch (e) { falhas++; console.log(`FALHA ${nome}\n      ${String(e).split("\n")[0].slice(0,300)}`);
+    console.log(`OK    ${ordem}. ${nome}${nov.length ? "\n      ⚠ " + nov.join("\n      ⚠ ") : ""}`); }
+  catch (e) { falhas++; console.log(`FALHA ${ordem}. ${nome}\n      ${String(e).split("\n")[0].slice(0,300)}`);
     await foto("FALHA-" + nome.replace(/\W+/g,"-").slice(0,40)); }
 };
 const ir = async (destino) => {
@@ -81,7 +82,7 @@ await p.getByRole("button", { name: /^Entrar$/ }).click();
 await p.waitForTimeout(4500);
 console.log("=== TESTE PONTA A PONTA — Firestore real, regras reais ===\n");
 
-await passo("1. abrir caixa com R$ 200 de fundo", async () => {
+await passo("abrir caixa com R$ 200 de fundo", async () => {
   await ir("Financeiro");
   await p.getByRole("button", { name: /Abrir caixa/i }).first().click();
   await p.waitForTimeout(1500);
@@ -92,7 +93,7 @@ await passo("1. abrir caixa com R$ 200 de fundo", async () => {
   if (!/CX-0001/.test(t)) throw new Error("não abriu: " + t.slice(0, 250));
 });
 
-await passo("2. cadastrar produto: custo 25, estoque 10", async () => {
+await passo("cadastrar produto: custo 25, estoque 10", async () => {
   await ir("Produtos e estoque");
   await p.getByRole("button", { name: /Adicionar produto/i }).click();
   await p.waitForTimeout(2000);
@@ -110,14 +111,14 @@ await passo("2. cadastrar produto: custo 25, estoque 10", async () => {
 });
 await foto("estoque");
 
-await passo("3. preço gravado formatado (custo 25 + margem 60% = R$ 40,00)", async () => {
+await passo("preço gravado formatado (custo 25 + margem 60% = R$ 40,00)", async () => {
   const t = await txt();
   if (/R\$\s?40,00/.test(t)) return;
   const m = t.match(/Óleo 20W50[\s\S]{0,180}/);
   throw new Error("preço não saiu formatado: " + (m ? m[0].replace(/\n/g, " | ") : "?"));
 });
 
-await passo("4. vender no PDV em dinheiro com desconto", async () => {
+await passo("vender no PDV em dinheiro com desconto", async () => {
   await ir("PDV Balcão");
   await p.getByRole("button", { name: /Óleo 20W50 Mineral/ }).first().click({ timeout: 10000 });
   await p.waitForTimeout(1200);
@@ -142,7 +143,7 @@ await passo("4. vender no PDV em dinheiro com desconto", async () => {
 });
 await foto("venda");
 
-await passo("5. estoque baixou de 10 para 9", async () => {
+await passo("estoque baixou de 10 para 9", async () => {
   const produto = (await banco("products"))[0];
   if (!produto) throw new Error("produto sumiu do banco");
   if (produto.stock !== 9) throw new Error(`estoque no banco é ${produto.stock}, esperado 9`);
@@ -151,7 +152,7 @@ await passo("5. estoque baixou de 10 para 9", async () => {
   if (!m || !/\b9\b/.test(m[0])) throw new Error("a tela não mostra o saldo 9: " + (m ? m[0].replace(/\n/g, " | ") : "?"));
 });
 
-await passo("6. abrir uma OS completa com placa, problema e mão de obra", async () => {
+await passo("abrir uma OS completa com placa, problema e mão de obra", async () => {
   await ir("Ordens de serviço");
   await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
   await p.waitForTimeout(1500);
@@ -200,7 +201,100 @@ await passo("6. abrir uma OS completa com placa, problema e mão de obra", async
 });
 await foto("os-aberta");
 
-await passo("7. sangria de R$ 50 sai da gaveta", async () => {
+await passo("levar a OS até a entrega e faturar em dinheiro", async () => {
+  await ir("Ordens de serviço");
+  await p.locator("button", { hasText: /^Abrir$/ }).first().click();
+  await p.waitForTimeout(2500);
+  await p.locator(".order-status-control select").selectOption("Entrega");
+  await p.waitForTimeout(900);
+  await p.locator(".dialog-footer .primary-button").click();  // Salvar alterações -> checkout
+  await p.waitForTimeout(2000);
+  const titulo = await p.locator(".dialog h2").first().innerText();
+  if (!/receber/i.test(titulo)) throw new Error(`não abriu o recebimento da OS: "${titulo}"`);
+  await p.locator(".payment-methods button").filter({ hasText: "Dinheiro" }).first().click();
+  await p.waitForTimeout(700);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(4500);
+  const os = (await banco("serviceOrders"))[0];
+  if (!/Entrega|Conclu/i.test(os.status || "")) throw new Error(`OS ficou em "${os.status}"`);
+  if (!os.closedAt && !os.closedAtISO) throw new Error("a OS não registrou o encerramento");
+  // O recebimento fica gravado na própria OS — não vira documento em "sales".
+  if (Number(os.total) !== 150) throw new Error(`faturou ${os.total}, esperado 150`);
+  if (os.paymentMethod !== "Dinheiro") throw new Error(`forma gravada "${os.paymentMethod}", esperado Dinheiro`);
+});
+
+await passo("serviço rápido de R$ 80 recebido em dinheiro", async () => {
+  await ir("Serviço rápido");
+  await p.getByRole("button", { name: /Novo serviço rápido/i }).first().click();
+  await p.waitForTimeout(2200);
+  await p.locator(".dialog input[type=number]").first().fill("80");
+  await p.getByPlaceholder("Nome ou telefone").fill("Cliente do balcão");
+  await p.waitForTimeout(400);
+  const pagamento = p.locator(".dialog select").filter({ has: p.locator('option:text-is("Dinheiro")') }).first();
+  if (await pagamento.count()) await pagamento.selectOption({ label: "Dinheiro" });
+  await p.waitForTimeout(400);
+  await p.locator(".dialog-footer .primary-button, .dialog button", { hasText: /Finalizar e receber/ }).first().click();
+  await p.waitForTimeout(4500);
+  const rapidas = (await banco("sales")).filter((v) => Number(v.total) === 80);
+  if (!rapidas.length) throw new Error("o serviço rápido não gravou venda de R$ 80");
+});
+
+await passo("entrada de estoque: 10 peças a R$ 30 sobem o saldo e o custo médio", async () => {
+  await ir("Compras e entradas");
+  await p.getByRole("button", { name: /Nova entrada/i }).first().click();
+  await p.waitForTimeout(2200);
+  await p.locator(".dialog button", { hasText: /Adicionar produto/ }).click();
+  await p.waitForTimeout(1200);
+  const linha = p.locator(".dialog select").last();
+  await linha.selectOption({ index: 1 }).catch(() => {});
+  await p.waitForTimeout(600);
+  const numeros = p.locator(".dialog input[type=number]");
+  const quantos = await numeros.count();
+  if (quantos < 2) throw new Error(`a linha da entrada não trouxe quantidade e custo (${quantos} campos)`);
+  await numeros.nth(quantos - 2).fill("10");
+  await numeros.nth(quantos - 1).fill("30");
+  await p.waitForTimeout(500);
+  await p.locator(".dialog button", { hasText: /Confirmar entrada/ }).click();
+  await p.waitForTimeout(4500);
+  const produto = (await banco("products"))[0];
+  if (produto.stock !== 19) throw new Error(`estoque ficou ${produto.stock}, esperado 19 (9 + 10)`);
+  const entradas = await banco("stockEntries");
+  if (!entradas.length) throw new Error("a entrada não foi gravada em stockEntries");
+});
+
+await passo("lançar uma conta a receber de R$ 200", async () => {
+  await ir("Contas a receber");
+  await p.getByRole("button", { name: /Nova conta/i }).first().click();
+  await p.waitForTimeout(2200);
+  await p.getByPlaceholder("Ex.: Parcela de peças e serviço").fill("Parcela do kit relação");
+  await p.locator(".dialog input[type=number]").first().fill("200");
+  await p.waitForTimeout(400);
+  await p.locator(".dialog button", { hasText: /Criar conta a receber/ }).click();
+  await p.waitForTimeout(4500);
+  const contas = await banco("accounts");
+  const conta = contas.find((c) => Number(c.amount ?? c.total) === 200);
+  if (!conta) throw new Error(`nenhuma conta de R$ 200; gravadas: ${JSON.stringify(contas).slice(0, 200)}`);
+  if (!/receber/i.test(conta.kind || conta.type || "")) throw new Error(`gravou como "${conta.kind ?? conta.type}"`);
+});
+
+await passo("registrar um gasto de R$ 40 pago pelo caixa", async () => {
+  await ir("Financeiro");
+  await p.getByRole("button", { name: /Adicionar gasto/i }).first().click();
+  await p.waitForTimeout(2200);
+  await p.getByPlaceholder("Ex.: Retificador CG 160").fill("Óleo para a bancada");
+  await p.locator(".dialog input[type=number]").first().fill("40");
+  await p.waitForTimeout(400);
+  await p.locator(".dialog button", { hasText: /Registrar gasto/ }).click();
+  await p.waitForTimeout(4500);
+  // Este passo pegou o defeito: sem fornecedor escolhido o campo ia como
+  // `undefined`, o Firestore recusava o lote inteiro, a tela dizia "gasto
+  // registrado" e descontava do saldo — e no banco não havia nada.
+  const gastos = (await banco("expenses")).filter((e) => Number(e.amount ?? e.value ?? e.total) === 40);
+  if (!gastos.length) throw new Error("o gasto de R$ 40 não foi gravado no banco");
+  if (gastos[0].status !== "Pago") throw new Error(`gasto gravado como "${gastos[0].status}", esperado Pago`);
+});
+
+await passo("sangria de R$ 50 sai da gaveta", async () => {
   await ir("Financeiro");
   await p.getByRole("button", { name: /Movimentar caixa/i }).first().click();
   await p.waitForTimeout(1800);
@@ -218,13 +312,14 @@ await passo("7. sangria de R$ 50 sai da gaveta", async () => {
   if (!/sangria/i.test(movs[0].kind || movs[0].type || "")) throw new Error(`tipo gravado: ${JSON.stringify(movs[0])}`);
 });
 
-await passo("8. fechar o caixa e conferir", async () => {
+await passo("fechar o caixa e conferir", async () => {
   await ir("Financeiro");
   await p.getByRole("button", { name: /Movimentar caixa/i }).first().click();
   await p.waitForTimeout(1800);
   const esperado = await p.locator(".cash-balance strong").first().innerText();
   console.log(`      esperado na gaveta: ${esperado}`);
-  if (!/185,00/.test(esperado)) throw new Error(`gaveta em ${esperado}; esperado R$ 185,00 (200 de fundo + 35 da venda - 50 de sangria)`);
+  // 200 de fundo + 35 da venda + 150 da OS + 80 do serviço rápido - 40 de gasto - 50 de sangria
+  if (!/375,00/.test(esperado)) throw new Error(`gaveta em ${esperado}; esperado R$ 375,00 (200 + 35 + 150 + 80 - 40 - 50)`);
   await p.locator(".cash-actions button", { hasText: /Fechar caixa/ }).click();
   await p.waitForTimeout(800);
   await p.locator('.dialog input[inputmode="decimal"]').first().fill(esperado.replace(/[^\d,]/g, "").replace(",", "."));
@@ -238,20 +333,20 @@ await passo("8. fechar o caixa e conferir", async () => {
   if (!caixa) throw new Error("nenhuma sessão de caixa no banco");
   if (caixa.status !== "fechado") throw new Error(`caixa ficou "${caixa.status}", esperado fechado`);
   if (caixa.openingAmount !== 200) throw new Error(`fundo gravado ${caixa.openingAmount}, esperado 200`);
-  if (Math.abs((caixa.countedAmount ?? 0) - 185) > 0.01) throw new Error(`contado ${caixa.countedAmount}, esperado 185`);
+  if (Math.abs((caixa.countedAmount ?? 0) - 375) > 0.01) throw new Error(`contado ${caixa.countedAmount}, esperado 375`);
   if (Math.abs(caixa.difference ?? 999) > 0.01) throw new Error(`diferença ${caixa.difference}, esperado 0`);
 });
 await foto("caixa-fechado");
 
-await passo("9. o backup traz todas as coleções gravadas", async () => {
-  const esperadas = { sales: 1, serviceOrders: 1, products: 1, cashSessions: 1, clients: 1, motorcycles: 1 };
+await passo("o backup traz todas as coleções gravadas", async () => {
+  const esperadas = { serviceOrders: 1, products: 1, cashSessions: 1, clients: 1, motorcycles: 1, stockEntries: 1, expenses: 1, accounts: 1 };
   for (const [colecao, quantos] of Object.entries(esperadas)) {
     const achados = await banco(colecao);
     if (achados.length !== quantos) throw new Error(`${colecao}: ${achados.length} documento(s), esperado ${quantos}`);
   }
 });
 
-await passo("10. abrir cada aba do menu sem quebrar a tela", async () => {
+await passo("abrir cada aba do menu sem quebrar a tela", async () => {
   const quebradas = [];
   for (const destino of Object.keys(GRUPO).concat(["Relatórios"])) {
     const antes = erros.length;
@@ -262,7 +357,7 @@ await passo("10. abrir cada aba do menu sem quebrar a tela", async () => {
   if (quebradas.length) throw new Error("abas com falha: " + quebradas.join(", "));
 });
 
-await passo("11. abrir cada formulário de cadastro sem quebrar a tela", async () => {
+await passo("abrir cada formulário de cadastro sem quebrar a tela", async () => {
   const formularios = [
     ["Produtos e estoque", /Adicionar produto/i],
     ["Fornecedores", /Cadastrar fornecedor|Novo fornecedor|Adicionar fornecedor/i],
