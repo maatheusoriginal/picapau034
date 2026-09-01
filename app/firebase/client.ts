@@ -13,6 +13,7 @@ import {
   type User,
   connectAuthEmulator,
 } from "firebase/auth";
+import { withoutUndefined } from "../../src/firestore-data";
 import {
   connectFirestoreEmulator,
   collection,
@@ -432,7 +433,7 @@ export async function replaceCollection<T extends { id: string }>(name: string, 
     current.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
     records.forEach((record) => {
       const { id, ...data } = record;
-      batch.set(doc(reference, id), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+      batch.set(doc(reference, id), { ...withoutUndefined(data), updatedAt: serverTimestamp() }, { merge: true });
     });
     await batch.commit();
   } catch (error) {
@@ -454,7 +455,7 @@ export async function syncCollectionDiff<T extends { id: string }>(name: string,
     deletedIds.forEach((id) => batch.delete(doc(reference, id)));
     changed.forEach((record) => {
       const { id, ...data } = record;
-      batch.set(doc(reference, id), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+      batch.set(doc(reference, id), { ...withoutUndefined(data), updatedAt: serverTimestamp() }, { merge: true });
     });
     await batch.commit();
   } catch (error) {
@@ -546,8 +547,8 @@ export async function replaceEmployees<T extends EmployeeLike>(records: T[]) {
     currentCompensation.docs.forEach((item) => { if (!ids.has(item.id)) batch.delete(item.ref); });
     records.forEach((record) => {
       const { id, baseSalary, paymentDay, ...publicData } = record;
-      batch.set(doc(employeeReference, id), { ...publicData, updatedAt: serverTimestamp() }, { merge: true });
-      batch.set(doc(compensationReference, id), { baseSalary, paymentDay, updatedAt: serverTimestamp() }, { merge: true });
+      batch.set(doc(employeeReference, id), { ...withoutUndefined(publicData), updatedAt: serverTimestamp() }, { merge: true });
+      batch.set(doc(compensationReference, id), { ...withoutUndefined({ baseSalary, paymentDay }), updatedAt: serverTimestamp() }, { merge: true });
     });
     await batch.commit();
   } catch (error) {
@@ -569,8 +570,8 @@ export async function syncEmployeesDiff<T extends EmployeeLike>(changed: T[], de
     });
     changed.forEach((record) => {
       const { id, baseSalary, paymentDay, ...publicData } = record;
-      batch.set(doc(employeeReference, id), { ...publicData, updatedAt: serverTimestamp() }, { merge: true });
-      batch.set(doc(compensationReference, id), { baseSalary, paymentDay, updatedAt: serverTimestamp() }, { merge: true });
+      batch.set(doc(employeeReference, id), { ...withoutUndefined(publicData), updatedAt: serverTimestamp() }, { merge: true });
+      batch.set(doc(compensationReference, id), { ...withoutUndefined({ baseSalary, paymentDay }), updatedAt: serverTimestamp() }, { merge: true });
     });
     await batch.commit();
   } catch (error) {
@@ -588,7 +589,7 @@ export async function saveFirestoreDoc<T extends Record<string, unknown>>(collec
   const cleanData: Record<string, unknown> = { ...data };
   delete cleanData.id;
   try {
-    await setDoc(doc(db, collectionName, id), { ...cleanData, updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(doc(db, collectionName, id), { ...withoutUndefined(cleanData), updatedAt: serverTimestamp() }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${id}`);
   }
@@ -613,7 +614,7 @@ export async function createServiceOrder(prefix: string, startNumber: number, da
       const id = `${safePrefix}-${String(number).padStart(4, "0")}`;
       const reference = doc(db, "serviceOrders", id);
       if ((await getDoc(reference)).exists()) continue;
-      await setDoc(reference, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      await setDoc(reference, { ...withoutUndefined(data), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       return id;
     }
   } catch (error) {
@@ -639,7 +640,7 @@ export async function recordSale(
   const { db } = services();
   try {
     const batch = writeBatch(db);
-    batch.set(doc(db, "sales", saleId), { ...sale, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    batch.set(doc(db, "sales", saleId), { ...withoutUndefined(sale), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
     stockUpdates.forEach(({ productId, quantity }) => {
       // increment() em vez de gravar (estoque - vendido): a quantidade que o
       // carrinho conhece foi lida quando o item entrou na venda e pode estar
@@ -692,7 +693,7 @@ export async function recordStockEntry(
       });
 
       transaction.set(doc(db, "stockEntries", entryId), {
-        ...entry,
+        ...withoutUndefined(entry),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -718,7 +719,7 @@ export async function saveOrderWithStock(
   const { db } = services();
   try {
     const batch = writeBatch(db);
-    batch.set(doc(db, "serviceOrders", orderId), { ...order, updatedAt: serverTimestamp() }, { merge: true });
+    batch.set(doc(db, "serviceOrders", orderId), { ...withoutUndefined(order), updatedAt: serverTimestamp() }, { merge: true });
     deltas.forEach(({ productId, quantity }) => {
       batch.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
     });
@@ -777,7 +778,7 @@ export async function saveImportedProducts(
       const batch = writeBatch(db);
       const block = writes.slice(start, start + IMPORT_BATCH_SIZE);
       block.forEach(({ id, data, merge }) => {
-        batch.set(doc(db, "products", id), { ...data, updatedAt: serverTimestamp() }, { merge });
+        batch.set(doc(db, "products", id), { ...withoutUndefined(data), updatedAt: serverTimestamp() }, { merge });
       });
       await batch.commit();
       written += block.length;
@@ -818,7 +819,7 @@ export async function saveAccounts(prefix: string, startNumber: number, accounts
 
     const batch = writeBatch(db);
     accounts.forEach((data, index) => {
-      batch.set(doc(db, "accounts", ids[index]!), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      batch.set(doc(db, "accounts", ids[index]!), { ...withoutUndefined(data), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
     });
     await batch.commit();
     return ids;
@@ -865,7 +866,7 @@ export async function recordMovement(data: Record<string, unknown>) {
       const id = `MOV-${String(number).padStart(4, "0")}`;
       const reference = doc(db, "movements", id);
       if ((await getDoc(reference)).exists()) continue;
-      await setDoc(reference, { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      await setDoc(reference, { ...withoutUndefined(data), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       return id;
     }
   } catch (error) {
@@ -896,7 +897,7 @@ export async function openCashSession(data: Record<string, unknown>) {
       const id = `CX-${String(number).padStart(4, "0")}`;
       const reference = doc(db, "cashSessions", id);
       if ((await getDoc(reference)).exists()) continue;
-      await setDoc(reference, { ...data, status: "aberto", createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      await setDoc(reference, { ...withoutUndefined(data), status: "aberto", createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       return id;
     }
   } catch (error) {
@@ -923,7 +924,7 @@ export async function addCashMovement(sessionId: string, movement: Record<string
       const data = snapshot.data() ?? {};
       if (data.status !== "aberto") throw new Error("Este caixa já foi fechado.");
       const movements = Array.isArray(data.movements) ? data.movements : [];
-      transaction.set(reference, { movements: [...movements, movement], updatedAt: serverTimestamp() }, { merge: true });
+      transaction.set(reference, { movements: withoutUndefined([...movements, movement]), updatedAt: serverTimestamp() }, { merge: true });
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `cashSessions/${sessionId}`);
@@ -948,7 +949,7 @@ export async function closeCashSession(sessionId: string, closing: Record<string
       const snapshot = await transaction.get(reference);
       if (!snapshot.exists()) throw new Error("Este caixa não existe mais.");
       if ((snapshot.data() ?? {}).status !== "aberto") throw new Error("Este caixa já foi fechado.");
-      transaction.set(reference, { ...closing, status: "fechado", updatedAt: serverTimestamp() }, { merge: true });
+      transaction.set(reference, { ...withoutUndefined(closing), status: "fechado", updatedAt: serverTimestamp() }, { merge: true });
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `cashSessions/${sessionId}`);
@@ -978,7 +979,7 @@ export async function settleAccount(accountId: string, settlement: Record<string
       if (amount <= 0) throw new Error("Informe o valor da baixa.");
       if (amount > open + 0.005) throw new Error(`O valor da baixa passa do saldo em aberto (${open.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}).`);
       transaction.set(reference, {
-        settlements: [...settlements, settlement],
+        settlements: withoutUndefined([...settlements, settlement]),
         updatedAt: serverTimestamp(),
       }, { merge: true });
     });
