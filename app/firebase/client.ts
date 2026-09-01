@@ -11,8 +11,10 @@ import {
   signOut,
   updatePassword,
   type User,
+  connectAuthEmulator,
 } from "firebase/auth";
 import {
+  connectFirestoreEmulator,
   collection,
   deleteDoc,
   doc,
@@ -128,11 +130,28 @@ type EmployeeLike = {
 
 let persistenceReady: Promise<void> | null = null;
 
+/**
+ * Aponta o app para o emulador do Firebase, quando VITE_FIREBASE_EMULATOR=1.
+ *
+ * É o que permite exercitar os fluxos de verdade — abrir caixa, vender, baixar
+ * estoque, fechar — contra um banco real e com as regras de firestore.rules
+ * carregadas, sem tocar nos dados da oficina. Em produção a variável não
+ * existe e nada disto roda.
+ */
+let emulatorReady = false;
+function connectEmulators(auth: ReturnType<typeof getAuth>, db: ReturnType<typeof getFirestore>) {
+  if (emulatorReady || import.meta.env.VITE_FIREBASE_EMULATOR !== "1") return;
+  emulatorReady = true;
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+}
+
 function services() {
   if (typeof window === "undefined") throw new Error("Firebase está disponível somente no navegador.");
   const app = getApps().length ? getApp() : initializeApp(resolveFirebaseConfig());
   const auth = getAuth(app);
   const db = getFirestore(app);
+  connectEmulators(auth, db);
   if (!persistenceReady) persistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => undefined);
   return { app, auth, db };
 }

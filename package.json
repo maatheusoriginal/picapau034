@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "tsx server/index.ts",
+    "dev:emulador": "vite --mode emulador --port 5199",
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
@@ -19,7 +20,9 @@
     "check:permissions": "tsx scripts/check-permissions.ts",
     "check:api-imports": "tsx scripts/check-api-imports.ts",
     "check:mechanic": "tsx scripts/check-mechanic.ts",
-    "check:backup": "tsx scripts/check-backup.ts"
+    "check:backup": "tsx scripts/check-backup.ts",
+    "check:hooks": "tsx scripts/check-hooks.ts",
+    "e2e:emulador": "node scripts/emulador/e2e.mjs"
   },
   "dependencies": {
     "express": "4.21.2",

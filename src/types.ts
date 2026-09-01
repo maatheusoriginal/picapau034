@@ -183,6 +183,49 @@ export type PaymentMethodConfig = {
   usesMachine: boolean;
 };
 
+/**
+ * Formas de pagamento que valem enquanto ninguém configurou as suas.
+ *
+ * Sem isto, uma oficina recém-instalada abre o PDV, monta a venda e não
+ * encontra NENHUMA forma de pagamento para escolher — não dá para receber
+ * nada. A coleção nasce vazia e a tela só lista o que está nela.
+ *
+ * Mesma ideia de `defaultSystemLists`: o padrão vale até a oficina cadastrar
+ * o seu, e some assim que ela cadastrar.
+ */
+export const defaultPaymentMethods: PaymentMethodConfig[] = [
+  { id: "PM-DINHEIRO", name: "Dinheiro", active: true, usesMachine: false },
+  { id: "PM-PIX", name: "PIX", active: true, usesMachine: false },
+  { id: "PM-DEBITO", name: "Débito", active: true, usesMachine: true },
+  { id: "PM-CREDITO", name: "Crédito", active: true, usesMachine: true },
+  { id: "PM-PRAZO", name: "Nota a prazo", active: true, usesMachine: false },
+  { id: "PM-TROCA", name: "Troca de serviços", active: true, usesMachine: false },
+];
+
+/**
+ * Maquininha genérica, sem taxa, para o cartão funcionar antes de a oficina
+ * cadastrar a dela. Taxa zero não inventa desconto que não existe: quando a
+ * oficina cadastrar a máquina de verdade, a taxa passa a valer.
+ */
+export const defaultPaymentMachines: PaymentMachineConfig[] = [
+  { id: "MAQ-PADRAO", name: "Maquininha da oficina", active: true, primary: true,
+    debitFee: 0, credit1xFee: 0, credit2to6Fee: 0, credit7to12Fee: 0, settlementDays: 1 },
+];
+
+/** Categorias de peça para o cadastro de produto não abrir sem opção nenhuma. */
+export const defaultProductCategories: CategoryConfig[] = [
+  "Motor e Transmissão", "Freios e Rodas", "Elétrica e Ignição", "Suspensão e Direção",
+  "Lubrificantes e Fluidos", "Pneus e Câmaras", "Acessórios e Carenagens", "Cabos e Relação", "Filtros",
+].map((name, index) => ({ id: `CAT-${String(index + 1).padStart(3, "0")}`, name, group: "Produtos" as const, active: true }));
+
+/**
+ * Devolve o que está cadastrado ou o padrão, quando a oficina ainda não
+ * configurou nada. Mesma função de `systemList` para as listas do sistema.
+ */
+export function orDefault<T>(configured: T[] | undefined, fallback: T[]): T[] {
+  return configured && configured.length ? configured : fallback;
+}
+
 export type PartnerConfig = {
   id: string;
   name: string;

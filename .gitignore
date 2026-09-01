@@ -9,6 +9,8 @@ dist/
 .env
 .env.*
 !.env.example
+# Só valores falsos do emulador — serve para rodar o teste ponta a ponta.
+!.env.emulador
 
 # Logs e arquivos do sistema
 *.log

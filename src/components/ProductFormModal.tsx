@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsConfig, StockEntryRecord, SupplierConfig } from "../types";
-import { defaultSystemLists } from "../types";
+import { defaultProductCategories, defaultSystemLists } from "../types";
 import { markupFromPrice, movementTotals, priceFromMarkup, productMovements } from "../inventory";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 
@@ -77,9 +77,11 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     [editingProduct, movementSources],
   );
   const totals = useMemo(() => movementTotals(movements), [movements]);
+  // A mesma lista padrão que a tela de estoque usa: duas listas diferentes
+  // faziam o produto nascer numa categoria que o filtro do estoque não conhecia.
   const defaultCategories = productCategories.length > 0
     ? productCategories
-    : ["Motor e Transmissão", "Freios e Rodas", "Elétrica e Ignição", "Suspensão e Direção", "Lubrificantes e Fluidos", "Pneus e Câmaras", "Acessórios e Carenagens", "Cabos e Relação", "Filtros"];
+    : defaultProductCategories.map((item) => item.name);
 
   // Populate form on open / editingProduct change
   useEffect(() => {

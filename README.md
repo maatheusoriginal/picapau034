@@ -43,6 +43,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:api-imports` | Confere se as funções da Vercel conseguem carregar |
 | `npm run check:mechanic` | Confere o quadro do mecânico (o que é dele e o que está livre) |
 | `npm run check:backup` | Confere o que a cópia de segurança leva e quando ela avisa |
+| `npm run check:hooks` | Confere se nenhum componente declara hook depois de um `return` antecipado |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -655,6 +656,87 @@ marcado em `sessionStorage` para nunca virar laço, e limpo quando o app abre
 inteiro, para o próximo deploy também se resolver sozinho. Se o
 `sessionStorage` estiver bloqueado (janela anônima), mostra a mensagem em vez de
 recarregar às cegas.
+
+### A segunda causa: hooks depois de um `return`
+
+A rede de segurança acima trata o modal que não carrega. A tela branca que
+sobrava tinha outra origem, encontrada só quando o sistema foi rodado de ponta a
+ponta contra um banco de verdade:
+
+```
+Rendered more hooks than during the previous render.
+The above error occurred in the <ModuleWorkspace> component
+```
+
+O React exige que **todo componente chame exatamente os mesmos hooks, na mesma
+ordem, em toda renderização**. Dois lugares quebravam essa regra:
+
+- `ModuleWorkspace` declarava dois `useMemo` **depois** de dez `return`
+  antecipados (`if (active === "PDV Balcão") return ...`). Sair de uma aba que
+  retorna cedo para uma que não retorna mudava a contagem de hooks e derrubava a
+  tela.
+- `AppDialog` fica montado o tempo todo e declarava **86 hooks depois** dos
+  cinco `return` dos formulários de produto, fornecedor, moto, cliente e
+  funcionário.
+
+Nos dois casos a correção é a mesma e não muda nada visualmente: todo hook subiu
+para antes do primeiro `return`.
+
+Para o defeito não voltar, `npm run check:hooks` lê `app/` e `src/`, marca onde
+cada componente começa, conta a profundidade de chaves caractere a caractere
+(para não se confundir com a lista de props em várias linhas nem com `return`
+dentro de um `.map`) e falha se encontrar um hook abaixo de um `return`
+antecipado. Rodado contra a versão com o defeito, aponta os 88 hooks fora de
+lugar; contra a versão corrigida, passa limpo.
+
+## Teste ponta a ponta com o emulador do Firebase
+
+Os `check:*` conferem contas em funções puras. Eles não provam que a tela grava
+no banco. Para isso o repositório traz a configuração do **Firebase Emulator
+Suite**, que sobe um Firestore e um Auth locais **com o `firestore.rules` de
+verdade carregado** — sem tocar nos dados da oficina.
+
+Em três terminais:
+
+```bash
+npx -y firebase-tools emulators:start --project picapau-teste  # Auth :9099, Firestore :8080
+npm run dev:emulador                                           # interface em :5199, lendo .env.emulador
+npm i --no-save playwright-core && npm run e2e:emulador        # o roteiro de teste
+```
+
+`firebase.json`, `.firebaserc` e `.env.emulador` estão versionados; o
+`.env.emulador` só tem valores falsos. Quando `VITE_FIREBASE_EMULATOR=1`,
+`app/firebase/client.ts` aponta o app para os emuladores; em produção a variável
+não existe e nada disso roda. Se a interface subir em outra porta, passe
+`URL_TESTE=http://127.0.0.1:PORTA`.
+
+Nem o `firebase-tools` nem o `playwright-core` são dependências do projeto, de
+propósito: juntos passam de meio giga, só servem para este teste e atrasariam a
+instalação na Vercel. Por isso vêm por `npx -y` e `--no-save`.
+
+### O que o roteiro faz
+
+`scripts/emulador/e2e.mjs` apaga o banco, semeia um Super Admin
+(`scripts/emulador/semear.mjs`, `dono@picapau.test` / `teste123`), abre o
+navegador e faz o dia da oficina. **Cada resultado é conferido no Firestore, não
+no texto da tela** — a tela pode mostrar o que quiser:
+
+| Passo | O que prova |
+| --- | --- |
+| 1 | Abre o caixa com R$ 200 de fundo e grava `CX-0001` |
+| 2 | Cadastra uma peça com custo 25 e estoque 10 |
+| 3 | O preço nasce de `custo + margem` e é gravado formatado (`R$ 40,00`) |
+| 4 | Venda no PDV com R$ 5 de desconto grava `total: 35` e a forma `Dinheiro` |
+| 5 | O estoque cai de 10 para 9 no banco |
+| 6 | OS completa com placa, problema e mão de obra; cliente e moto viram cadastro |
+| 7 | Sangria de R$ 50 entra na sessão de caixa |
+| 8 | A gaveta fecha em R$ 185 (200 + 35 − 50) e a conferência dá "Confere" |
+| 9 | Todas as coleções esperadas existem no banco |
+| 10 | As 16 abas do menu abrem sem quebrar a tela |
+| 11 | Os 5 formulários de cadastro abrem e fecham sem quebrar a tela |
+
+Foi assim que os dois defeitos de hooks acima apareceram: o passo 4 derrubava a
+aplicação inteira.
 
 ## Responsividade
 
