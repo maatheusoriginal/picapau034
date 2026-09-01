@@ -18,16 +18,25 @@ import type { AccountRecord, AccountSettlement, ExpenseRecord, MovementRecord, O
  *
  * "Troca de serviços" é compensação: quita a dívida sem entrada de dinheiro —
  * é o que a própria tela de pagamento já explica ("Entrada em caixa: R$ 0,00").
- * "Nota a prazo" entra depois, e por isso vira conta a receber.
+ * "Nota a prazo" entra depois, e por isso vira conta a receber. "Faturado no
+ * parceiro" é o mesmo caso da nota, só que o prazo é o fechamento do mês da
+ * empresa: a moto sai da oficina hoje, o dinheiro vem na fatura.
  */
-export const NON_CASH_PAYMENT_METHODS = ["Troca de serviços", "Nota a prazo"];
+export const PARTNER_PAYMENT_METHOD = "Faturado no parceiro";
+
+export const NON_CASH_PAYMENT_METHODS = ["Troca de serviços", "Nota a prazo", PARTNER_PAYMENT_METHOD];
 
 export function isCashPayment(method: string | undefined): boolean {
   return !NON_CASH_PAYMENT_METHODS.includes((method ?? "").trim());
 }
 
 export function isCreditPayment(method: string | undefined): boolean {
-  return (method ?? "").trim() === "Nota a prazo";
+  const forma = (method ?? "").trim();
+  // "Faturado no parceiro" é a prazo pelo mesmo motivo da nota: o serviço saiu,
+  // o dinheiro entra na fatura do mês seguinte. Assim a OS da frota não conta
+  // como faturamento recebido, não entra na gaveta do caixa e aparece em
+  // Contas a receber — tudo pelo caminho que já existia.
+  return forma === "Nota a prazo" || forma === PARTNER_PAYMENT_METHOD;
 }
 
 // ---------------------------------------------------------------------------
@@ -543,7 +552,7 @@ export function financeSummary(
   };
 }
 
-function round2(value: number): number {
+export function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 

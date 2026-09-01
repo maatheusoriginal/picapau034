@@ -24,6 +24,7 @@
     "check:hooks": "tsx scripts/check-hooks.ts",
     "check:firestore-data": "tsx scripts/check-firestore-data.ts",
     "check:number-input": "tsx scripts/check-number-input.ts",
+    "check:partner": "tsx scripts/check-partner.ts",
     "e2e:emulador": "node scripts/emulador/e2e.mjs"
   },
   "dependencies": {

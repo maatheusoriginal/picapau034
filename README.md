@@ -46,6 +46,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:hooks` | Confere se nenhum componente declara hook depois de um `return` antecipado |
 | `npm run check:firestore-data` | Confere que nenhum campo vazio (`undefined`) escapa para o Firestore |
 | `npm run check:number-input` | Confere que o campo de número deixa apagar o que está escrito |
+| `npm run check:partner` | Confere o faturamento por empresa parceira (desconto, vencimento e caixa) |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -798,6 +799,56 @@ as 31: que vazio, `1,` e `-` são estados válidos no meio da digitação; que
 
 Os campos que guardam texto puro (valor do gasto, valor da conta, mão de obra
 avulsa) nunca tiveram o defeito e foram deixados como estavam.
+
+## Empresa parceira
+
+A oficina atende frotas — aplicativo de entrega, locadora, transportadora. A
+moto entra, a peça sai do estoque e o serviço é feito no dia; **o dinheiro só
+vem na fatura do mês seguinte**. Tratar isso como venda à vista mentia duas
+vezes: dizia que entrou dinheiro que não entrou, e o caixa do dia fechava com
+quebra.
+
+Na etapa **Origem** da OS, escolher "Encaminhado por parceiro" agora:
+
+- marca a empresa como responsável pelo pagamento (era um `<select>` com
+  `defaultValue`, sem estado e sem ninguém lendo — escolher "Empresa parceira"
+  não mudava nada, e a OS da frota era cobrada do motoboy que trouxe a moto);
+- oferece **qualquer moto já cadastrada no sistema**, mesmo em nome de outra
+  pessoa, porque a frota traz hoje uma moto e amanhã outra;
+- grava quem trouxe a moto (entregador e contato — também eram dois campos
+  soltos, sem estado).
+
+No encerramento, a OS faturada **não pergunta forma de pagamento**. Mostra o que
+vai para a fatura, com o desconto combinado aplicado **só na mão de obra** —
+peça tem preço fixo, dar desconto nela seria vender abaixo do que a oficina
+pagou ao fornecedor —, e diz o vencimento.
+
+O valor vira conta a receber **no nome da empresa**, com vencimento no dia 1º do
+mês seguinte. A baixa do estoque acontece normalmente, como em qualquer OS.
+
+Por dentro, a forma de pagamento gravada é `Faturado no parceiro`, reconhecida
+como pagamento a prazo pelo resto do sistema: não conta como faturamento
+recebido, não entra na gaveta do caixa, e aparece em Contas a receber — tudo
+pelo caminho que já existia para a nota a prazo.
+
+`npm run check:partner` confere as 30 regras: o desconto sobre a mão de obra
+(inclusive 0%, 100%, negativo e acima de 100), o vencimento (virada de mês, de
+ano, último dia do mês) e que o dinheiro não entra na gaveta.
+
+### O id da OS se perdia no caminho do recebimento
+
+Encontrado ao testar isto com **mais de uma OS na lista**. Ao ir do detalhe da
+OS para a tela de receber, o id não era repassado: `openDialog` limpava o
+registro selecionado e o `currentOrder` caía num `?? orders[0]`.
+
+O resultado: o recebimento era gravado na **primeira OS da lista**. A ordem
+errada era encerrada, com os itens e o total da outra, e a certa continuava
+aberta. Com uma OS só nada aparecia — que é por que passou até agora.
+
+O id passou a ir junto, e o encerramento recusa gravar quando a OS não é a
+selecionada, em vez de encerrar a errada em silêncio. O roteiro ponta a ponta
+confere que a OS do passo 6 continua com os seus R$ 150 em dinheiro depois de a
+OS da parceira ser encerrada.
 
 ## Responsividade
 

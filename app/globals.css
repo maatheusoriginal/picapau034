@@ -1611,6 +1611,31 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   font-size: 11px;
 }
 
+/* Encerramento de OS faturada na empresa parceira: não se pergunta forma de
+   pagamento, mostra-se o que vai para a fatura e quando vence. */
+.partner-billing-card {
+  display: grid;
+  gap: 12px;
+  padding: 15px 16px;
+  border: 1px solid #d9e2f0;
+  border-radius: 13px;
+  background: #f6f9fd;
+}
+
+.partner-billing-head { display: flex; align-items: center; gap: 11px; }
+.partner-billing-head > span { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 10px; background: #e3ecf9; color: #2f5c9e; }
+.partner-billing-head strong { display: block; font-size: 13px; color: #22242a; }
+.partner-billing-head small { display: block; margin-top: 2px; color: #6f7c90; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+
+.partner-billing-lines { display: grid; gap: 7px; }
+.partner-billing-lines > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 11px; color: #55606f; }
+.partner-billing-lines b { font-size: 12px; color: #2b2d33; font-variant-numeric: tabular-nums; }
+.partner-billing-discount { color: #2f7a48 !important; }
+.partner-billing-discount b { color: #2f7a48; }
+.partner-billing-total { margin-top: 4px; padding-top: 9px; border-top: 1px solid #dde5f1; }
+.partner-billing-total span { font-weight: 800; color: #22242a; }
+.partner-billing-total b { font-size: 16px; }
+
 /* Atalho para o cadastro completo de cliente e moto sem sair da OS. */
 .os-full-register {
   display: flex;
