@@ -28,6 +28,13 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   brands = [],
 }) => {
   const [isSaving, setIsSaving] = useState(false);
+  // O que falta preencher, dito DENTRO do formulário.
+  //
+  // Era um `notify` — o aviso de canto da aplicação —, que num formulário
+  // aberto por cima de outro (o cadastro de cliente chamado de dentro da OS)
+  // aparece atrás do modal. Quem clicava em salvar via a aba trocar sozinha e
+  // nada acontecer, sem nenhuma explicação na tela.
+  const [erroForm, setErroForm] = useState("");
 
   // Form Fields
   const [plate, setPlate] = useState("");
@@ -112,15 +119,16 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
 
     const cleanPlate = normalizePlateInput(plate);
     if (!cleanPlate) {
-      notify("Informe a placa da motocicleta.");
+      setErroForm("Informe a placa da motocicleta.");
       return;
     }
 
     if (!model.trim()) {
-      notify("Informe o modelo da moto.");
+      setErroForm("Informe o modelo da moto.");
       return;
     }
 
+    setErroForm("");
     setIsSaving(true);
     try {
       const motoId = editingMotorcycle?.id || `MOTO-${cleanPlate}`;
@@ -171,7 +179,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
       onClose();
     } catch (err: unknown) {
       console.error("Erro ao salvar moto:", err);
-      notify(err instanceof Error ? err.message : "Não foi possível salvar a motocicleta.");
+      setErroForm(err instanceof Error ? err.message : "Não foi possível salvar a motocicleta. Verifique a conexão e tente de novo.");
     } finally {
       setIsSaving(false);
     }
@@ -191,6 +199,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="dialog-body">
+          {erroForm ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erroForm}</span></div> : null}
           <div className="form-section-stack">
             {/* Linha 1: Placa e Proprietário */}
             <div className="form-grid-2">

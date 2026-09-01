@@ -26,3 +26,25 @@ export function withoutUndefined<T>(value: T): T {
   }
   return value;
 }
+
+/**
+ * O maior número já usado numa sequência de ids (CLI-007, SUP-012...).
+ *
+ * Os formulários numeravam o registro novo pela QUANTIDADE de registros
+ * (`allClients.length + 1`). Basta apagar um cliente para a contagem recuar, e
+ * aí o próximo cadastro recebe um id que já existe e sobrescreve o registro de
+ * outra pessoa — com nome, telefone e histórico. Contar não serve; o que vale
+ * é o maior número já emitido.
+ */
+export function highestSequence(records: Array<{ id: string }>, prefix: string): number {
+  return records.reduce((highest, record) => {
+    if (prefix && !record.id.toUpperCase().startsWith(`${prefix.toUpperCase()}-`)) return highest;
+    const digits = record.id.match(/(\d+)\s*$/);
+    return digits ? Math.max(highest, Number(digits[1])) : highest;
+  }, 0);
+}
+
+/** O próximo id livre da sequência, já formatado (CLI-008). */
+export function nextSequentialId(records: Array<{ id: string }>, prefix: string, width = 3): string {
+  return `${prefix}-${String(highestSequence(records, prefix) + 1).padStart(width, "0")}`;
+}

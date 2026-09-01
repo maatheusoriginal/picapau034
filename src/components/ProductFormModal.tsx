@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsConfig, StockEntryRecord, SupplierConfig } from "../types";
 import { defaultProductCategories, defaultSystemLists } from "../types";
 import { markupFromPrice, movementTotals, priceFromMarkup, productMovements } from "../inventory";
+import { nextSequentialId } from "../firestore-data";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
 
@@ -16,6 +17,7 @@ interface ProductFormModalProps {
   allProducts: ProductRecord[];
   /** Unidades configuradas em Configurações → Listas do sistema. */
   units?: string[];
+  partBrands?: string[];
   /** Padrões da oficina (markup sugerido, estoque mínimo, unidade e modo de preço). */
   settings?: Partial<SettingsConfig> | null;
   /** Compras, vendas e OS, para montar o histórico da peça. */
@@ -36,11 +38,15 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   notify,
   allProducts,
   units = [],
+  partBrands = [],
   settings = null,
   movementSources,
 }) => {
   const [activeTab, setActiveTab] = useState<"ident" | "prices" | "stock" | "compat" | "extra" | "history">("ident");
   const [isSaving, setIsSaving] = useState(false);
+  // O que falta preencher, dito dentro do formulário. Era um aviso de canto
+  // que aparecia atrás do modal.
+  const [erro, setErro] = useState("");
 
   // Form State
   const [name, setName] = useState("");
@@ -73,6 +79,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
   const money = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const unitOptions = units.length ? units : defaultSystemLists.units;
+  const brandOptions = partBrands.length ? partBrands : defaultSystemLists.partBrands;
   const movements = useMemo(
     () => (editingProduct ? productMovements(editingProduct.id, movementSources ?? {}) : []),
     [editingProduct, movementSources],
@@ -120,9 +127,10 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setNotes(editingProduct.notes || "");
       setActive(editingProduct.active !== false);
     } else {
-      // Auto generate next code
-      const nextNum = allProducts.length + 1;
-      const generatedCode = `PRD-${String(nextNum).padStart(3, "0")}`;
+      // O código sai do maior número já emitido, e não da quantidade de peças:
+      // contar a lista faz a próxima peça reaproveitar o código de uma peça
+      // apagada e sobrescrever o cadastro dela.
+      const generatedCode = nextSequentialId(allProducts, "PRD");
       
       setName("");
       setCode(generatedCode);
@@ -176,20 +184,31 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
   const grossProfit = price - cost;
 
+  // As etapas do cadastro, na ordem. A aba de movimentação fica fora: é
+  // leitura, não etapa.
+  const etapas = ["ident", "prices", "stock", "compat", "extra"] as const;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Pressionar Enter dentro de qualquer campo dispara o submit do
+    // formulário, em qualquer etapa. Era o que fechava o cadastro no meio do
+    // caminho: a peça era gravada com o que já estava preenchido e a tela
+    // sumia, como se tivesse dado erro. Enter agora avança de etapa, que é o
+    // que a pessoa espera — gravar é só pelo botão da última.
+
     if (!name.trim()) {
-      notify("Informe o nome do produto.");
+      setErro("Informe o nome da peça antes de cadastrar.");
       setActiveTab("ident");
       return;
     }
 
     if (price <= 0) {
-      notify("Informe um preço de venda maior que zero.");
+      setErro("Informe um preço de venda maior que zero.");
       setActiveTab("prices");
       return;
     }
+    setErro("");
 
     setIsSaving(true);
     try {
@@ -255,7 +274,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       onClose();
     } catch (err: unknown) {
       console.error("Erro ao salvar produto:", err);
-      notify(err instanceof Error ? err.message : "Não foi possível salvar o produto.");
+      setErro(err instanceof Error ? err.message : "Não foi possível salvar a peça. Verifique a conexão e tente de novo.");
     } finally {
       setIsSaving(false);
     }
@@ -300,6 +319,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="dialog-body">
+          {erro ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erro}</span></div> : null}
           {/* TAB 1: IDENTIFICAÇÃO */}
           {activeTab === "ident" && (
             <div className="form-section-stack">
@@ -366,13 +386,33 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               <div className="form-grid-3">
                 <label className="field-group">
                   <span className="field-label">Marca / Fabricante</span>
-                  <input
-                    type="text"
-                    value={brand}
-                    onChange={(e) => setBrand(e.target.value)}
-                    placeholder="Ex: Yamalube, Mobil, Cobreq"
+                  {/*
+                    Só dava para digitar, e cada pessoa escrevia de um jeito
+                    ("Motul", "MOTUL", "motul 5100"): o filtro por marca no
+                    estoque não juntava nada. Agora sai da lista cadastrada em
+                    Configurações → Listas do sistema, com "Outra" para o que
+                    ainda não está lá.
+                  */}
+                  <select
+                    value={brand === "" || brandOptions.includes(brand) ? brand : "__outra__"}
+                    onChange={(e) => setBrand(e.target.value === "__outra__" ? " " : e.target.value)}
                     className="dialog-input"
-                  />
+                  >
+                    <option value="">Sem marca definida</option>
+                    {brandOptions.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                    <option value="__outra__">Outra (digitar abaixo)</option>
+                  </select>
+                  {brand !== "" && !brandOptions.includes(brand) && (
+                    <input
+                      type="text"
+                      value={brand.trim()}
+                      onChange={(e) => setBrand(e.target.value)}
+                      placeholder="Ex: Yamalube, Mobil, Cobreq"
+                      className="dialog-input"
+                      style={{ marginTop: "8px" }}
+                      autoFocus
+                    />
+                  )}
                 </label>
                 <label className="field-group">
                   <span className="field-label">Unidade de Medida</span>
@@ -663,37 +703,46 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   type="button"
                   className="outline-button"
                   onClick={() => {
-                    // A aba de movimentação fica fora: é leitura, não etapa do cadastro.
-                    const tabs = ["ident", "prices", "stock", "compat", "extra"] as const;
-                    const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx > 0) setActiveTab(tabs[currIdx - 1]!);
+                    const atual = etapas.indexOf(activeTab as (typeof etapas)[number]);
+                    if (atual > 0) setActiveTab(etapas[atual - 1]!);
                   }}
                 >
                   Anterior
                 </button>
               )}
-              {activeTab !== "extra" && activeTab !== "history" ? (
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => {
-                    // A aba de movimentação fica fora: é leitura, não etapa do cadastro.
-                    const tabs = ["ident", "prices", "stock", "compat", "extra"] as const;
-                    const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx < tabs.length - 1) setActiveTab(tabs[currIdx + 1]!);
-                  }}
-                >
-                  Próxima etapa →
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  className="primary-button save-action-btn"
-                  disabled={isSaving}
-                >
-                  {isSaving ? "Salvando no Firestore..." : (editingProduct ? "Salvar Alterações" : "Cadastrar Produto")}
-                </button>
-              )}
+              {/*
+                "Próxima etapa" e o botão de gravar ficam SEMPRE os dois na
+                tela, cada um no seu lugar.
+
+                Antes o mesmo canto trocava de botão: na etapa 4 era "Próxima
+                etapa", e assim que ela avançava virava "Cadastrar Produto", no
+                mesmo pixel. Um clique duplo — ou dois cliques seguidos, que é o
+                que se faz num botão que parece não ter respondido — avançava e
+                logo em seguida gravava: a peça era cadastrada pela metade e a
+                tela fechava sozinha. Reproduzido com dblclick e conferido no
+                banco.
+
+                Na última etapa o "Próxima etapa" fica desabilitado em vez de
+                sumir, para nada mudar de posição debaixo do cursor.
+              */}
+              <button
+                type="button"
+                className="outline-button"
+                disabled={activeTab === "extra" || activeTab === "history"}
+                onClick={() => {
+                  const atual = etapas.indexOf(activeTab as (typeof etapas)[number]);
+                  if (atual >= 0 && atual < etapas.length - 1) setActiveTab(etapas[atual + 1]!);
+                }}
+              >
+                Próxima etapa →
+              </button>
+              <button
+                type="submit"
+                className="primary-button save-action-btn"
+                disabled={isSaving}
+              >
+                {isSaving ? "Salvando no Firestore..." : (editingProduct ? "Salvar Alterações" : "Cadastrar Produto")}
+              </button>
             </div>
           </div>
         </form>

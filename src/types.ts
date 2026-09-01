@@ -359,6 +359,8 @@ export type SystemLists = {
   units: string[];
   /** Marcas de motocicleta oferecidas no cadastro. */
   motorcycleBrands: string[];
+  /** Marcas e fabricantes de peça oferecidos no cadastro de produto. */
+  partBrands: string[];
   /** Caixas e contas bancárias que recebem e pagam. */
   cashAccounts: string[];
   /** Prioridades atribuídas a uma OS na recepção. */
@@ -374,6 +376,7 @@ export type SystemLists = {
 export const systemListLabels: Record<keyof SystemLists, { title: string; hint: string; placeholder: string }> = {
   units: { title: "Unidades de medida", hint: "Usadas no cadastro de peças e na unidade padrão.", placeholder: "Ex.: UN, LT, PC" },
   motorcycleBrands: { title: "Marcas de motocicleta", hint: "Aparecem no cadastro de motos.", placeholder: "Ex.: Honda" },
+  partBrands: { title: "Marcas de peça", hint: "Aparecem no cadastro de peças, no campo Marca / Fabricante.", placeholder: "Ex.: Motul" },
   cashAccounts: { title: "Caixas e contas", hint: "Contas de entrada e saída de dinheiro.", placeholder: "Ex.: Caixa balcão" },
   orderPriorities: { title: "Prioridades da OS", hint: "Escolhidas na recepção da motocicleta.", placeholder: "Ex.: Urgente" },
   fuelLevels: { title: "Níveis de combustível", hint: "Registrados na entrada da moto.", placeholder: "Ex.: 1/2 tanque" },
@@ -384,6 +387,7 @@ export const systemListLabels: Record<keyof SystemLists, { title: string; hint: 
 export const defaultSystemLists: SystemLists = {
   units: ["UN", "PC", "LT", "KG", "M", "PAR", "JG", "CX"],
   motorcycleBrands: ["Honda", "Yamaha", "Suzuki", "Shineray", "Kawasaki", "Dafra", "BMW", "Triumph", "Royal Enfield", "Outra"],
+  partBrands: ["Motul", "Ipiranga", "Yamalube", "Mobil", "Lubrax", "Cobreq", "Fras-le", "NGK", "Bosch", "Magneti Marelli", "DID", "Riffel", "Vedamotors", "Pirelli", "Levorin", "Michelin", "Original Honda", "Original Yamaha"],
   cashAccounts: ["Caixa balcão", "Banco Inter"],
   orderPriorities: ["Normal", "Urgente", "Baixa"],
   fuelLevels: ["Reserva", "1/4", "1/2 tanque", "3/4", "Cheio"],

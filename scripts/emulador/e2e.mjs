@@ -480,6 +480,85 @@ await passo("campo de número deixa apagar o valor", async () => {
   if (problemas.length) throw new Error("campo de número:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("cadastro de peça: marca em lista e sem gravar antes da hora", async () => {
+  const problemas = [];
+  await ir("Produtos e estoque");
+  await p.getByRole("button", { name: /Adicionar produto/i }).first().click();
+  await p.waitForTimeout(2200);
+
+  // A marca era texto livre: cada pessoa escrevia de um jeito e o filtro do
+  // estoque não juntava nada.
+  const marca = p.locator(".dialog-window select").nth(1);
+  const marcas = await marca.locator("option").allInnerTexts();
+  if (marcas.length < 6) problemas.push(`lista de marcas com ${marcas.length} opção(ões)`);
+  await marca.selectOption("__outra__");
+  await p.waitForTimeout(600);
+  if (!(await p.locator('.dialog-window input[placeholder="Ex: Yamalube, Mobil, Cobreq"]').count()))
+    problemas.push('"Outra" não abriu o campo para digitar');
+  await marca.selectOption("Motul");
+  await p.waitForTimeout(400);
+
+  // Clique duplo em "Próxima etapa" na penúltima etapa cadastrava a peça pela
+  // metade e fechava a tela: o botão de gravar aparecia no mesmo pixel.
+  const antesDoClique = (await banco("products")).length;
+  await p.locator(".dialog-window .dialog-input").first().fill("Óleo Motul 5100 4T");
+  await p.locator(".dialog-tabs button", { hasText: /Preços/ }).click();
+  await p.waitForTimeout(600);
+  await p.locator(".dialog-window input[type=number]").first().fill("25");
+  await p.locator(".dialog-tabs button", { hasText: /Compatibilidade/ }).click();
+  await p.waitForTimeout(700);
+  const proxima = p.locator(".dialog-window button", { hasText: /Próxima etapa/ }).first();
+  const caixa = await proxima.boundingBox();
+  await p.mouse.dblclick(caixa.x + caixa.width / 2, caixa.y + caixa.height / 2);
+  await p.waitForTimeout(3000);
+  if ((await banco("products")).length !== antesDoClique) problemas.push("o clique duplo cadastrou a peça sozinho");
+  if (!(await p.locator(".dialog-window").count())) problemas.push("o clique duplo fechou a tela");
+  if ((await p.locator(".dialog-window button", { hasText: /Próxima etapa|Cadastrar Produto/ }).count()) !== 2)
+    problemas.push("os dois botões precisam ficar sempre na tela");
+  await p.locator(".dialog-window button", { hasText: /Cadastrar Produto/ }).first().click();
+  await p.waitForTimeout(4000);
+  if ((await banco("products")).length !== antesDoClique + 1) problemas.push("o botão de cadastrar não gravou");
+  if (problemas.length) throw new Error("cadastro de peça:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("cadastrar cliente completo sem sair da OS", async () => {
+  const problemas = [];
+  const antes = (await banco("clients")).length;
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+  const atalhos = await p.locator(".os-full-register button").allInnerTexts();
+  if (atalhos.length !== 2) problemas.push(`${atalhos.length} atalho(s) de cadastro completo, esperado 2`);
+  await p.locator(".os-full-register button", { hasText: /cliente/i }).click();
+  await p.waitForTimeout(2500);
+  const abas = await p.locator(".dialog-window .dialog-tabs button").allInnerTexts();
+  if (!abas.some((t) => /Endereço/i.test(t))) problemas.push(`o cadastro completo não abriu: ${JSON.stringify(abas)}`);
+
+  // Salvar sem o telefone avisava por um toast que ficava ATRÁS do modal:
+  // a aba trocava sozinha e nada mais acontecia.
+  await p.locator('.dialog-window input[placeholder*="Carlos Eduardo"]').fill("Transportes Bom Dia");
+  await p.waitForTimeout(400);
+  await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
+  await p.waitForTimeout(1500);
+  const aviso = await p.locator(".dialog-window .settings-modal-error").innerText().catch(() => "");
+  if (!/WhatsApp|telefone/i.test(aviso)) problemas.push(`aviso dentro do formulário: ${JSON.stringify(aviso)}`);
+  if ((await banco("clients")).length !== antes) problemas.push("gravou sem o telefone");
+
+  await p.locator(".dialog-window input").first().fill("34999998888");
+  await p.waitForTimeout(400);
+  await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
+  await p.waitForTimeout(4000);
+  if ((await banco("clients")).length !== antes + 1) problemas.push("o cliente completo não foi gravado");
+  if (!(await p.locator(".dialog", { hasText: /Abrir nova ordem/i }).count())) problemas.push("não voltou para a OS depois de cadastrar");
+  await p.locator(".dialog-footer .ghost-button, .dialog button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+  if (problemas.length) throw new Error("cadastro dentro da OS:\n      - " + problemas.join("\n      - "));
+});
+
 await passo("em tela baixa, o botão de salvar continua alcançável", async () => {
   // O <form> dos modais de Configurações fica entre o .dialog e o rodapé. Sem
   // ser uma coluna flexível, o corpo crescia com o conteúdo, estourava o
