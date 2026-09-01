@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import type { SupplierConfig } from "../types";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
+import { nextSequentialId } from "../firestore-data";
 
 interface SupplierFormModalProps {
   isOpen: boolean;
@@ -22,6 +23,13 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<"ident" | "contact" | "commercial" | "address" | "notes">("ident");
   const [isSaving, setIsSaving] = useState(false);
+  // O que falta preencher, dito DENTRO do formulário.
+  //
+  // Era um `notify` — o aviso de canto da aplicação —, que num formulário
+  // aberto por cima de outro (o cadastro de cliente chamado de dentro da OS)
+  // aparece atrás do modal. Quem clicava em salvar via a aba trocar sozinha e
+  // nada acontecer, sem nenhuma explicação na tela.
+  const [erroForm, setErroForm] = useState("");
 
   // Form fields
   const [name, setName] = useState("");
@@ -79,6 +87,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
       setNotes("");
       setActive(true);
     }
+    setErroForm("");
     setActiveTab("ident");
   }, [isOpen, editingSupplier]);
 
@@ -86,20 +95,21 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
     e.preventDefault();
 
     if (!name.trim()) {
-      notify("Informe a Razão Social ou Nome do fornecedor.");
+      setErroForm("Informe a Razão Social ou Nome do fornecedor.");
       setActiveTab("ident");
       return;
     }
 
     if (!phone.trim()) {
-      notify("Informe o WhatsApp ou telefone de contato.");
+      setErroForm("Informe o WhatsApp ou telefone de contato.");
       setActiveTab("contact");
       return;
     }
 
+    setErroForm("");
     setIsSaving(true);
     try {
-      const supplierId = editingSupplier?.id || `SUP-${String(allSuppliers.length + 1).padStart(3, "0")}`;
+      const supplierId = editingSupplier?.id || nextSequentialId(allSuppliers, "SUP");
 
       const supplierData: SupplierConfig = {
         id: supplierId,
@@ -145,7 +155,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
       onClose();
     } catch (err: unknown) {
       console.error("Erro ao salvar fornecedor:", err);
-      notify(err instanceof Error ? err.message : "Não foi possível salvar o fornecedor.");
+      setErroForm(err instanceof Error ? err.message : "Não foi possível salvar o fornecedor. Verifique a conexão e tente de novo.");
     } finally {
       setIsSaving(false);
     }
@@ -183,6 +193,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="dialog-body">
+          {erroForm ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erroForm}</span></div> : null}
           {/* TAB 1: IDENTIFICAÇÃO */}
           {activeTab === "ident" && (
             <div className="form-section-stack">
@@ -418,23 +429,32 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   Anterior
                 </button>
               )}
-              {activeTab !== "notes" ? (
-                <button
-                  type="button"
-                  className="primary-button"
+              {/*
+                Os dois botões ficam SEMPRE na tela, cada um no seu lugar.
+
+                Antes o mesmo canto trocava de botão: era "Próxima etapa" e, ao
+                avançar para a última etapa, virava o de gravar no mesmo pixel.
+                Dois cliques seguidos — o que se faz num botão que parece não ter
+                respondido — avançavam e gravavam em seguida: o cadastro saía
+                pela metade e a tela fechava sozinha. Na última etapa o "Próxima
+                etapa" fica desabilitado em vez de sumir, para nada mudar de
+                posição debaixo do cursor.
+              */}
+              <button
+                type="button"
+                className="outline-button"
+                disabled={activeTab === "notes"}
                   onClick={() => {
                     const tabs: Array<"ident" | "contact" | "commercial" | "address" | "notes"> = ["ident", "contact", "commercial", "address", "notes"];
                     const currIdx = tabs.indexOf(activeTab);
                     if (currIdx < tabs.length - 1) setActiveTab(tabs[currIdx + 1]);
                   }}
-                >
-                  Próxima etapa →
-                </button>
-              ) : (
+              >
+                Próxima etapa →
+              </button>
                 <button type="submit" className="primary-button save-action-btn" disabled={isSaving}>
                   {isSaving ? "Salvando no Firestore..." : (editingSupplier ? "Salvar Alterações" : "Cadastrar Fornecedor")}
                 </button>
-              )}
             </div>
           </div>
         </form>

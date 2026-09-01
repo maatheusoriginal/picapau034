@@ -1611,6 +1611,24 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   font-size: 11px;
 }
 
+/* Atalho para o cadastro completo de cliente e moto sem sair da OS. */
+.os-full-register {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px dashed #dcdad6;
+  border-radius: 11px;
+  background: #faf9f7;
+}
+
+.os-full-register small { color: #85817c; font-size: 9px; line-height: 1.5; }
+.os-full-register > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.os-full-register .outline-button { display: inline-flex; align-items: center; gap: 7px; }
+
 .settings-card-header {
   display: flex;
   align-items: center;

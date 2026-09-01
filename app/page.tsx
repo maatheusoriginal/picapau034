@@ -2036,6 +2036,8 @@ export function AppDialog({
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newVehicleModel, setNewVehicleModel] = useState("");
   const [newVehicleYear, setNewVehicleYear] = useState("");
+  // A cor era um campo solto, sem estado: o que se digitava nele sumia.
+  const [newVehicleColor, setNewVehicleColor] = useState("");
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState("");
   // Importação de planilha: a prévia fica em pé até a pessoa confirmar, para
@@ -2054,6 +2056,15 @@ export function AppDialog({
   const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
   const [importFileName, setImportFileName] = useState("");
   const [importReading, setImportReading] = useState(false);
+
+  // Cadastro completo de cliente ou moto sem sair da OS.
+  //
+  // A OS já deixava criar cliente e moto com o mínimo (nome, placa, modelo),
+  // mas não dava acesso ao cadastro de verdade — CPF, endereço, chassi,
+  // proprietário, quilometragem. Quem precisava disso tinha que fechar a OS,
+  // ir em Cadastros, voltar e recomeçar. Agora o formulário completo abre por
+  // cima da OS e, ao salvar, já entra selecionado nela.
+  const [cadastroNaOs, setCadastroNaOs] = useState<"cliente" | "moto" | null>(null);
 
   const currentOrder = orders.find((order) => order.id === selectedRecordId) ?? orders[0];
   // O botão de baixa passa o id da conta pelo mesmo caminho que o detalhe da OS.
@@ -2074,6 +2085,11 @@ export function AppDialog({
   // O AppDialog fica montado o tempo todo. Sem isto, reabrir a importação
   // mostraria a prévia da planilha anterior e o botão ofereceria importar de
   // novo peças que já entraram.
+  useEffect(() => {
+    if (dialog === "os") return;
+    setCadastroNaOs(null);
+  }, [dialog]);
+
   useEffect(() => {
     if (dialog === "import") return;
     setImportPlan(null);
@@ -2126,6 +2142,7 @@ export function AppDialog({
           notify={notify || finish}
           allProducts={products}
           units={systemList(lists, "units")}
+          partBrands={systemList(lists, "partBrands")}
           settings={settings}
           movementSources={{ stockEntries, sales, orders }}
         />
@@ -2457,7 +2474,7 @@ export function AppDialog({
         plate,
         model: bike,
         year: newVehicleYear,
-        color: "",
+        color: newVehicleColor.trim(),
       });
       await saveFirestoreDoc("clients", clientId, {
         motorcycleIds: [...(customerLookupMatch?.motorcycleIds ?? []), motorcycleId],
@@ -3210,7 +3227,7 @@ export function AppDialog({
         {dialog === "osChoice" ? (
           <div className="dialog-body attendance-choice">
             <button onClick={() => changeDialog("quick")}><span className="attendance-icon fast"><Icon name="clock"/></span><div><b>É um serviço rápido</b><strong>Atendimento expresso</strong><small>Troca de óleo, lâmpada, regulagem ou ajuste concluído na hora. Cliente e moto são opcionais.</small><em>Ir para Serviço Rápido <Icon name="arrow" size={16}/></em></div></button>
-            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
+            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
           </div>
         ) : null}
 
@@ -3230,8 +3247,17 @@ export function AppDialog({
                     <section className="lookup-panel"><label className="field"><span>Placa</span><input value={osPlate} onChange={(event) => handleOsPlate(event.target.value)} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(osPlate)} · formatação automática</small></label>{selectedMotorcycle && normalizePlate(selectedMotorcycle.plate) === normalizePlate(osPlate) && !newVehicleMode ? <div className="lookup-found vehicle"><span className="registry-avatar">MT</span><div><strong>{selectedMotorcycle.model}</strong><small>{selectedMotorcycle.plate} · {selectedMotorcycle.year} · {selectedMotorcycle.color}</small></div><i>Cadastro encontrado</i></div> : <div className="lookup-empty"><Icon name="bike" size={18}/><span>Placa não cadastrada. Preencha os dados da nova moto abaixo.</span></div>}</section>
                   </div>
                   {customerLookupMatch && customerMotorcycles.length > 1 && !newVehicleMode ? <div className="vehicle-choice-block"><div><strong>Qual moto está entrando?</strong><small>Este cliente possui mais de um veículo.</small></div><div className="vehicle-choice-list">{customerMotorcycles.map((motorcycle) => <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}><span className="catalog-code">{motorcycle.model.includes("Biz") ? "BZ" : "CG"}</span><div><strong>{motorcycle.model}</strong><small>{motorcycle.plate} · {motorcycle.year}</small></div>{selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}</button>)}<button className="new-vehicle-choice" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}><span className="catalog-code">+</span><div><strong>Nenhuma dessas</strong><small>Cadastrar uma nova moto para {selectedCustomer?.name || "cliente"}</small></div></button></div></div> : null}
-                  {newVehicleMode || !customerLookupMatch ? <div className="inline-create new-vehicle-form"><label className="field"><span>Nome completo do cliente</span><input value={newCustomerName} onChange={(event) => setNewCustomerName(event.target.value)} placeholder="Nome do cliente"/></label><label className="field"><span>WhatsApp</span><input value={onlyDigits(customerLookup) ? customerLookup : ""} onChange={(event) => setCustomerLookup(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label><label className="field"><span>Marca e modelo</span><input value={newVehicleModel} onChange={(event) => setNewVehicleModel(event.target.value)} placeholder="Ex.: Honda CG 160 Fan"/></label><label className="field"><span>Ano / modelo</span><input value={newVehicleYear} onChange={(event) => setNewVehicleYear(event.target.value)} placeholder="2024 / 2025"/></label><label className="field"><span>Cor</span><input placeholder="Ex.: Vermelha"/></label></div> : null}
+                  {newVehicleMode || !customerLookupMatch ? <div className="inline-create new-vehicle-form"><label className="field"><span>Nome completo do cliente</span><input value={newCustomerName} onChange={(event) => setNewCustomerName(event.target.value)} placeholder="Nome do cliente"/></label><label className="field"><span>WhatsApp</span><input value={onlyDigits(customerLookup) ? customerLookup : ""} onChange={(event) => setCustomerLookup(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label><label className="field"><span>Marca e modelo</span><input value={newVehicleModel} onChange={(event) => setNewVehicleModel(event.target.value)} placeholder="Ex.: Honda CG 160 Fan"/></label><label className="field"><span>Ano / modelo</span><input value={newVehicleYear} onChange={(event) => setNewVehicleYear(event.target.value)} placeholder="2024 / 2025"/></label><label className="field"><span>Cor</span><input value={newVehicleColor} onChange={(event) => setNewVehicleColor(event.target.value)} placeholder="Ex.: Vermelha"/></label></div> : null}
                   {!newVehicleMode && customerLookupMatch ? <button className="soft-action" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}><Icon name="plus" size={17}/>Cadastrar outro veículo para este cliente</button> : null}
+                  {canManageCustomers ? (
+                    <div className="os-full-register">
+                      <small>Precisa dos dados completos — CPF, endereço, chassi, proprietário?</small>
+                      <div>
+                        <button className="outline-button" onClick={() => setCadastroNaOs("cliente")}><Icon name="users" size={16}/>Cadastro completo do cliente</button>
+                        <button className="outline-button" onClick={() => setCadastroNaOs("moto")}><Icon name="bike" size={16}/>Cadastro completo da moto</button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               {step === 2 ? (
@@ -3772,6 +3798,50 @@ export function AppDialog({
           </div>
         </footer> : <footer className="dialog-footer choice-footer"><button className="ghost-button" onClick={close}>Cancelar</button></footer>}
       </section>
+
+      {/*
+        Cadastro completo aberto de dentro da OS. Fica depois do .dialog para
+        renderizar por cima dele, e ao salvar já deixa o registro escolhido na
+        OS — quem cadastrou não precisa procurá-lo de novo na busca.
+      */}
+      {cadastroNaOs === "cliente" ? (
+        <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
+          <ClientFormModal
+            isOpen={true}
+            onClose={() => setCadastroNaOs(null)}
+            notify={notify || finish}
+            allClients={clients}
+            onSaved={(cliente) => {
+              setSelectedCustomerId(cliente.id);
+              setCustomerLookup(cliente.phone || cliente.name);
+              setNewCustomerName(cliente.name);
+              setCadastroNaOs(null);
+              notify?.(`Cliente "${cliente.name}" cadastrado e selecionado nesta OS.`);
+            }}
+          />
+        </Suspense></ErrorBoundary>
+      ) : null}
+      {cadastroNaOs === "moto" ? (
+        <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
+          <MotorcycleFormModal
+            isOpen={true}
+            onClose={() => setCadastroNaOs(null)}
+            clients={clients}
+            notify={notify || finish}
+            allMotorcycles={motorcycles}
+            brands={systemList(lists, "motorcycleBrands")}
+            preselectedClientId={selectedCustomerId}
+            onSaved={(moto) => {
+              setSelectedMotorcycleId(moto.id);
+              setOsPlate(moto.plate);
+              setNewVehicleMode(false);
+              if (moto.ownerId) setSelectedCustomerId(moto.ownerId);
+              setCadastroNaOs(null);
+              notify?.(`Moto placa ${moto.plate} cadastrada e selecionada nesta OS.`);
+            }}
+          />
+        </Suspense></ErrorBoundary>
+      ) : null}
     </div>
   );
 }
