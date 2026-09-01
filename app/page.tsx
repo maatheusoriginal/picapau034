@@ -3,6 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories, isMechanicUser, orDefault, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { NumberField } from "../src/components/NumberField";
+import { billableMotorcycles, billingDescription, isPartnerBilled, motorcycleLabel, nextBillingDate, partnerTotals, PARTNER_PAYMENT_METHOD } from "../src/partner";
 import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
@@ -2066,6 +2067,14 @@ export function AppDialog({
   // cima da OS e, ao salvar, já entra selecionado nela.
   const [cadastroNaOs, setCadastroNaOs] = useState<"cliente" | "moto" | null>(null);
 
+  // Quem paga a OS. Era um <select> com `defaultValue`, sem estado e sem
+  // ninguém lendo: escolher "Empresa parceira" não mudava nada, e a OS da
+  // frota era cobrada do motoboy que trouxe a moto.
+  const [osPayer, setOsPayer] = useState<"owner" | "partner">("owner");
+  // Quem trouxe a moto pela parceira. Também eram dois campos soltos.
+  const [osCourierName, setOsCourierName] = useState("");
+  const [osCourierPhone, setOsCourierPhone] = useState("");
+
   const currentOrder = orders.find((order) => order.id === selectedRecordId) ?? orders[0];
   // O botão de baixa passa o id da conta pelo mesmo caminho que o detalhe da OS.
   const currentAccount = accounts.find((account) => account.id === selectedRecordId);
@@ -2239,7 +2248,17 @@ export function AppDialog({
   const expenseMargin = expenseCharged - expenseCost;
   const checkoutPartsTotal = checkoutItems.filter((item) => item.type === "Peça").reduce((sum, item) => sum + item.price, 0);
   const checkoutLaborTotal = checkoutItems.filter((item) => item.type === "Mão de obra").reduce((sum, item) => sum + item.price, 0);
-  const checkoutTotal = checkoutPartsTotal + checkoutLaborTotal;
+  const checkoutRawTotal = checkoutPartsTotal + checkoutLaborTotal;
+  // Numa OS de empresa parceira, o desconto combinado sai do total ANTES de
+  // virar fatura. Mostrar o desconto na tela e cobrar o valor cheio — que era
+  // o que acontecia — é pior do que não ter desconto nenhum: a empresa confere
+  // a fatura contra o combinado e encontra diferença.
+  const checkoutPartner = currentOrder && isPartnerBilled(currentOrder)
+    ? partners.find((item) => item.id === currentOrder.partnerId) ?? null
+    : null;
+  const checkoutTotal = checkoutPartner
+    ? partnerTotals(checkoutItems, checkoutPartner.laborDiscount ?? 0).total
+    : checkoutRawTotal;
   const tradeCompensated = Math.min(Math.max(Number(tradeValue) || 0, 0), checkoutTotal);
   const tradeRemaining = Math.max(checkoutTotal - tradeCompensated, 0);
   const tradeCreditRemaining = Math.max((Number(tradeValue) || 0) - checkoutTotal, 0);
@@ -2503,6 +2522,12 @@ export function AppDialog({
       origin: osOrigin === "partner" ? `Encaminhado por ${selectedPartner?.name ?? "parceiro"}` : "Cliente direto",
       total: osTotal,
       deductedItems: [],
+      // Quem paga fica gravado na OS: é o que faz o encerramento mandar a
+      // conta para a fatura da parceira em vez de pedir o dinheiro na hora.
+      payer: osOrigin === "partner" && osPayer === "partner" ? "partner" : "owner",
+      ...(osOrigin === "partner" && selectedPartner ? { partnerId: selectedPartner.id, partnerName: selectedPartner.name } : {}),
+      ...(osCourierName.trim() ? { courierName: osCourierName.trim() } : {}),
+      ...(osCourierPhone.trim() ? { courierPhone: osCourierPhone.trim() } : {}),
       ...(clientId ? { clientId } : {}),
       ...(motorcycleId ? { motorcycleId } : {}),
     });
@@ -2577,6 +2602,8 @@ export function AppDialog({
     amount: number;
     origin: string;
     sourceId: string;
+    /** Vencimento próprio, em dd/mm/aaaa. A fatura da parceira usa o dia 1º do mês seguinte. */
+    dueDate?: string;
   }) => {
     // Vence em 30 dias, o prazo usual de uma nota a prazo de oficina.
     const due = new Date();
@@ -2588,7 +2615,7 @@ export function AppDialog({
       description: input.description,
       category: revenueCategoryNames[0] ?? "Serviços de oficina",
       amount: input.amount,
-      dueDate: due.toLocaleDateString("pt-BR"),
+      dueDate: input.dueDate ?? due.toLocaleDateString("pt-BR"),
       settlements: [],
       origin: input.origin,
       sourceId: input.sourceId,
@@ -2883,10 +2910,22 @@ export function AppDialog({
       ];
       setCheckoutItems(items);
       setTradeValue(String(items.reduce((sum, item) => sum + item.price, 0)));
-      setPaymentMethod("PIX");
-      return changeDialog("orderCheckout");
+      // OS de empresa parceira não pede forma de pagamento: já nasce faturada.
+      setPaymentMethod(currentOrder && isPartnerBilled(currentOrder) ? PARTNER_PAYMENT_METHOD : "PIX");
+      setSplitPayment(false);
+      // O id da OS precisa ir junto. Sem ele, `openDialog` limpa o registro
+      // selecionado e `currentOrder` cai no `?? orders[0]`: com mais de uma OS
+      // na lista, o recebimento era gravado na PRIMEIRA — a errada era
+      // encerrada, com os itens e o total desta, e a certa continuava aberta.
+      return changeDialog("orderCheckout", currentOrder?.id);
     }
     if (dialog === "orderCheckout") {
+      // Rede de segurança para o mesmo defeito: sem o id, `currentOrder` seria
+      // a primeira OS da lista. Melhor recusar e dizer o que houve do que
+      // encerrar a ordem errada em silêncio.
+      if (!selectedRecordId || currentOrder?.id !== selectedRecordId) {
+        return setDialogError("Não foi possível identificar a ordem de serviço. Feche esta janela e abra a OS pela lista de novo.");
+      }
       if (splitIssue) return setDialogError(splitIssue);
       setSaving(true);
       try {
@@ -2920,14 +2959,24 @@ export function AppDialog({
           if (aPrazoOS > 0) {
             // Mesma situação da venda: a OS já foi encerrada e não dá para
             // voltar atrás, então a falha é reportada em vez de engolida.
+            //
+            // A OS de empresa parceira cai aqui pelo mesmo caminho da nota a
+            // prazo, com duas diferenças: a cobrança vai no nome da EMPRESA, e
+            // não do motoboy que trouxe a moto, e vence no dia 1º do mês
+            // seguinte — a fatura mensal. A baixa do estoque já aconteceu
+            // acima, como em qualquer OS.
+            const faturada = isPartnerBilled(currentOrder);
             try {
               await createReceivableFor({
-                person: currentOrder.customer,
-                personId: currentOrder.clientId,
-                description: `Ordem de serviço ${currentOrder.id} · ${currentOrder.bike}${splitPayment ? " · parte a prazo" : ""}`,
+                person: faturada ? (currentOrder.partnerName || "Empresa parceira") : currentOrder.customer,
+                personId: faturada ? currentOrder.partnerId : currentOrder.clientId,
+                description: faturada
+                  ? billingDescription(currentOrder.id, currentOrder.bike)
+                  : `Ordem de serviço ${currentOrder.id} · ${currentOrder.bike}${splitPayment ? " · parte a prazo" : ""}`,
                 amount: aPrazoOS,
-                origin: "Ordem de serviço",
+                origin: faturada ? "Fatura de parceiro" : "Ordem de serviço",
                 sourceId: currentOrder.id,
+                ...(faturada ? { dueDate: nextBillingDate() } : {}),
               });
             } catch (error) {
               notify(`${currentOrder.id} encerrada, mas a conta a receber não foi criada: ${error instanceof Error ? error.message : "erro desconhecido"}. Lance a cobrança em Contas a receber.`);
@@ -3227,7 +3276,7 @@ export function AppDialog({
         {dialog === "osChoice" ? (
           <div className="dialog-body attendance-choice">
             <button onClick={() => changeDialog("quick")}><span className="attendance-icon fast"><Icon name="clock"/></span><div><b>É um serviço rápido</b><strong>Atendimento expresso</strong><small>Troca de óleo, lâmpada, regulagem ou ajuste concluído na hora. Cliente e moto são opcionais.</small><em>Ir para Serviço Rápido <Icon name="arrow" size={16}/></em></div></button>
-            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
+            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setOsPayer("owner"); setOsCourierName(""); setOsCourierPhone(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
           </div>
         ) : null}
 
@@ -3264,15 +3313,36 @@ export function AppDialog({
                 <div className="form-section">
                   <div className="form-intro"><span className="form-icon"><Icon name="users"/></span><div><h3>Como esta moto chegou?</h3><p>O proprietário real continua vinculado à moto.</p></div></div>
                   <div className="choice-grid">
-                    <label className={`choice-card ${osOrigin === "direct" ? "selected" : ""}`}><input type="radio" name="origin" checked={osOrigin === "direct"} onChange={() => setOsOrigin("direct")}/><span className="choice-radio"/><div><strong>Cliente direto</strong><small>O próprio cliente trouxe a moto</small></div></label>
-                    <label className={`choice-card ${osOrigin === "partner" ? "selected" : ""}`}><input type="radio" name="origin" checked={osOrigin === "partner"} onChange={() => setOsOrigin("partner")}/><span className="choice-radio"/><div><strong>Encaminhado por parceiro</strong><small>Empresa cadastrada encaminhou a moto</small></div></label>
+                    <label className={`choice-card ${osOrigin === "direct" ? "selected" : ""}`}><input type="radio" name="origin" checked={osOrigin === "direct"} onChange={() => { setOsOrigin("direct"); setOsPayer("owner"); }}/><span className="choice-radio"/><div><strong>Cliente direto</strong><small>O próprio cliente trouxe a moto</small></div></label>
+                    <label className={`choice-card ${osOrigin === "partner" ? "selected" : ""}`}><input type="radio" name="origin" checked={osOrigin === "partner"} onChange={() => { setOsOrigin("partner"); setOsPayer("partner"); }}/><span className="choice-radio"/><div><strong>Encaminhado por parceiro</strong><small>Empresa cadastrada encaminhou a moto</small></div></label>
                   </div>
                   <div className="form-grid">
-                    <label className="field"><span>Responsável pelo pagamento</span><select defaultValue={osOrigin === "partner" ? "partner" : "owner"}><option value="owner">Proprietário da moto</option><option value="partner">Empresa parceira</option><option value="other">Outro responsável</option></select></label>
-                    {osOrigin === "partner" ? <label className="field"><span>Parceiro responsável</span><select value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)}>{activePartners.map((partner) => <option value={partner.id} key={partner.id}>{partner.name} · {partner.laborDiscount}% mão de obra</option>)}</select></label> : <label className="field"><span>Origem</span><input value="Atendimento direto" readOnly/></label>}
-                    {osOrigin === "partner" ? <><label className="field"><span>Entregador / condutor</span><input placeholder="Nome de quem trouxe a moto"/></label><label className="field"><span>Contato do entregador</span><input placeholder="(34) 99999-9999"/></label></> : null}
+                    <label className="field"><span>Responsável pelo pagamento</span><select value={osPayer} onChange={(event) => setOsPayer(event.target.value as "owner" | "partner")}><option value="owner">Proprietário da moto</option><option value="partner" disabled={osOrigin !== "partner"}>Empresa parceira · fatura mensal</option></select></label>
+                    {osOrigin === "partner" ? <label className="field"><span>Parceiro responsável</span><select value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)}>{activePartners.length ? activePartners.map((partner) => <option value={partner.id} key={partner.id}>{partner.name} · {partner.laborDiscount}% mão de obra</option>) : <option value="">Nenhuma empresa parceira cadastrada</option>}</select></label> : <label className="field"><span>Origem</span><input value="Atendimento direto" readOnly/></label>}
+                    {osOrigin === "partner" ? <><label className="field"><span>Entregador / condutor</span><input value={osCourierName} onChange={(event) => setOsCourierName(event.target.value)} placeholder="Nome de quem trouxe a moto"/></label><label className="field"><span>Contato do entregador</span><input value={osCourierPhone} onChange={(event) => setOsCourierPhone(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label></> : null}
                   </div>
-                  <div className="info-strip"><Icon name="check" size={18}/><span>{osOrigin === "partner" ? `${selectedPartner?.name ?? "O parceiro"} recebe ${selectedPartner?.laborDiscount ?? 0}% de desconto somente na mão de obra. Peças permanecem com o preço fixo.` : "O cliente será o responsável financeiro desta OS. Isso pode ser alterado depois."}</span></div>
+                  {/*
+                    A frota traz hoje uma moto que já esteve aqui no mês passado,
+                    e amanhã outra. Procurar pela placa na etapa 1 funciona, mas
+                    quem atende parceira quer ver a lista e escolher.
+                  */}
+                  {osOrigin === "partner" && motorcycles.length > 0 ? (
+                    <label className="field field-full">
+                      <span>Puxar uma moto já cadastrada no sistema</span>
+                      <select value={selectedMotorcycleId} onChange={(event) => { const escolhida = event.target.value; if (!escolhida) return; selectMotorcycle(escolhida); }}>
+                        <option value="">Escolha na lista ou informe a placa na etapa anterior</option>
+                        {billableMotorcycles(motorcycles.map((moto) => ({ ...moto, ownerName: clients.find((cliente) => cliente.id === moto.ownerId)?.name ?? moto.ownerName }))).map((moto) => (
+                          <option key={moto.id} value={moto.id}>{motorcycleLabel(moto)}</option>
+                        ))}
+                      </select>
+                      <small className="field-help">Qualquer moto do sistema pode ser atendida pela parceira, mesmo cadastrada no nome de outra pessoa.</small>
+                    </label>
+                  ) : null}
+                  <div className="info-strip"><Icon name="check" size={18}/><span>{osOrigin === "partner" && osPayer === "partner"
+                    ? `${selectedPartner?.name ?? "A parceira"} paga esta OS na fatura com vencimento em ${nextBillingDate()}. O desconto de ${selectedPartner?.laborDiscount ?? 0}% vale só na mão de obra; peça mantém o preço. A baixa do estoque acontece normalmente na entrega.`
+                    : osOrigin === "partner"
+                      ? `${selectedPartner?.name ?? "O parceiro"} encaminhou a moto, mas quem paga é o proprietário. Escolha "Empresa parceira" acima para lançar na fatura mensal.`
+                      : "O cliente será o responsável financeiro desta OS. Isso pode ser alterado depois."}</span></div>
                 </div>
               ) : null}
               {step === 3 ? (
@@ -3739,6 +3809,30 @@ export function AppDialog({
 
               <section className="checkout-payment-panel">
                 <div className="payment-total-card checkout-total-card"><span>Total a receber</span><strong>{formatBRL(checkoutTotal)}</strong><small>{checkoutItems.length} itens · {currentOrder ? currentOrder.customer : "Cliente"}</small></div>
+                {currentOrder && isPartnerBilled(currentOrder) ? (
+                  <>
+                    {/*
+                      OS de empresa parceira não pergunta forma de pagamento: a
+                      moto sai hoje, a peça já saiu do estoque, e o valor entra
+                      na fatura do mês. Perguntar aqui levaria alguém a marcar
+                      "Dinheiro" e a gaveta a fechar com uma sobra que não
+                      existe.
+                    */}
+                    <div className="partner-billing-card">
+                      <div className="partner-billing-head"><span><Icon name="users" size={18}/></span><div><strong>{currentOrder.partnerName || "Empresa parceira"}</strong><small>Faturado, não recebido agora</small></div></div>
+                      <div className="partner-billing-lines">
+                        <div><span>Mão de obra</span><b>{formatBRL(partnerTotals(checkoutItems, 0).labor)}</b></div>
+                        {partnerTotals(checkoutItems, checkoutPartner?.laborDiscount ?? 0).discount > 0
+                          ? <div className="partner-billing-discount"><span>Desconto de {checkoutPartner?.laborDiscount}% na mão de obra</span><b>− {formatBRL(partnerTotals(checkoutItems, checkoutPartner?.laborDiscount ?? 0).discount)}</b></div>
+                          : null}
+                        <div><span>Peças</span><b>{formatBRL(partnerTotals(checkoutItems, 0).parts)}</b></div>
+                        <div className="partner-billing-total"><span>Vai para a fatura</span><b>{formatBRL(checkoutTotal)}</b></div>
+                      </div>
+                      <div className="info-strip"><Icon name="clock" size={17}/><span>Vence em <b>{nextBillingDate()}</b>, o primeiro dia do mês seguinte. A conta aparece em Contas a receber no nome da empresa; a baixa do estoque acontece agora, como em qualquer OS.</span></div>
+                    </div>
+                  </>
+                ) : (
+                <>
                 <div className="form-label">Como o cliente vai acertar?</div>
                 <div className="payment-methods checkout-methods">{activePaymentMethods.map((methodConfig) => { const method = methodConfig.name; return <button className={paymentMethod === method ? "selected" : ""} key={method} onClick={() => setPaymentMethod(method)}><span>{method === "PIX" ? "PX" : method === "Troca de serviços" ? "TS" : method.slice(0, 2).toUpperCase()}</span><strong>{method}</strong>{paymentMethod === method ? <i>✓</i> : null}</button>; })}</div>
                 <label className="toggle-row checkout-split"><input type="checkbox" checked={splitPayment} onChange={(event) => setSplitPayment(event.target.checked)}/><span/><div><strong>Dividir ou receber parcialmente</strong><small>O saldo restante pode virar uma conta a receber.</small></div></label>
@@ -3757,6 +3851,8 @@ export function AppDialog({
                 {cashDue > 0 ? <div className="form-grid payment-extra"><label className="field"><span>Valor entregue pelo cliente</span><input inputMode="decimal" value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={formatBRL(cashDue)}/></label><div className="change-box"><span>Troco calculado</span><strong>{formatBRL(changeDue)}</strong></div></div> : null}
                 {paymentMethod === "Nota a prazo" ? <div className="credit-warning"><Icon name="alert" size={18}/><div><strong>Registrar saldo a receber</strong><small>Defina o vencimento e mantenha a OS tecnicamente encerrada.</small></div></div> : null}
                 {paymentMethod === "Troca de serviços" ? <div className="trade-payment-card"><div className="trade-payment-head"><span><Icon name="users" size={18}/></span><div><strong>Compensação por troca de serviços</strong><small>O combinado quita a OS sem entrar como dinheiro recebido.</small></div></div><div className="form-grid"><label className="field field-full"><span>Trabalho ou serviço recebido</span><input value={tradeServiceDescription} onChange={(event) => setTradeServiceDescription(event.target.value)} placeholder="Ex.: Desenvolvimento do sistema da oficina"/></label><label className="field"><span>Valor acordado / crédito disponível</span><input type="number" min="0" value={tradeValue} onChange={(event) => setTradeValue(event.target.value)}/></label><label className="field"><span>Compensado nesta OS</span><input value={formatBRL(tradeCompensated)} readOnly/></label><label className="field field-full"><span>Observações</span><textarea value={tradeNotes} onChange={(event) => setTradeNotes(event.target.value)} placeholder="Descreva o acordo e o que ainda falta entregar, se houver."/></label></div><div className="trade-balance-grid"><div><span>Total da OS</span><strong>{formatBRL(checkoutTotal)}</strong></div><div><span>Entrada em dinheiro</span><strong>R$ 0,00</strong></div><div><span>{tradeRemaining > 0 ? "Saldo ainda devido" : "Crédito restante da troca"}</span><strong>{formatBRL(tradeRemaining > 0 ? tradeRemaining : tradeCreditRemaining)}</strong></div></div><div className="trade-cash-note"><Icon name="check" size={16}/><span>A baixa será identificada como <strong>Troca de serviços</strong> no financeiro e no histórico do cliente.</span></div></div> : null}
+                </>
+                )}
                 <div className="print-ready-strip"><Icon name="file" size={19}/><div><strong>Impressão automática em 3 vias</strong><small>1 · Mecânico &nbsp; 2 · Caixa &nbsp; 3 · Cliente</small></div><span>80mm</span></div>
               </section>
             </div>

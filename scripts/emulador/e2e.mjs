@@ -65,13 +65,19 @@ const passo = async (nome, fn) => {
   ordem += 1;
   try { await fn(); const nov = [...new Set(erros.slice(antes))];
     console.log(`OK    ${ordem}. ${nome}${nov.length ? "\n      ⚠ " + nov.join("\n      ⚠ ") : ""}`); }
-  catch (e) { falhas++; console.log(`FALHA ${ordem}. ${nome}\n      ${String(e).split("\n")[0].slice(0,300)}`);
+  catch (e) { falhas++; console.log(`FALHA ${ordem}. ${nome}\n      ${String(e).replace(/^Error: /, "").split("\n").slice(0, 8).join("\n      ").slice(0, 700)}`);
     await foto("FALHA-" + nome.replace(/\W+/g,"-").slice(0,40)); }
 };
 const ir = async (destino) => {
   const g = GRUPO[destino];
-  if (g) { await p.locator(".nav-group-trigger", { hasText: g }).first().click(); await p.waitForTimeout(450); }
-  await p.locator(g ? ".nav-subitem" : ".nav-item", { hasText: destino }).first().click();
+  const alvo = p.locator(g ? ".nav-subitem" : ".nav-item", { hasText: destino }).first();
+  // Só abre o grupo se ele estiver fechado: clicar num grupo já aberto o
+  // FECHA, e aí o item some e o passo trava esperando por ele.
+  if (g && !(await alvo.isVisible().catch(() => false))) {
+    await p.locator(".nav-group-trigger", { hasText: g }).first().click();
+    await p.waitForTimeout(600);
+  }
+  await alvo.click();
   await p.waitForTimeout(1500);
 };
 
@@ -557,6 +563,110 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
   await p.locator(".dialog-footer .ghost-button, .dialog button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
   await p.waitForTimeout(1200);
   if (problemas.length) throw new Error("cadastro dentro da OS:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no caixa", async () => {
+  const problemas = [];
+
+  // 1. a empresa parceira, com desconto combinado na mão de obra
+  await p.locator(".nav-item", { hasText: "Configurações" }).first().click();
+  await p.waitForTimeout(2200);
+  await p.locator(".settings-tab-button", { hasText: "Parceiros" }).first().click();
+  await p.waitForTimeout(1400);
+  await p.locator("button").filter({ hasText: /Novo Parceiro/ }).first().click();
+  await p.waitForTimeout(1800);
+  await p.locator(".dialog input").first().fill("Flash Entregas");
+  await p.locator(".dialog input[type=number]").first().fill("15");
+  await p.waitForTimeout(400);
+  await p.locator(".dialog button", { hasText: /Salvar Parceiro/ }).first().click();
+  await p.waitForTimeout(3500);
+  if (!(await banco("partners")).length) problemas.push("a empresa parceira não foi cadastrada");
+
+  // 2. a OS pela parceira
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+  await p.getByPlaceholder("ABC-1234 ou ABC-1D23").fill("FLA-2C34");
+  await p.getByPlaceholder("Nome do cliente").fill("João Motoboy");
+  await p.getByPlaceholder("(34) 99999-9999", { exact: true }).fill("34988887777");
+  await p.getByPlaceholder("Ex.: Honda CG 160 Fan").fill("Honda Biz 125");
+  await p.waitForTimeout(400);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(1400);
+
+  await p.locator(".choice-card", { hasText: /Encaminhado por parceiro/ }).click();
+  await p.waitForTimeout(900);
+  // Era um <select> com defaultValue, sem estado e sem ninguém lendo: escolher
+  // "Empresa parceira" não mudava nada e a OS da frota era cobrada do motoboy.
+  if ((await p.locator(".dialog select").first().inputValue()) !== "partner")
+    problemas.push("escolher parceiro não sugeriu a empresa como pagadora");
+  const motos = await p.locator(".dialog select").last().locator("option").count();
+  if (motos < 2) problemas.push(`a lista de motos do sistema trouxe ${motos} opção(ões)`);
+  await p.getByPlaceholder("Nome de quem trouxe a moto").fill("Carlos entregador");
+  await p.waitForTimeout(400);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(1300);
+  await p.getByPlaceholder("Ex.: 38.420 km").fill("12.000 km");
+  await p.locator(".dialog textarea").first().fill("Revisão da frota");
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(1300);
+  await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão completa");
+  await p.locator(".dialog input[type=number]").first().fill("200");
+  await p.waitForTimeout(300);
+  await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
+  await p.waitForTimeout(900);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(1300);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(4000);
+
+  const daParceira = (await banco("serviceOrders")).find((ordem) => ordem.partnerName === "Flash Entregas");
+  if (!daParceira) problemas.push("a OS não gravou a empresa parceira");
+  else {
+    if (daParceira.payer !== "partner") problemas.push(`quem paga ficou "${daParceira.payer}"`);
+    if (!/Carlos/.test(daParceira.courierName || "")) problemas.push(`entregador gravado: "${daParceira.courierName}"`);
+  }
+
+  // 3. o encerramento não pergunta forma de pagamento.
+  // A lista já tem a OS do passo 6: abrir a primeira abriria a errada.
+  await p.locator("tr", { hasText: "FLA-2C34" }).locator("button", { hasText: /^Abrir$/ }).first().click();
+  await p.waitForTimeout(2500);
+  const tituloOs = await p.locator(".dialog h2").first().innerText();
+  if (!/OS-0002/.test(tituloOs)) problemas.push(`abriu ${tituloOs}, esperado a OS da parceira`);
+  await p.locator(".order-status-control select").selectOption("Entrega");
+  await p.waitForTimeout(900);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(2200);
+  if (await p.locator(".payment-methods.checkout-methods").count()) problemas.push("perguntou forma de pagamento numa OS de parceira");
+  if (!(await p.locator(".partner-billing-card").count())) problemas.push("não mostrou o que vai para a fatura");
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(5000);
+
+  // 4. virou fatura no nome da empresa, com desconto e vencimento certos
+  const fatura = (await banco("accounts")).find((conta) => conta.person === "Flash Entregas");
+  if (!fatura) problemas.push("não gerou a conta a receber no nome da empresa");
+  else {
+    if (Number(fatura.amount) !== 170) problemas.push(`fatura de R$ ${fatura.amount}, esperado 170 (200 de mão de obra − 15%)`);
+    const agora = new Date();
+    const primeiro = new Date(agora.getFullYear(), agora.getMonth() + 1, 1);
+    const esperado = `${String(primeiro.getDate()).padStart(2, "0")}/${String(primeiro.getMonth() + 1).padStart(2, "0")}/${primeiro.getFullYear()}`;
+    if (fatura.dueDate !== esperado) problemas.push(`vence em ${fatura.dueDate}, esperado ${esperado}`);
+  }
+  const encerrada = (await banco("serviceOrders")).find((ordem) => ordem.partnerName === "Flash Entregas");
+  if (encerrada?.paymentMethod !== "Faturado no parceiro") problemas.push(`forma gravada: "${encerrada?.paymentMethod}"`);
+
+  // A OS do passo 6 não pode ter sido tocada. Era o que acontecia: o id se
+  // perdia ao ir do detalhe para o recebimento e o encerramento caía na
+  // PRIMEIRA OS da lista, com os itens e o total desta.
+  const antiga = (await banco("serviceOrders")).find((ordem) => ordem.plate === "TES-1D23");
+  if (Number(antiga?.total) !== 150) problemas.push(`a OS do passo 6 virou R$ ${antiga?.total}, esperado 150 — o encerramento gravou na ordem errada`);
+  if (antiga?.paymentMethod !== "Dinheiro") problemas.push(`a OS do passo 6 ficou como "${antiga?.paymentMethod}", esperado Dinheiro`);
+
+  if (problemas.length) throw new Error("empresa parceira:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("em tela baixa, o botão de salvar continua alcançável", async () => {

@@ -330,6 +330,16 @@ export type OrderRecord = {
   fuelLevel?: string;
   /** OS entregue e recebida: sai das listas de serviço em andamento. */
   closed?: boolean;
+  /** Empresa parceira que encaminhou a moto e responde pela OS. */
+  partnerId?: string;
+  partnerName?: string;
+  /** Quem paga: o dono da moto ou a empresa parceira (fatura mensal). */
+  payer?: "owner" | "partner";
+  /** Quem trouxe a moto pela parceira, para a oficina saber com quem falar. */
+  courierName?: string;
+  courierPhone?: string;
+  /** Conta a receber gerada pelo faturamento da parceira. */
+  billingAccountId?: string;
   /** Data do encerramento, no formato brasileiro. */
   closedAt?: string;
   /** ISO 8601 do encerramento. `closedAt` só tem a data, e a sessão de caixa precisa da hora. */
