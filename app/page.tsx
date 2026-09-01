@@ -1,7 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isMechanicUser, serviceOrderStatuses, statusTone, systemList } from "../src/types";
+import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories, isMechanicUser, orDefault, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
@@ -1569,6 +1569,17 @@ export function ModuleWorkspace({
   const [query, setQuery] = useState("");
   const [listFilter, setListFilter] = useState("Todos");
 
+  // Todo hook desta função precisa ficar acima dos returns antecipados abaixo.
+  // Estes dois useMemo estavam depois deles: ao trocar de uma aba que retorna
+  // cedo (PDV, Financeiro...) para uma que não retorna, o React via uma
+  // quantidade diferente de hooks e derrubava a tela inteira
+  // ("Rendered more hooks than during the previous render") — a tela branca
+  // que aparecia em algumas abas.
+  // Os KPIs de Financeiro, Relatórios e Vendas do balcão eram "R$ 0,00" e "0"
+  // escritos direto no ternário.
+  const moduleSummary = useMemo(() => financeSummary(sales, orders, expenses, accounts, movements), [sales, orders, expenses, accounts, movements]);
+  const salesToday = useMemo(() => sales.filter((sale) => sale.date === new Date().toLocaleDateString("pt-BR")), [sales]);
+
   if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} discount={discount} setDiscount={setDiscount} products={products} clients={clients} blockZeroStockSale={settings?.blockZeroStockSale !== false} />;
   if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
@@ -1802,10 +1813,6 @@ export function ModuleWorkspace({
   
   const records = active === "Fornecedores" ? supplierRecords : active === "Motocicletas" ? motorcycleRecords : active === "Clientes" ? defaultRecords : [];
   
-  // Os KPIs de Financeiro, Relatórios e Vendas do balcão eram "R$ 0,00" e "0"
-  // escritos direto no ternário.
-  const moduleSummary = useMemo(() => financeSummary(sales, orders, expenses, accounts, movements), [sales, orders, expenses, accounts, movements]);
-  const salesToday = useMemo(() => sales.filter((sale) => sale.date === new Date().toLocaleDateString("pt-BR")), [sales]);
   const firstValue = active === "Financeiro" ? formatBRL(moduleSummary.dayBalance) : active === "Relatórios" ? formatBRL(moduleSummary.grossMonth) : active === "Motocicletas" ? String(motorcycles.length) : active === "Vendas do balcão" ? String(salesToday.length) : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((supplier) => supplier.active).length) : String(clients.length);
   const secondValue = active === "Financeiro" ? formatBRL(moduleSummary.receivableTotal) : active === "Relatórios" ? formatBRL(moduleSummary.averageTicket) : active === "Motocicletas" ? String(new Set(motorcycles.map((m) => m.brand)).size) : active === "Vendas do balcão" ? formatBRL(salesToday.reduce((total, sale) => total + sale.total, 0)) : active === "Compras e entradas" ? "R$ 0,00" : active === "Fornecedores" ? (suppliers.length > 0 ? `${Math.round(suppliers.reduce((sum, s) => sum + s.deliveryDays, 0) / suppliers.length)} dias` : "0 dias") : String(clients.filter((c) => Boolean(c.phone)).length);
   const thirdValue = active === "Financeiro" ? String(moduleSummary.overdueCount) : active === "Relatórios" ? String(moduleSummary.closedOrders) : active === "Motocicletas" ? String(motorcycles.filter((m) => m.plate.length === 8).length) : active === "Vendas do balcão" ? formatBRL(salesToday.length ? salesToday.reduce((total, sale) => total + sale.total, 0) / salesToday.length : 0) : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((s) => s.deliveryDays <= 1).length) : String(clients.filter((c) => c.motorcycleIds && c.motorcycleIds.length > 0).length);
@@ -1935,87 +1942,6 @@ export function AppDialog({
   const editingClient = clients.find((client) => client.id === selectedRecordId) ?? null;
   const editingMotorcycle = motorcycles.find((motorcycle) => motorcycle.id === selectedRecordId) ?? null;
   const editingSupplier = suppliers.find((supplier) => supplier.id === selectedRecordId) ?? null;
-
-  if (dialog === "product") {
-    return (
-      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
-        <ProductFormModal
-          isOpen={true}
-          onClose={close}
-          editingProduct={editingProduct}
-          onSaved={(prod) => finish(`Produto "${prod.name}" salvo com sucesso no Firestore!`)}
-          categories={categories}
-          suppliers={suppliers}
-          notify={notify || finish}
-          allProducts={products}
-          units={systemList(lists, "units")}
-          settings={settings}
-          movementSources={{ stockEntries, sales, orders }}
-        />
-      </Suspense></ErrorBoundary>
-    );
-  }
-
-  if (dialog === "supplier") {
-    return (
-      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
-        <SupplierFormModal
-          isOpen={true}
-          onClose={close}
-          editingSupplier={editingSupplier}
-          onSaved={(sup) => finish(`Fornecedor "${sup.name}" salvo com sucesso no Firestore!`)}
-          notify={notify || finish}
-          allSuppliers={suppliers}
-        />
-      </Suspense></ErrorBoundary>
-    );
-  }
-
-  if (dialog === "motorcycle") {
-    return (
-      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
-        <MotorcycleFormModal
-          isOpen={true}
-          onClose={close}
-          editingMotorcycle={editingMotorcycle}
-          onSaved={(moto) => finish(`Motocicleta placa ${moto.plate} salva com sucesso no Firestore!`)}
-          clients={clients}
-          notify={notify || finish}
-          allMotorcycles={motorcycles}
-          brands={systemList(lists, "motorcycleBrands")}
-        />
-      </Suspense></ErrorBoundary>
-    );
-  }
-
-  if (dialog === "client") {
-    return (
-      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
-        <ClientFormModal
-          isOpen={true}
-          onClose={close}
-          editingClient={editingClient}
-          onSaved={(cli) => finish(`Cliente "${cli.name}" salvo com sucesso no Firestore!`)}
-          notify={notify || finish}
-          allClients={clients}
-        />
-      </Suspense></ErrorBoundary>
-    );
-  }
-
-  if (dialog === "employee") {
-    return (
-      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
-        <EmployeeFormModal
-          isOpen={true}
-          onClose={close}
-          onSaved={(emp) => finish(`Funcionário "${emp.name}" salvo com sucesso no Firestore!`)}
-          notify={notify || finish}
-          allEmployees={users}
-        />
-      </Suspense></ErrorBoundary>
-    );
-  }
 
   const [paymentMethod, setPaymentMethod] = useState("PIX");
   const [splitPayment, setSplitPayment] = useState(false);
@@ -2180,12 +2106,101 @@ export function AppDialog({
   }, [dialog]);
 
   if (!dialog) return null;
+
+  // Estes cinco formulários ficavam ACIMA de todos os useState/useEffect
+  // abaixo. Como o AppDialog fica montado o tempo todo, abrir o cadastro de
+  // produto, fornecedor, moto, cliente ou funcionário fazia o React renderizar
+  // zero hook depois de ter renderizado 86 — erro de contagem de hooks e tela
+  // branca. Agora todo hook roda antes de qualquer return.
+  if (dialog === "product") {
+    return (
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
+        <ProductFormModal
+          isOpen={true}
+          onClose={close}
+          editingProduct={editingProduct}
+          onSaved={(prod) => finish(`Produto "${prod.name}" salvo com sucesso no Firestore!`)}
+          categories={categories}
+          suppliers={suppliers}
+          notify={notify || finish}
+          allProducts={products}
+          units={systemList(lists, "units")}
+          settings={settings}
+          movementSources={{ stockEntries, sales, orders }}
+        />
+      </Suspense></ErrorBoundary>
+    );
+  }
+
+  if (dialog === "supplier") {
+    return (
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
+        <SupplierFormModal
+          isOpen={true}
+          onClose={close}
+          editingSupplier={editingSupplier}
+          onSaved={(sup) => finish(`Fornecedor "${sup.name}" salvo com sucesso no Firestore!`)}
+          notify={notify || finish}
+          allSuppliers={suppliers}
+        />
+      </Suspense></ErrorBoundary>
+    );
+  }
+
+  if (dialog === "motorcycle") {
+    return (
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
+        <MotorcycleFormModal
+          isOpen={true}
+          onClose={close}
+          editingMotorcycle={editingMotorcycle}
+          onSaved={(moto) => finish(`Motocicleta placa ${moto.plate} salva com sucesso no Firestore!`)}
+          clients={clients}
+          notify={notify || finish}
+          allMotorcycles={motorcycles}
+          brands={systemList(lists, "motorcycleBrands")}
+        />
+      </Suspense></ErrorBoundary>
+    );
+  }
+
+  if (dialog === "client") {
+    return (
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
+        <ClientFormModal
+          isOpen={true}
+          onClose={close}
+          editingClient={editingClient}
+          onSaved={(cli) => finish(`Cliente "${cli.name}" salvo com sucesso no Firestore!`)}
+          notify={notify || finish}
+          allClients={clients}
+        />
+      </Suspense></ErrorBoundary>
+    );
+  }
+
+  if (dialog === "employee") {
+    return (
+      <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
+        <EmployeeFormModal
+          isOpen={true}
+          onClose={close}
+          onSaved={(emp) => finish(`Funcionário "${emp.name}" salvo com sucesso no Firestore!`)}
+          notify={notify || finish}
+          allEmployees={users}
+        />
+      </Suspense></ErrorBoundary>
+    );
+  }
   const activeMechanics = users.filter((user) => user.active !== false && isMechanicUser(user));
   const activePartners = partners.filter((partner) => partner.active);
   const activeSuppliers = suppliers.filter((supplier) => supplier.active);
   const enabledQuickServices = quickServices.filter((service) => service.active);
-  const activePaymentMethods = paymentMethods.filter((method) => method.active);
-  const activePaymentMachines = paymentMachines.filter((machine) => machine.active);
+  // Sem o padrão, uma oficina recém-instalada monta a venda e não encontra
+  // forma de pagamento nenhuma para escolher — não consegue receber. A
+  // coleção nasce vazia, e a tela só listava o que estivesse nela.
+  const activePaymentMethods = orDefault(paymentMethods.filter((method) => method.active), defaultPaymentMethods);
+  const activePaymentMachines = orDefault(paymentMachines.filter((machine) => machine.active), defaultPaymentMachines);
   const selectedMechanics = activeMechanics.filter((user) => selectedMechanicIds.includes(user.id));
   const orderMechanics = activeMechanics.filter((user) => orderMechanicIds.includes(user.id));
   const selectedPartner = activePartners.find((partner) => partner.id === selectedPartnerId) ?? activePartners[0];
@@ -2225,7 +2240,12 @@ export function AppDialog({
   const currentAccountTarget = currentCashAccount;
   // Os filtros do catálogo e as categorias de gasto vinham escritos no JSX e
   // ignoravam o cadastro de categorias da própria oficina.
-  const productCategoryNames = categories.filter((item) => item.active !== false && item.group === "Produtos").map((item) => item.name);
+  // Mesmo padrão das formas de pagamento: sem categoria cadastrada, o filtro do
+  // catálogo ficava com "Todos" e mais nada.
+  const productCategoryNames = orDefault(
+    categories.filter((item) => item.active !== false && item.group === "Produtos"),
+    defaultProductCategories,
+  ).map((item) => item.name);
   const expenseCategoryNames = categories.filter((item) => item.active !== false && item.group === "Despesas").map((item) => item.name);
   // "Peça comprada fora do estoque" e "Pagamento de funcionário" ficam fixas
   // porque disparam comportamento próprio no formulário (vínculo com a OS e
@@ -3265,7 +3285,7 @@ export function AppDialog({
                   <div className="form-intro"><span className="form-icon"><Icon name="box"/></span><div><h3>Peças e mão de obra</h3><p>Peças usam o preço fixo do cadastro. A mão de obra é informada manualmente.</p></div></div>
                   <div className="os-items-builder">
                     <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{products.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{products.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
-                    <section className="os-labor-panel"><div className="os-builder-title"><div><strong>Adicionar mão de obra</strong><small>Descrição e valor digitados para esta OS</small></div></div><div className="form-grid"><label className="field field-full"><span>Descrição</span><input value={laborDescription} onChange={(event) => setLaborDescription(event.target.value)} placeholder="Ex.: Troca do kit relação"/></label><label className="field"><span>Valor da mão de obra</span><input type="number" value={laborValue} onChange={(event) => setLaborValue(event.target.value)}/></label><button className="primary-button labor-add-button" onClick={() => { if (!laborDescription.trim() || Number(laborValue) <= 0) return; setOsItems((current) => [...current, { id: `LAB-${Date.now()}`, type: "Mão de obra", name: laborDescription.trim(), price: Number(laborValue) }]); setLaborDescription(""); setLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar mão de obra</button></div><div className="labor-rule"><Icon name="check" size={17}/><span>O valor vale somente para esta OS e não altera o cadastro de serviços.</span></div></section>
+                    <section className="os-labor-panel"><div className="os-builder-title"><div><strong>Adicionar mão de obra</strong><small>Descrição e valor digitados para esta OS</small></div></div><div className="form-grid"><label className="field field-full"><span>Descrição</span><input value={laborDescription} onChange={(event) => setLaborDescription(event.target.value)} placeholder="Ex.: Troca do kit relação"/></label><label className="field"><span>Valor da mão de obra</span><input type="number" value={laborValue} onChange={(event) => setLaborValue(event.target.value)}/></label><button className="primary-button labor-add-button" onClick={() => { if (!laborDescription.trim()) return setDialogError("Descreva a mão de obra antes de adicionar."); if (!(Number(laborValue) > 0)) return setDialogError("Informe o valor da mão de obra."); setDialogError(""); setOsItems((current) => [...current, { id: `LAB-${Date.now()}`, type: "Mão de obra", name: laborDescription.trim(), price: Number(laborValue) }]); setLaborDescription(""); setLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar mão de obra</button></div><div className="labor-rule"><Icon name="check" size={17}/><span>O valor vale somente para esta OS e não altera o cadastro de serviços.</span></div></section>
                   </div>
                   <div className="selected-os-items"><div className="os-builder-title"><div><strong>Itens incluídos</strong><small>{osItems.length ? `${osItems.length} item${osItems.length === 1 ? "" : "s"} nesta OS` : "Nenhum item adicionado ainda"}</small></div></div>{osItems.length ? osItems.map((item) => <div className="selected-os-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do cadastro" : "Valor manual desta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setOsItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>×</button></div>) : <div className="empty-os-items"><Icon name="box"/><span>Adicione as peças e a mão de obra que já souber. Você poderá completar depois.</span></div>}<div className="os-items-total"><span>Peças <b>{formatBRL(partsTotal)}</b></span><span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>{partnerDiscount > 0 ? <span className="discount">Desconto parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}<strong>Total inicial {formatBRL(osTotal)}</strong></div></div>
                 </div>
