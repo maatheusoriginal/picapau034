@@ -857,9 +857,31 @@ WhatsApp ou nome. Cada bloco tem um estado de cada vez:
 | Estado | O que aparece |
 | --- | --- |
 | Procurando | O campo e uma dica |
+| Achou | A **lista** de quem bateu, com telefone e placas, para clicar |
 | Não achou | "Nenhum cliente com X" + botão **Cadastrar cliente** |
 | Cadastrando | Nome e WhatsApp, com atalho para o cadastro completo |
-| Encontrado | O cliente, quantas motos tem, e um botão **Trocar** |
+| Escolhido | O cliente, quantas motos tem, e um botão **Trocar** |
+
+### A busca lista quem bateu, não escolhe sozinha
+
+A busca fazia `.find()`: digitar "jo" **já prendia a OS no primeiro João da
+agenda**, sem mostrar que existiam outros três. Numa oficina isso é rotina — pai
+e filho com o mesmo nome, dois Silva, a mesma pessoa cadastrada duas vezes — e a
+OS acabava no nome errado, com a moto errada aparecendo para escolher.
+
+Agora digitar **procura**; quem escolhe é a pessoa, clicando. A lista mostra
+nome, WhatsApp e as placas de cada um, que é o que deixa diferenciar dois
+homônimos sem abrir o cadastro dos dois. Cliente de uma moto só continua vindo
+com ela já escolhida, e trocar o texto da busca desfaz a escolha anterior em vez
+de deixar um cliente selecionado por baixo.
+
+É o mesmo padrão dos três `?? clients[0]` (PRs #28, #30 e #32), agora do outro
+lado: **achar não é escolher**.
+
+O roteiro ponta a ponta cadastra "Joaquim Ribeiro" e "Joaquim Ribeiro Filho",
+digita "Joaquim", confere que os **dois** aparecem e que nenhum foi escolhido
+sozinho, clica no segundo — justamente o que o `.find()` nunca escolheria — e
+confere no Firestore que a OS saiu no nome do filho, com a moto do filho.
 
 **2 · Motocicleta** — fica esperando enquanto não há cliente ("Escolha o cliente
 acima primeiro"). Com o cliente escolhido, mostra as motos dele para clicar, mais

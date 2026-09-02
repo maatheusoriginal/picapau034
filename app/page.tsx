@@ -2269,14 +2269,32 @@ export function AppDialog({
   // mostrar as motos de OUTRO cliente para escolher.
   const selectedCustomer = clients.find((client) => client.id === selectedCustomerId) ?? null;
   const lookupDigits = onlyDigits(customerLookup);
-  const customerLookupMatch = clients.find((client) => (lookupDigits.length >= 8 && onlyDigits(client.phone).includes(lookupDigits)) || (!lookupDigits.length && customerLookup.trim().length >= 3 && client.name.toLowerCase().includes(customerLookup.toLowerCase())));
+  const lookupTexto = customerLookup.trim().toLowerCase();
+  /**
+   * Todos os clientes que batem com o que foi digitado, não só o primeiro.
+   *
+   * Era um `.find()`: digitar "jo" já prendia a OS no primeiro João da agenda,
+   * sem mostrar que existiam outros três. Numa oficina isso é rotina — pai e
+   * filho com o mesmo nome, dois Silva, a mesma pessoa cadastrada duas vezes —
+   * e a OS acabava no nome errado, com a moto errada aparecendo para escolher.
+   * Agora a busca lista quem bateu e a escolha é um clique.
+   */
+  const clientesEncontrados = (lookupDigits.length >= 3 || lookupTexto.length >= 2)
+    ? clients
+        .filter((client) => (lookupDigits.length >= 3 && onlyDigits(client.phone).includes(lookupDigits))
+          || (lookupDigits.length < 3 && lookupTexto.length >= 2 && client.name.toLowerCase().includes(lookupTexto)))
+        .sort((um, outro) => um.name.localeCompare(outro.name, "pt-BR"))
+        .slice(0, 12)
+    : [];
+  // O cliente da OS é o que foi ESCOLHIDO na lista — digitar não escolhe.
+  const osCustomer = !osNewCustomer && !osSkipCustomer ? selectedCustomer : null;
   // Cliente sendo cadastrado agora ainda não tem moto nenhuma: a lista vazia é
   // o que faz o formulário da moto nova aparecer no lugar da escolha.
   // O bloco da moto só abre depois de escolhida a empresa parceira ou o
   // cliente — ou depois de a pessoa dizer que atende sem cadastrar.
   const blocoDaMotoLiberado = osOrigin === "partner"
     ? Boolean(selectedPartner)
-    : Boolean(customerLookupMatch) || osNewCustomer || osSkipCustomer;
+    : Boolean(osCustomer) || osNewCustomer || osSkipCustomer;
 
   const customerMotorcycles = !osNewCustomer && !osSkipCustomer && selectedCustomer
     ? motorcycles.filter((motorcycle) => motorcycle.ownerId === selectedCustomer.id)
@@ -2413,18 +2431,30 @@ export function AppDialog({
   const changeDue = changeFor(cashDue, toAmount(cashReceived));
   const paymentCreditAmount = splitPayment ? creditTotal(splitParts) : (isCreditPayment(paymentMethod) ? paymentGross : 0);
   const orderStatusTone = statusTone(orderStatus);
+  // Digitar só procura: quem escolhe o cliente é a pessoa, clicando no
+  // resultado. Antes o próprio campo já selecionava o primeiro que batesse.
   const handleCustomerLookup = (value: string) => {
-    const formattedValue = onlyDigits(value) ? formatPhone(value) : value;
-    setCustomerLookup(formattedValue);
-    const digits = onlyDigits(value);
-    const normalizedText = value.toLowerCase();
-    const found = clients.find((client) => (digits.length >= 8 && onlyDigits(client.phone).includes(digits)) || (normalizedText.length >= 3 && client.name.toLowerCase().includes(normalizedText)));
-    if (!found) return;
-    setSelectedCustomerId(found.id);
-    const ownedMotorcycles = motorcycles.filter((motorcycle) => motorcycle.ownerId === found.id);
-    if (ownedMotorcycles.length === 1) {
-      setSelectedMotorcycleId(ownedMotorcycles[0].id);
-      setOsPlate(ownedMotorcycles[0].plate);
+    setCustomerLookup(onlyDigits(value) ? formatPhone(value) : value);
+    if (selectedCustomerId) {
+      setSelectedCustomerId("");
+      setSelectedMotorcycleId("");
+      setOsPlate("");
+      setNewVehicleMode(false);
+    }
+  };
+  const escolherCliente = (client: ClientRecord) => {
+    setSelectedCustomerId(client.id);
+    setOsNewCustomer(false);
+    setOsSkipCustomer(false);
+    // Cliente de uma moto só: já deixa escolhida, que é o caso mais comum.
+    const doDono = motorcycles.filter((motorcycle) => motorcycle.ownerId === client.id);
+    if (doDono.length === 1) {
+      setSelectedMotorcycleId(doDono[0].id);
+      setOsPlate(doDono[0].plate);
+      setNewVehicleMode(false);
+    } else {
+      setSelectedMotorcycleId("");
+      setOsPlate("");
       setNewVehicleMode(false);
     }
   };
@@ -2520,7 +2550,7 @@ export function AppDialog({
     const typedIsPhone = onlyDigits(customerLookup).length >= 8;
     // Cadastrando um cliente novo, vale o nome digitado — mesmo que o telefone
     // por acaso caia em algum cadastro parecido.
-    const customerName = (osNewCustomer ? newCustomerName : (customerLookupMatch?.name ?? newCustomerName)).trim()
+    const customerName = (osNewCustomer ? newCustomerName : (osCustomer?.name ?? newCustomerName)).trim()
       || (typedIsPhone ? "" : customerLookup.trim());
     // OS de frota não tem cliente: quem responde é a empresa parceira.
     const daParceira = osOrigin === "partner" && Boolean(selectedPartner);
@@ -2542,7 +2572,7 @@ export function AppDialog({
     // Cliente e moto digitados na hora viram cadastro de verdade — senão a
     // próxima OS do mesmo cliente não o encontraria na busca. Só para quem tem
     // permissão de gerenciar clientes; sem ela a OS guarda apenas os textos.
-    let clientId = customerLookupMatch?.id ?? "";
+    let clientId = osCustomer?.id ?? "";
     let motorcycleId = !newVehicleMode ? selectedMotorcycleId : "";
     if (canManageCustomers && !clientId && customerName && !semCliente && !daParceira) {
       // Mesmo padrão CLI-000 do cadastro de clientes, mas a partir do maior id
@@ -2578,7 +2608,7 @@ export function AppDialog({
       });
       if (clientId) {
         await saveFirestoreDoc("clients", clientId, {
-          motorcycleIds: [...(customerLookupMatch?.motorcycleIds ?? []), motorcycleId],
+          motorcycleIds: [...(osCustomer?.motorcycleIds ?? []), motorcycleId],
         });
       }
     }
@@ -3422,13 +3452,13 @@ export function AppDialog({
                     pede.
                   */}
                   <div className="os-step-blocks">
-                    <section className={`os-block ${osOrigin === "partner" ? (selectedPartner ? "done" : "") : osSkipCustomer || (customerLookupMatch && !osNewCustomer) || (osNewCustomer && newCustomerName.trim()) ? "done" : ""}`}>
+                    <section className={`os-block ${osOrigin === "partner" ? (selectedPartner ? "done" : "") : osSkipCustomer || osCustomer || (osNewCustomer && newCustomerName.trim()) ? "done" : ""}`}>
                       <header className="os-block-head">
                         <span className="os-block-number">1</span>
                         <div><strong>Quem responde por esta OS</strong><small>Um cliente da casa ou uma empresa parceira. A moto vem depois.</small></div>
                         {osOrigin === "partner" && selectedPartner ? <span className="os-block-badge ok">Parceira</span>
                           : osSkipCustomer ? <span className="os-block-badge pendente">Pendente</span>
-                          : customerLookupMatch && !osNewCustomer ? <span className="os-block-badge ok">Encontrado</span> : null}
+                          : osCustomer ? <span className="os-block-badge ok">Encontrado</span> : null}
                       </header>
 
                       {/*
@@ -3476,12 +3506,12 @@ export function AppDialog({
                           </div>
                           <button className="os-picked-change" onClick={() => setOsSkipCustomer(false)}>Identificar</button>
                         </div>
-                      ) : customerLookupMatch && !osNewCustomer ? (
+                      ) : osCustomer ? (
                         <div className="os-picked">
-                          <span className="registry-avatar">{customerLookupMatch.name.split(" ").map((parte) => parte[0]).slice(0, 2).join("")}</span>
+                          <span className="registry-avatar">{osCustomer.name.split(" ").map((parte) => parte[0]).slice(0, 2).join("")}</span>
                           <div>
-                            <strong>{customerLookupMatch.name}</strong>
-                            <small>{customerLookupMatch.phone || "Sem telefone"} · {customerMotorcycles.length} moto{customerMotorcycles.length === 1 ? "" : "s"} cadastrada{customerMotorcycles.length === 1 ? "" : "s"}</small>
+                            <strong>{osCustomer.name}</strong>
+                            <small>{osCustomer.phone || "Sem telefone"} · {customerMotorcycles.length} moto{customerMotorcycles.length === 1 ? "" : "s"} cadastrada{customerMotorcycles.length === 1 ? "" : "s"}</small>
                           </div>
                           <button className="os-picked-change" onClick={() => { setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); }}>Trocar</button>
                         </div>
@@ -3498,7 +3528,31 @@ export function AppDialog({
                       ) : (
                         <div className="os-search">
                           <label className="mini-search"><Icon name="search" size={17}/><input value={customerLookup} onChange={(event) => handleCustomerLookup(event.target.value)} placeholder="WhatsApp ou nome do cliente"/></label>
-                          {customerLookup.trim().length >= 3 ? (
+                          {/*
+                            A lista de quem bateu com a busca. Mostrar telefone e
+                            quantas motos tem é o que deixa escolher entre dois
+                            homônimos sem abrir o cadastro de cada um.
+                          */}
+                          {clientesEncontrados.length ? (
+                            <>
+                              <div className="os-search-results">
+                                {clientesEncontrados.map((client) => {
+                                  const motosDele = motorcycles.filter((motorcycle) => motorcycle.ownerId === client.id);
+                                  return (
+                                    <button key={client.id} onClick={() => escolherCliente(client)}>
+                                      <span className="registry-avatar">{client.name.split(" ").map((parte) => parte[0]).slice(0, 2).join("")}</span>
+                                      <div>
+                                        <strong>{client.name}</strong>
+                                        <small>{client.phone || "Sem telefone"}{motosDele.length ? ` · ${motosDele.map((motorcycle) => formatPlate(motorcycle.plate)).slice(0, 3).join(", ")}` : " · sem moto cadastrada"}</small>
+                                      </div>
+                                      <Icon name="arrow" size={16}/>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <small className="os-search-count">{clientesEncontrados.length === 1 ? "1 cliente encontrado" : `${clientesEncontrados.length} clientes encontrados`}. Clique em quem é o dono desta OS.</small>
+                            </>
+                          ) : customerLookup.trim().length >= 2 ? (
                             <div className="os-search-empty">
                               <span>Nenhum cliente com "{customerLookup.trim()}".</span>
                               <button className="primary-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); setNewCustomerName(onlyDigits(customerLookup) ? "" : customerLookup.trim()); if (onlyDigits(customerLookup)) setCustomerLookup(formatPhone(customerLookup)); else setCustomerLookup(""); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
@@ -3645,12 +3699,12 @@ export function AppDialog({
                 <div className="review-card">
                   <div className="review-success"><Icon name="check"/><div><strong>Tudo pronto para abrir a OS</strong><span>Confira os dados, responsáveis e valores antes de confirmar.</span></div></div>
                   <div className="review-grid">
-                    <div><span>Cliente</span><strong>{customerLookupMatch?.name ?? "Novo cliente"}</strong><small>{customerLookupMatch?.phone ?? customerLookup}</small></div>
+                    <div><span>Cliente</span><strong>{osCustomer?.name ?? "Novo cliente"}</strong><small>{osCustomer?.phone ?? customerLookup}</small></div>
                     <div><span>Motocicleta</span><strong>{selectedMotorcycle && !newVehicleMode ? selectedMotorcycle.model : "Nova motocicleta"}</strong><small>{osPlate || "Placa a informar"}{selectedMotorcycle && !newVehicleMode ? ` · ${selectedMotorcycle.year}` : ""}</small></div>
                     <div><span>Origem / Pagador</span><strong>{osOrigin === "partner" ? selectedPartner?.name : "Cliente direto"}</strong><small>{osOrigin === "partner" ? `${selectedPartner?.billingCycle} · ${selectedPartner?.laborDiscount}% na mão de obra` : "Proprietário da moto"}</small></div>
                     <div><span>Mecânicos responsáveis</span><strong>{selectedMechanics.length ? selectedMechanics.map((mechanic) => mechanic.name).join(" + ") : "Não definido"}</strong><small>{selectedMechanics.length === 1 ? "1 mecânico poderá atualizar a OS" : `${selectedMechanics.length} mecânicos poderão atualizar a OS`}</small></div>
                   </div>
-                  <div className="review-problem"><span>Problema relatado</span><p>{customerLookupMatch ? "Conforme informado na recepção da motocicleta." : "Aguardando preenchimento na recepção."}</p></div>
+                  <div className="review-problem"><span>Problema relatado</span><p>{osCustomer ? "Conforme informado na recepção da motocicleta." : "Aguardando preenchimento na recepção."}</p></div>
                   <div className="review-items-summary"><div><span>Peças com preço fixo</span><strong>{formatBRL(partsTotal)}</strong></div><div><span>Mão de obra manual</span><strong>{formatBRL(laborTotal)}</strong></div>{partnerDiscount > 0 ? <div><span>Desconto do parceiro</span><strong>− {formatBRL(partnerDiscount)}</strong></div> : null}<div className="review-grand-total"><span>Total inicial</span><strong>{formatBRL(osTotal)}</strong></div></div>
                 </div>
               ) : null}

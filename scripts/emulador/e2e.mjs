@@ -818,6 +818,13 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   // Cliente do passo 6, procurado pelo nome.
   await p.locator(".os-search input").first().fill("Cliente de Teste");
   await p.waitForTimeout(1200);
+  // Digitar LISTA quem bateu; escolher é o clique. Antes o campo já prendia a
+  // OS no primeiro cliente que batesse, sem mostrar que havia outros.
+  const listados = await p.locator(".os-search-results > button").allInnerTexts();
+  if (!listados.length) problemas.push("a busca não listou os clientes encontrados");
+  if (await p.locator(".os-picked").count()) problemas.push("digitar já escolheu o cliente sozinho");
+  await p.locator(".os-search-results > button", { hasText: "Cliente de Teste" }).first().click();
+  await p.waitForTimeout(1000);
   const achado = await p.locator(".os-picked").innerText().catch(() => "");
   if (!/Cliente de Teste/.test(achado)) problemas.push(`não achou o cliente: ${JSON.stringify(achado)}`);
   if (!/1 moto cadastrada/.test(achado)) problemas.push(`não contou as motos dele: ${JSON.stringify(achado)}`);
@@ -848,6 +855,82 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   await p.locator(".dialog-footer .ghost-button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
   await p.waitForTimeout(1200);
   if (problemas.length) throw new Error("etapa 1 da OS:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai para o certo", async () => {
+  // Pai e filho, dois Silva, a mesma pessoa cadastrada duas vezes: a busca
+  // fazia `.find()` e prendia a OS no PRIMEIRO que batesse, sem mostrar que
+  // existia outro. A OS saía no nome errado, com a moto errada para escolher.
+  const problemas = [];
+
+  for (const pessoa of [
+    { nome: "Joaquim Ribeiro", telefone: "34911112222", placa: "JOA-1A11", versao: "Titan" },
+    { nome: "Joaquim Ribeiro Filho", telefone: "34933334444", placa: "JOA-2A22", versao: "Fan" },
+  ]) {
+    await ir("Clientes");
+    await p.getByRole("button", { name: /Cadastrar cliente|Novo cliente|Adicionar cliente/i }).first().click();
+    await p.waitForTimeout(2200);
+    await p.locator('.dialog-window input[placeholder*="Carlos Eduardo"]').fill(pessoa.nome);
+    await p.locator(".dialog-tabs button", { hasText: /Contato/ }).click();
+    await p.waitForTimeout(600);
+    await p.locator(".dialog-window input").first().fill(pessoa.telefone);
+    await p.locator(".dialog-tabs button", { hasText: /Dados Pessoais/ }).click();
+    await p.waitForTimeout(600);
+    await p.locator('.client-moto-block input[placeholder*="ABC-1234"]').fill(pessoa.placa);
+    await p.waitForTimeout(400);
+    const listas = p.locator(".client-moto-block select");
+    await listas.nth(0).selectOption("Honda"); await p.waitForTimeout(600);
+    await listas.nth(1).selectOption("CG 150"); await p.waitForTimeout(600);
+    await listas.nth(2).selectOption(pessoa.versao); await p.waitForTimeout(500);
+    await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
+    await p.waitForTimeout(3500);
+  }
+  const oFilho = (await banco("clients")).find((item) => item.name === "Joaquim Ribeiro Filho");
+  if (!oFilho) throw new Error("os dois homônimos não foram cadastrados");
+
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+  await p.locator(".os-search input").first().fill("Joaquim");
+  await p.waitForTimeout(1300);
+  const achados = await p.locator(".os-search-results > button").allInnerTexts();
+  if (achados.length !== 2) problemas.push(`a busca listou ${achados.length} cliente(s), esperado os dois Joaquim`);
+  if (await p.locator(".os-picked").count()) problemas.push("digitar escolheu um dos dois sozinho");
+  // Cada linha precisa dar para diferenciar: telefone e placa da moto.
+  if (!achados.some((texto) => /JOA-2A22/.test(texto))) problemas.push(`a lista não mostra a placa para diferenciar: ${JSON.stringify(achados)}`);
+
+  // O SEGUNDO da lista — justamente o que o `.find()` nunca escolheria.
+  await p.locator(".os-search-results > button", { hasText: "Joaquim Ribeiro Filho" }).first().click();
+  await p.waitForTimeout(1100);
+  const escolhido = await p.locator(".os-picked").innerText().catch(() => "");
+  if (!/Joaquim Ribeiro Filho/.test(escolhido)) problemas.push(`escolheu outro cliente: ${JSON.stringify(escolhido)}`);
+  const motoDoBloco = await p.locator(".os-block").nth(1).innerText();
+  if (/JOA-1A11/.test(motoDoBloco)) problemas.push("mostrou a moto do homônimo");
+
+  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
+  await p.getByPlaceholder("Ex.: 38.420 km").fill("21.000 km");
+  await p.locator(".dialog textarea").first().fill("Revisão dos 20 mil");
+  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
+  await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão");
+  await p.locator(".dialog input[type=number]").first().fill("90");
+  await p.waitForTimeout(300);
+  await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
+  await p.waitForTimeout(900);
+  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
+  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4500);
+
+  // A conferência que vale: no banco, a OS é do filho, com a moto do filho.
+  const aberta = (await banco("serviceOrders")).find((ordem) => ordem.plate === "JOA-2A22");
+  if (!aberta) problemas.push("a OS do homônimo escolhido não foi gravada");
+  else {
+    if (aberta.customer !== "Joaquim Ribeiro Filho") problemas.push(`a OS saiu no nome de "${aberta.customer}"`);
+    if (aberta.clientId !== oFilho._id) problemas.push("a OS ficou vinculada ao cliente errado");
+  }
+  if (problemas.length) throw new Error("homônimos na busca:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("cliente exige placa vinculada, e a moto vai junto", async () => {
