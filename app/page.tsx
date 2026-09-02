@@ -5,6 +5,7 @@ import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories
 import { NumberField } from "../src/components/NumberField";
 import { billableMotorcycles, billingDescription, isPartnerBilled, motorcycleLabel, nextBillingDate, partnerTotals, PARTNER_PAYMENT_METHOD } from "../src/partner";
 import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
+import { formatPlate, motorcycleIdFor, normalizePlate, platePattern } from "../src/plate";
 import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
@@ -117,7 +118,7 @@ const parseBRL = (value: string | number) => typeof value === "number"
   ? (Number.isFinite(value) ? value : 0)
   : Number(String(value ?? "").replace(/[^\d,]/g, "").replace(",", ".")) || 0;
 const onlyDigits = (value: string) => value.replace(/\D/g, "");
-const normalizePlate = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7);
+
 /**
  * O painel administrativo tem endereço próprio (/admin). Não há biblioteca de
  * rotas no projeto: o Express devolve o index.html para qualquer caminho, então
@@ -135,15 +136,7 @@ const highestSequence = (records: Array<{ id: string }>, prefix: string) => reco
   const digits = record.id.match(/(\d+)\s*$/);
   return digits ? Math.max(highest, Number(digits[1])) : highest;
 }, 0);
-const formatPlate = (value: string) => {
-  const normalized = normalizePlate(value);
-  return normalized.length > 3 ? `${normalized.slice(0, 3)}-${normalized.slice(3)}` : normalized;
-};
-const platePattern = (value: string) => {
-  const normalized = normalizePlate(value);
-  if (normalized.length < 7) return "Digite os 7 caracteres";
-  return /[A-Z]/.test(normalized[4] ?? "") ? "Padrão Mercosul" : "Padrão antigo";
-};
+
 const formatPhone = (value: string) => {
   const digits = onlyDigits(value).slice(0, 11);
   if (digits.length <= 2) return digits;
@@ -2047,6 +2040,16 @@ export function AppDialog({
   // cadastrando. Antes o formulário de cadastro aparecia sozinho sempre que a
   // busca não achava nada — inclusive com o campo ainda vazio.
   const [osNewCustomer, setOsNewCustomer] = useState(false);
+  // "Atender sem cadastrar agora": a moto chega no guincho, ou o cliente deixa
+  // e sai correndo. A OS abre com a placa e o serviço anda; o encerramento é
+  // que cobra o nome e o WhatsApp.
+  const [osSkipCustomer, setOsSkipCustomer] = useState(false);
+
+  // Os dados que faltam de uma OS aberta sem cliente, preenchidos no
+  // encerramento. Ficam separados dos campos da OS nova para não misturar o
+  // que se está abrindo com o que se está fechando.
+  const [checkoutCustomerName, setCheckoutCustomerName] = useState("");
+  const [checkoutCustomerPhone, setCheckoutCustomerPhone] = useState("");
   const [newVehicleBrand, setNewVehicleBrand] = useState("Honda");
   const [newVehicleCatalogModel, setNewVehicleCatalogModel] = useState("");
   const [newVehicleVersion, setNewVehicleVersion] = useState("");
@@ -2121,6 +2124,12 @@ export function AppDialog({
   // ainda digitado é o tipo de coisa que faz sair dinheiro duas vezes.
   // Fechar e reabrir o pagamento não pode manter a divisão anterior: seria
   // dividir a venda seguinte com os valores da venda passada.
+  useEffect(() => {
+    if (dialog === "orderCheckout") return;
+    setCheckoutCustomerName("");
+    setCheckoutCustomerPhone("");
+  }, [dialog]);
+
   useEffect(() => {
     if (dialog === "payment" || dialog === "orderCheckout") return;
     setSplitPayment(false);
@@ -2212,6 +2221,8 @@ export function AppDialog({
           onSaved={(cli) => finish(`Cliente "${cli.name}" salvo com sucesso no Firestore!`)}
           notify={notify || finish}
           allClients={clients}
+          allMotorcycles={motorcycles}
+          brands={systemList(lists, "motorcycleBrands")}
         />
       </Suspense></ErrorBoundary>
     );
@@ -2250,7 +2261,7 @@ export function AppDialog({
   const customerLookupMatch = clients.find((client) => (lookupDigits.length >= 8 && onlyDigits(client.phone).includes(lookupDigits)) || (!lookupDigits.length && customerLookup.trim().length >= 3 && client.name.toLowerCase().includes(customerLookup.toLowerCase())));
   // Cliente sendo cadastrado agora ainda não tem moto nenhuma: a lista vazia é
   // o que faz o formulário da moto nova aparecer no lugar da escolha.
-  const customerMotorcycles = !osNewCustomer && selectedCustomer
+  const customerMotorcycles = !osNewCustomer && !osSkipCustomer && selectedCustomer
     ? motorcycles.filter((motorcycle) => motorcycle.ownerId === selectedCustomer.id)
     : [];
   const selectedMotorcycle = motorcycles.find((motorcycle) => motorcycle.id === selectedMotorcycleId);
@@ -2479,13 +2490,17 @@ export function AppDialog({
     // por acaso caia em algum cadastro parecido.
     const customerName = (osNewCustomer ? newCustomerName : (customerLookupMatch?.name ?? newCustomerName)).trim()
       || (typedIsPhone ? "" : customerLookup.trim());
+    // A moto entra sem dono identificado: é a placa que segura a OS até alguém
+    // vir buscar. O nome fica pendente e é cobrado no encerramento.
+    const semCliente = osSkipCustomer && !customerName;
     const plate = formatPlate(osPlate || selectedMotorcycle?.plate || "");
     // A moto nova sai do catálogo: marca + modelo + versão viram um nome só,
     // o mesmo texto que o cadastro completo grava.
     const bike = (selectedMotorcycle && !newVehicleMode
       ? [selectedMotorcycle.brand, selectedMotorcycle.model].filter(Boolean).join(" ")
       : [newVehicleBrand, newVehicleModel].filter(Boolean).join(" ")).trim();
-    if (!customerName) throw new Error("Informe o nome do cliente antes de abrir a ordem de serviço.");
+    if (!customerName && !osSkipCustomer) throw new Error("Informe o nome do cliente antes de abrir a ordem de serviço.");
+    if (semCliente && !plate) throw new Error("Sem o cliente, a placa é o que identifica esta OS. Informe a placa.");
     if (!bike && !plate) throw new Error("Informe a motocicleta ou a placa antes de abrir a ordem de serviço.");
 
     // Cliente e moto digitados na hora viram cadastro de verdade — senão a
@@ -2493,7 +2508,7 @@ export function AppDialog({
     // permissão de gerenciar clientes; sem ela a OS guarda apenas os textos.
     let clientId = customerLookupMatch?.id ?? "";
     let motorcycleId = !newVehicleMode ? selectedMotorcycleId : "";
-    if (canManageCustomers && !clientId && customerName) {
+    if (canManageCustomers && !clientId && customerName && !semCliente) {
       // Mesmo padrão CLI-000 do cadastro de clientes, mas a partir do maior id
       // já usado em vez da quantidade de registros: contar a lista faz o
       // próximo cliente reaproveitar o id de um cliente apagado e sobrescrevê-lo.
@@ -2508,28 +2523,33 @@ export function AppDialog({
         active: true,
       });
     }
-    if (canManageCustomers && !motorcycleId && clientId && plate) {
+    // A moto é cadastrada mesmo sem cliente: numa OS aberta sem identificar o
+    // dono, a placa é o que segura a ordem, e sem o cadastro a próxima entrada
+    // da mesma moto não a encontraria. O dono é preenchido no encerramento.
+    if (canManageCustomers && !motorcycleId && plate) {
       // A placa já identifica a moto de forma única, mesmo padrão do cadastro.
-      motorcycleId = `MOTO-${normalizePlate(plate)}`;
+      motorcycleId = motorcycleIdFor(plate);
       await saveFirestoreDoc("motorcycles", motorcycleId, {
-        ownerId: clientId,
-        ownerName: customerName,
+        ...(clientId ? { ownerId: clientId, ownerName: customerName } : {}),
         plate,
         brand: newVehicleBrand,
         model: newVehicleModel.trim() || bike,
         year: newVehicleYear,
         color: newVehicleColor.trim(),
       });
-      await saveFirestoreDoc("clients", clientId, {
-        motorcycleIds: [...(customerLookupMatch?.motorcycleIds ?? []), motorcycleId],
-      });
+      if (clientId) {
+        await saveFirestoreDoc("clients", clientId, {
+          motorcycleIds: [...(customerLookupMatch?.motorcycleIds ?? []), motorcycleId],
+        });
+      }
     }
 
     // Com a trava desligada, a peça já sai do estoque na abertura; com ela
     // ligada, a OS nasce sem reservar nada e a baixa espera o serviço começar.
     const reservedOnCreate = shouldReserveStock("Recepção", deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(osItems) : [];
     const orderId = await createServiceOrder(osPrefix, nextOrderNumber, {
-      customer: customerName,
+      customer: semCliente ? "Cliente não identificado" : customerName,
+      ...(semCliente ? { customerPending: true } : {}),
       bike: bike || "Motocicleta",
       plate,
       mechanic: selectedMechanics[0]?.name ?? "",
@@ -2951,12 +2971,42 @@ export function AppDialog({
       if (!selectedRecordId || currentOrder?.id !== selectedRecordId) {
         return setDialogError("Não foi possível identificar a ordem de serviço. Feche esta janela e abra a OS pela lista de novo.");
       }
+      // OS aberta sem cliente identificado: os dados são cobrados AQUI, antes de
+      // receber. Deixar passar é ficar com serviço feito e ninguém para cobrar.
+      const faltamDados = currentOrder?.customerPending === true;
+      if (faltamDados && !checkoutCustomerName.trim()) {
+        return setDialogError("Esta OS foi aberta sem cliente identificado. Informe o nome antes de encerrar.");
+      }
+      if (faltamDados && onlyDigits(checkoutCustomerPhone).length < 10) {
+        return setDialogError("Informe o WhatsApp do cliente antes de encerrar — é por ele que a oficina cobra e avisa.");
+      }
       if (splitIssue) return setDialogError(splitIssue);
       setSaving(true);
       try {
         // O encerramento grava o que foi realmente executado e marca a OS como
         // concluída, para ela sair da fila de motos prontas aguardando retirada.
         if (currentOrder) {
+          // O cliente que faltava vira cadastro de verdade, e a moto passa a
+          // ser dele: é o que faz a próxima OS desta moto já achar o dono.
+          let clienteDaOs = currentOrder.clientId ?? "";
+          if (faltamDados && canManageCustomers) {
+            clienteDaOs = `CLI-${String(highestSequence(clients, "CLI") + 1).padStart(3, "0")}`;
+            await saveFirestoreDoc("clients", clienteDaOs, {
+              name: checkoutCustomerName.trim(),
+              phone: formatPhone(checkoutCustomerPhone),
+              detail: currentOrder.bike || "Cliente identificado no encerramento da OS",
+              meta: "",
+              condition: "Pagamento normal",
+              motorcycleIds: currentOrder.motorcycleId ? [currentOrder.motorcycleId] : [],
+              active: true,
+            });
+            if (currentOrder.motorcycleId) {
+              await saveFirestoreDoc("motorcycles", currentOrder.motorcycleId, {
+                ownerId: clienteDaOs,
+                ownerName: checkoutCustomerName.trim(),
+              });
+            }
+          }
           // No encerramento os itens revisados são os que de fato foram usados,
           // então o estoque é acertado pela diferença: peça retirada da OS na
           // conferência volta para a prateleira.
@@ -2975,6 +3025,11 @@ export function AppDialog({
             // saber a qual sessão esta OS pertence.
             closedAtISO: new Date().toISOString(),
             deductedItems: target,
+            ...(faltamDados ? {
+              customer: checkoutCustomerName.trim(),
+              customerPending: false,
+              ...(clienteDaOs ? { clientId: clienteDaOs } : {}),
+            } : {}),
           }, stockDeltas(target, reserved));
           // Imprime já com o que foi conferido no checkout, e não com os itens
           // antigos que ainda estão no `currentOrder` desta renderização.
@@ -2993,8 +3048,8 @@ export function AppDialog({
             const faturada = isPartnerBilled(currentOrder);
             try {
               await createReceivableFor({
-                person: faturada ? (currentOrder.partnerName || "Empresa parceira") : currentOrder.customer,
-                personId: faturada ? currentOrder.partnerId : currentOrder.clientId,
+                person: faturada ? (currentOrder.partnerName || "Empresa parceira") : (faltamDados ? checkoutCustomerName.trim() : currentOrder.customer),
+                personId: faturada ? currentOrder.partnerId : (clienteDaOs || currentOrder.clientId),
                 description: faturada
                   ? billingDescription(currentOrder.id, currentOrder.bike)
                   : `Ordem de serviço ${currentOrder.id} · ${currentOrder.bike}${splitPayment ? " · parte a prazo" : ""}`,
@@ -3301,7 +3356,7 @@ export function AppDialog({
         {dialog === "osChoice" ? (
           <div className="dialog-body attendance-choice">
             <button onClick={() => changeDialog("quick")}><span className="attendance-icon fast"><Icon name="clock"/></span><div><b>É um serviço rápido</b><strong>Atendimento expresso</strong><small>Troca de óleo, lâmpada, regulagem ou ajuste concluído na hora. Cliente e moto são opcionais.</small><em>Ir para Serviço Rápido <Icon name="arrow" size={16}/></em></div></button>
-            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setOsNewCustomer(false); setNewVehicleBrand("Honda"); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setOsPayer("owner"); setOsCourierName(""); setOsCourierPhone(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
+            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setOsNewCustomer(false); setOsSkipCustomer(false); setNewVehicleBrand("Honda"); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setOsPayer("owner"); setOsCourierName(""); setOsCourierPhone(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
           </div>
         ) : null}
 
@@ -3330,14 +3385,23 @@ export function AppDialog({
                     pede.
                   */}
                   <div className="os-step-blocks">
-                    <section className={`os-block ${(customerLookupMatch && !osNewCustomer) || (osNewCustomer && newCustomerName.trim()) ? "done" : ""}`}>
+                    <section className={`os-block ${osSkipCustomer || (customerLookupMatch && !osNewCustomer) || (osNewCustomer && newCustomerName.trim()) ? "done" : ""}`}>
                       <header className="os-block-head">
                         <span className="os-block-number">1</span>
                         <div><strong>Cliente</strong><small>Procure pelo WhatsApp ou pelo nome. Se não achar, cadastre aqui mesmo.</small></div>
-                        {customerLookupMatch && !osNewCustomer ? <span className="os-block-badge ok">Encontrado</span> : null}
+                        {osSkipCustomer ? <span className="os-block-badge pendente">Pendente</span> : customerLookupMatch && !osNewCustomer ? <span className="os-block-badge ok">Encontrado</span> : null}
                       </header>
 
-                      {customerLookupMatch && !osNewCustomer ? (
+                      {osSkipCustomer ? (
+                        <div className="os-pending-card">
+                          <span><Icon name="alert" size={18}/></span>
+                          <div>
+                            <strong>Sem cliente identificado</strong>
+                            <small>A OS abre com a placa e o serviço anda normalmente. O nome e o WhatsApp serão pedidos na hora de encerrar e receber.</small>
+                          </div>
+                          <button className="os-picked-change" onClick={() => setOsSkipCustomer(false)}>Identificar</button>
+                        </div>
+                      ) : customerLookupMatch && !osNewCustomer ? (
                         <div className="os-picked">
                           <span className="registry-avatar">{customerLookupMatch.name.split(" ").map((parte) => parte[0]).slice(0, 2).join("")}</span>
                           <div>
@@ -3362,24 +3426,28 @@ export function AppDialog({
                           {customerLookup.trim().length >= 3 ? (
                             <div className="os-search-empty">
                               <span>Nenhum cliente com "{customerLookup.trim()}".</span>
-                              <button className="primary-button" onClick={() => { setOsNewCustomer(true); setNewCustomerName(onlyDigits(customerLookup) ? "" : customerLookup.trim()); if (onlyDigits(customerLookup)) setCustomerLookup(formatPhone(customerLookup)); else setCustomerLookup(""); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
+                              <button className="primary-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); setNewCustomerName(onlyDigits(customerLookup) ? "" : customerLookup.trim()); if (onlyDigits(customerLookup)) setCustomerLookup(formatPhone(customerLookup)); else setCustomerLookup(""); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
                             </div>
                           ) : (
                             <div className="os-search-hint"><Icon name="users" size={17}/><span>Digite o telefone ou o nome. Cliente novo? Digite o nome e o botão de cadastrar aparece.</span></div>
                           )}
+                          <div className="os-search-actions">
+                            <button className="outline-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
+                            <button className="ghost-button" onClick={() => { setOsSkipCustomer(true); setOsNewCustomer(false); setCustomerLookup(""); setNewCustomerName(""); setSelectedCustomerId(""); }}>Atender sem cadastrar agora</button>
+                          </div>
                         </div>
                       )}
                     </section>
 
-                    <section className={`os-block ${(selectedMotorcycle && !newVehicleMode) || (newVehicleMode && osPlate.trim()) ? "done" : ""} ${!customerLookupMatch && !osNewCustomer ? "waiting" : ""}`}>
+                    <section className={`os-block ${(selectedMotorcycle && !newVehicleMode) || (newVehicleMode && osPlate.trim()) ? "done" : ""} ${!customerLookupMatch && !osNewCustomer && !osSkipCustomer ? "waiting" : ""}`}>
                       <header className="os-block-head">
                         <span className="os-block-number">2</span>
                         <div><strong>Motocicleta</strong><small>{customerMotorcycles.length && !newVehicleMode ? "Escolha a moto que está entrando." : "Placa, marca, modelo e versão."}</small></div>
                         {selectedMotorcycle && !newVehicleMode ? <span className="os-block-badge ok">Escolhida</span> : null}
                       </header>
 
-                      {!customerLookupMatch && !osNewCustomer ? (
-                        <div className="os-search-hint"><Icon name="bike" size={17}/><span>Escolha o cliente acima primeiro. A moto vem depois.</span></div>
+                      {!customerLookupMatch && !osNewCustomer && !osSkipCustomer ? (
+                        <div className="os-search-hint"><Icon name="bike" size={17}/><span>Escolha o cliente acima primeiro, ou siga sem cadastrar. A moto vem depois.</span></div>
                       ) : (
                         <>
                           {customerMotorcycles.length > 0 && !newVehicleMode ? (
@@ -3939,6 +4007,16 @@ export function AppDialog({
               </section>
 
               <section className="checkout-payment-panel">
+                {currentOrder?.customerPending ? (
+                  <div className="checkout-pending-customer">
+                    <div className="checkout-pending-head"><span><Icon name="alert" size={18}/></span><div><strong>Falta identificar o cliente</strong><small>Esta OS foi aberta sem cadastro. Sem nome e WhatsApp a oficina fica com o serviço feito e ninguém para cobrar.</small></div></div>
+                    <div className="form-grid">
+                      <label className="field"><span>Nome do cliente <b className="req">*</b></span><input value={checkoutCustomerName} onChange={(event) => setCheckoutCustomerName(event.target.value)} placeholder="Nome de quem vai retirar a moto" autoFocus/></label>
+                      <label className="field"><span>WhatsApp <b className="req">*</b></span><input value={checkoutCustomerPhone} onChange={(event) => setCheckoutCustomerPhone(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label>
+                    </div>
+                    <small className="os-inline-hint">Ao encerrar, o cliente é cadastrado e a moto {currentOrder.plate} passa a ser dele.</small>
+                  </div>
+                ) : null}
                 <div className="payment-total-card checkout-total-card"><span>Total a receber</span><strong>{formatBRL(checkoutTotal)}</strong><small>{checkoutItems.length} itens · {currentOrder ? currentOrder.customer : "Cliente"}</small></div>
                 {currentOrder && isPartnerBilled(currentOrder) ? (
                   <>
@@ -4038,6 +4116,9 @@ export function AppDialog({
             onClose={() => setCadastroNaOs(null)}
             notify={notify || finish}
             allClients={clients}
+            allMotorcycles={motorcycles}
+            brands={systemList(lists, "motorcycleBrands")}
+            defaultMotorcycle={{ plate: osPlate, brand: newVehicleBrand, model: newVehicleCatalogModel, version: newVehicleVersion, year: newVehicleYear, color: newVehicleColor }}
             onSaved={(cliente) => {
               setSelectedCustomerId(cliente.id);
               setCustomerLookup(cliente.phone || cliente.name);

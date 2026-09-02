@@ -49,6 +49,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:partner` | Confere o faturamento por empresa parceira (desconto, vencimento e caixa) |
 | `npm run check:barcode` | Confere o gerador de código de barras interno (EAN-13) |
 | `npm run check:motorcycle-catalog` | Confere o catálogo de marca, modelo e versão de moto |
+| `npm run check:plate` | Confere as regras de placa (padrão antigo, Mercosul e comparação) |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -802,6 +803,43 @@ as 31: que vazio, `1,` e `-` são estados válidos no meio da digitação; que
 Os campos que guardam texto puro (valor do gasto, valor da conta, mão de obra
 avulsa) nunca tiveram o defeito e foram deixados como estavam.
 
+## Todo cliente precisa de uma moto vinculada
+
+Numa oficina não existe cliente sem moto. Sem a placa vinculada, a próxima OS
+dessa pessoa **não a encontra pela busca por placa** — que é como o balcão
+procura quando a moto chega no portão.
+
+O cadastro de cliente passa a ter um bloco **Motocicleta do cliente** com placa
+(obrigatória), marca, modelo, versão, ano e cor, e grava as duas coisas no mesmo
+salvar. Quem já tem moto cadastrada não precisa informar outra: a exigência é
+ter pelo menos uma, não uma a cada edição.
+
+Duas recusas explícitas, em vez de gravar errado calado:
+
+- placa fora dos padrões brasileiros (`ABC-1234` ou `ABC-1D23`);
+- placa que já é de outro cliente. O id da moto sai da placa, então gravar por
+  cima **trocaria o dono da moto de alguém** — o aviso diz de quem ela é.
+
+Chamado de dentro da OS, o formulário já abre com a placa e o modelo que foram
+digitados lá: repetir a digitação é onde nasce a divergência entre as duas telas.
+
+As regras de placa saíram do `app/page.tsx` para `src/plate.ts`, porque agora
+duas telas precisam delas, e `npm run check:plate` confere as 23 — incluindo que
+`ABC-1D23` e `abc1d23` são a mesma moto e caem no mesmo documento.
+
+## OS sem cliente identificado
+
+A moto chega de guincho, ou o cliente deixa e sai correndo. A etapa 1 da OS
+ganha **"Atender sem cadastrar agora"** ao lado de "Cadastrar cliente": a OS
+abre com a placa, a peça sai do estoque e o serviço anda normalmente.
+
+**O encerramento é que cobra.** Antes de receber, a tela pede nome e WhatsApp e
+recusa fechar sem eles — sem isso a oficina fica com o serviço feito e ninguém
+para cobrar. Ao encerrar, o cliente vira cadastro e a moto passa a ser dele.
+
+A moto é cadastrada mesmo sem o dono: é a placa que segura a ordem, e sem o
+cadastro a próxima entrada da mesma moto não a encontraria.
+
 ## A primeira etapa da OS
 
 Esta tela tinha **três caminhos sobrepostos** ao mesmo tempo: uma busca por
@@ -846,9 +884,14 @@ por modelo e qualquer contagem de "quais motos mais atendemos" param de
 funcionar.
 
 `src/motorcycle-catalog.ts` traz o que roda em oficina de bairro no Brasil:
-Honda, Yamaha, Suzuki, Kawasaki, Haojue, Dafra, Shineray, Royal Enfield, BMW,
-Triumph e Harley-Davidson, cada uma com os seus modelos e versões. Escolher a
-marca troca a lista de modelos; escolher o modelo troca a de versões.
+**16 marcas, 117 modelos e 282 versões** — Honda, Yamaha, Suzuki, Kawasaki,
+Haojue, Dafra, Shineray, Traxx, Kasinski, Sundown, Royal Enfield, BMW, Triumph,
+Harley-Davidson, KTM e Ducati. Escolher a marca troca a lista de modelos;
+escolher o modelo troca a de versões.
+
+A Honda vai da CG 125 à Africa Twin, passando por **CG 150** (Titan, Titan KS,
+Titan ES, Titan EX, Titan Mix, Sport, Fan, Fan ESI, Job, ESD), CG 160, Biz, Pop,
+NXR Bros, XRE, XLR, CBX, CB, NX, XR, PCX, Lead, Elite, ADV, SH, Shadow e Dream.
 
 Não é exaustivo de propósito: quem tiver uma moto fora da lista escolhe "Outro"
 e digita, e o texto vai gravado igual. O que fica no banco continua sendo um
