@@ -850,8 +850,9 @@ campos digitar.
 
 Agora são **dois blocos numerados, na ordem em que a oficina trabalha**:
 
-**1 · Cliente** — um campo de busca só, que aceita WhatsApp ou nome. Cada bloco
-tem um estado de cada vez:
+**1 · Cliente** — a escolha entre **cliente** e **empresa parceira** (ver
+"Empresa parceira", adiante) e, para cliente, um campo de busca só, que aceita
+WhatsApp ou nome. Cada bloco tem um estado de cada vez:
 
 | Estado | O que aparece |
 | --- | --- |
@@ -931,19 +932,51 @@ vem na fatura do mês seguinte**. Tratar isso como venda à vista mentia duas
 vezes: dizia que entrou dinheiro que não entrou, e o caixa do dia fechava com
 quebra.
 
-### A moto da OS da parceira
+### A parceira é escolhida junto com o cliente
 
-A frota traz hoje uma moto que já esteve aqui no mês passado, e amanhã uma que
-nunca veio. Os dois caminhos ficam na mesma tela:
+Quem abre a OS da frota já sabe de quem é a moto antes de digitar qualquer coisa.
+Por isso o bloco **1 · Cliente** passou a ter duas opções lado a lado:
 
-- **Puxar uma moto já cadastrada**, com busca por placa, modelo ou dono — frota
-  tem dezenas de motos, e rolar um `<select>` com cinquenta placas não é
-  escolher, é procurar;
-- **Cadastrar moto nova**, que abre o cadastro completo por cima da OS e já
-  deixa a moto escolhida nela.
+| Escolha | O que aparece no bloco 2 |
+| --- | --- |
+| **Cliente** | A busca por nome ou WhatsApp, como antes |
+| **Empresa parceira** | A lista de parceiras ativas e, abaixo, as motos daquela frota |
 
-Antes só existia o primeiro: para cadastrar uma moto nova era preciso voltar uma
-etapa. O cabeçalho do bloco mostra o tempo todo qual moto está escolhida.
+Com a parceira escolhida, o bloco da moto mostra **as motos dela**, com busca por
+placa ou modelo — frota tem dezenas de motos, e rolar um `<select>` com cinquenta
+placas não é escolher, é procurar. "Outra moto" abre o cadastro por cima da OS já
+com a parceira preenchida como responsável.
+
+### Moto de frota não tem dono, tem responsável
+
+As motos que ficam com a oficina em nome do parceiro **são cadastradas sem dono
+individual**: ninguém é o proprietário, a empresa é a responsável. O cadastro de
+moto ganhou o campo **"Empresa parceira responsável"**, e o dono virou opcional
+("Sem dono individual"). No banco a moto guarda `partnerId` e `partnerName`, e
+nenhum `ownerId`.
+
+Isso é o que permite cadastrar de uma vez toda a frota que está na oficina sem
+inventar um cliente para cada moto — e é conferido no roteiro ponta a ponta, que
+verifica no Firestore que a moto ficou sem dono e que **nenhum cliente foi
+criado** ao abrir a OS da frota.
+
+### A etapa "Origem" saiu
+
+A OS tinha uma etapa só para perguntar de onde veio a moto e quem a trouxe. Com
+a parceira escolhida logo na etapa 1, a pergunta já está respondida antes de
+chegar lá: a etapa era um clique em "Próxima" toda vez.
+
+A OS passou de **5 para 4 etapas** — Cliente e moto, Recepção, Itens, Revisão —
+e os campos de entregador e contato saíram junto.
+
+#### A lista da frota vinha vazia
+
+Ao testar, escolher a parceira mostrava "nenhuma moto" mesmo com a frota
+cadastrada. O `useState` inicial era `partners[0]?.id ?? ""`, avaliado **antes de
+o Firestore responder**: o estado ficava em `""` para sempre enquanto o `<select>`
+exibia a primeira parceira. A tela dizia uma coisa e o filtro procurava outra.
+A filtragem passou a usar a parceira que está de fato selecionada, e o id é
+gravado ao entrar no modo parceira.
 
 #### O terceiro `clients[0]`
 
@@ -958,15 +991,10 @@ de motos do bloco do cliente (PR #30). Não escolher nada nunca pode significar
 "o primeiro da lista": o `|| clients[0]` saiu, e o campo fica em "Selecione o
 cliente proprietário".
 
-Na etapa **Origem** da OS, escolher "Encaminhado por parceiro" agora:
-
-- marca a empresa como responsável pelo pagamento (era um `<select>` com
-  `defaultValue`, sem estado e sem ninguém lendo — escolher "Empresa parceira"
-  não mudava nada, e a OS da frota era cobrada do motoboy que trouxe a moto);
-- oferece **qualquer moto já cadastrada no sistema**, mesmo em nome de outra
-  pessoa, porque a frota traz hoje uma moto e amanhã outra;
-- grava quem trouxe a moto (entregador e contato — também eram dois campos
-  soltos, sem estado).
+Escolher a empresa parceira marca a empresa como responsável pelo pagamento —
+era um `<select>` com `defaultValue`, sem estado e sem ninguém lendo: escolher
+"Empresa parceira" não mudava nada, e a OS da frota era cobrada do motoboy que
+trouxe a moto.
 
 No encerramento, a OS faturada **não pergunta forma de pagamento**. Mostra o que
 vai para a fatura, com o desconto combinado aplicado **só na mão de obra** —

@@ -398,7 +398,9 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .dialog-header h2 { margin: 5px 0 4px; font-size: 18px; letter-spacing: -.03em; }
 .dialog-header p { margin: 0; color: #88898d; font-size: 10px; }
 .dialog-header > button { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 8px; background: #f3f2f0; color: #76777a; font-size: 21px; line-height: 1; }
-.stepper { flex: 0 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); padding: 15px 23px; border-bottom: 1px solid #eceae7; background: #faf9f7; }
+/* A OS passou de 5 para 4 etapas quando a escolha da parceira foi para dentro
+   da etapa do cliente. `auto-fit` evita ter que mexer aqui na próxima vez. */
+.stepper { flex: 0 0 auto; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 15px 23px; border-bottom: 1px solid #eceae7; background: #faf9f7; }
 .step { position: relative; display: flex; align-items: center; gap: 7px; color: #a1a1a4; font-size: 9px; }
 .step:not(:last-child)::after { content: ""; position: absolute; left: 27px; right: 9px; top: 11px; z-index: 0; height: 1px; background: #deddda; }
 .step b { position: relative; z-index: 1; width: 22px; height: 22px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid #d9d7d3; border-radius: 50%; background: #fff; color: #a0a0a3; font-size: 8px; }
@@ -1653,34 +1655,25 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .partner-billing-total span { font-weight: 800; color: #22242a; }
 .partner-billing-total b { font-size: 16px; }
 
-/* Escolha da moto quando a OS é de uma empresa parceira: puxar uma que já está
-   no sistema, com busca, ou cadastrar a que chegou agora. Antes só existia o
-   primeiro caminho, e para o segundo era preciso voltar uma etapa. */
-.partner-bike-picker {
-  margin-top: 14px;
-  padding: 14px 15px;
-  border: 1px solid #e2e0dc;
-  border-radius: 12px;
-  background: #faf9f7;
+/* Cliente ou empresa parceira, na primeira etapa da OS. A frota é o caso mais
+   comum depois do cliente de balcão, e ficava numa etapa separada depois desta
+   — a etapa do cliente pedia um cliente que não existia. */
+.os-party-switch { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
+.os-party-switch > button {
+  height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid #dfddd9; border-radius: 10px; background: #ffffff;
+  color: #55565a; font-size: 12px; font-weight: 750; cursor: pointer; transition: .15s ease;
 }
-.partner-bike-picker > header {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.partner-bike-picker > header strong { display: block; font-size: 12px; color: #22242a; }
-.partner-bike-picker > header small { display: block; margin-top: 3px; color: #8b8c90; font-size: 10px; line-height: 1.45; }
+.os-party-switch > button:hover:not(:disabled) { border-color: #c9c7c2; background: #faf9f7; }
+.os-party-switch > button.selected { border-color: var(--red); background: #fff6f5; color: var(--red); }
+.os-party-switch > button:disabled { opacity: .45; cursor: not-allowed; }
 
-.partner-bike-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
-.partner-bike-actions {
-  grid-column: 1 / -1;
-  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 9px;
-}
-.partner-bike-actions .outline-button { display: inline-flex; align-items: center; gap: 7px; }
+.os-partner-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.os-partner-pick .info-strip { grid-column: 1 / -1; }
+.os-partner-bike-search { margin-bottom: 11px; }
 
 @media (max-width: 720px) {
-  .partner-bike-body { grid-template-columns: 1fr; }
-  .partner-bike-actions { flex-direction: column; align-items: stretch; }
-  .partner-bike-actions .outline-button { width: 100%; justify-content: center; }
+  .os-party-switch, .os-partner-pick { grid-template-columns: 1fr; }
 }
 
 /* OS aberta sem cliente identificado: o cartão de aviso na etapa 1 e o
