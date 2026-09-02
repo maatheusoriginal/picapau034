@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from "react";
-import type { ClientRecord } from "../types";
+import type { ClientRecord, MotorcycleRecord } from "../types";
+import { defaultSystemLists } from "../types";
+import { fullModelName, modelsOf, versionsOf } from "../motorcycle-catalog";
+import { formatPlate, isValidPlate, motorcycleIdFor, platePattern, samePlate } from "../plate";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
 import { nextSequentialId } from "../firestore-data";
@@ -11,6 +14,17 @@ interface ClientFormModalProps {
   editingClient?: ClientRecord | null;
   notify: (msg: string) => void;
   allClients: ClientRecord[];
+  /** Motos já cadastradas, para saber se este cliente já tem alguma. */
+  allMotorcycles?: MotorcycleRecord[];
+  /** Marcas configuradas em Configurações → Listas do sistema. */
+  brands?: string[];
+  /**
+   * Dados da moto já digitados na tela que abriu este cadastro.
+   *
+   * Chamado de dentro da OS, a placa já foi informada lá: repetir a digitação
+   * aqui é trabalho dobrado e é onde nasce a divergência entre as duas telas.
+   */
+  defaultMotorcycle?: { plate?: string; brand?: string; model?: string; version?: string; year?: string; color?: string };
 }
 
 export const ClientFormModal: React.FC<ClientFormModalProps> = ({
@@ -20,6 +34,9 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
   editingClient,
   notify,
   allClients,
+  allMotorcycles = [],
+  brands = [],
+  defaultMotorcycle,
 }) => {
   const [activeTab, setActiveTab] = useState<"ident" | "contact" | "address" | "financial" | "notes">("ident");
   const [isSaving, setIsSaving] = useState(false);
@@ -30,6 +47,20 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
   // aparece atrás do modal. Quem clicava em salvar via a aba trocar sozinha e
   // nada acontecer, sem nenhuma explicação na tela.
   const [erroForm, setErroForm] = useState("");
+
+  // A moto do cliente. Numa oficina não existe cliente sem moto: sem a placa
+  // vinculada, a próxima OS dessa pessoa não a encontra pela busca por placa —
+  // que é como o balcão procura quando a moto chega.
+  const [motoPlate, setMotoPlate] = useState("");
+  const [motoBrand, setMotoBrand] = useState("Honda");
+  const [motoModel, setMotoModel] = useState("");
+  const [motoVersion, setMotoVersion] = useState("");
+  const [motoYear, setMotoYear] = useState("");
+  const [motoColor, setMotoColor] = useState("");
+  const brandOptions = brands.length ? brands : defaultSystemLists.motorcycleBrands;
+  // Cliente que já tem moto no sistema não precisa cadastrar outra para ser
+  // salvo — a exigência é ter pelo menos uma, não uma a cada edição.
+  const jaTemMoto = Boolean(editingClient && allMotorcycles.some((moto) => moto.ownerId === editingClient.id));
 
   // Form Fields
   const [name, setName] = useState("");
@@ -73,6 +104,12 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
       setActive(true);
     }
     setErroForm("");
+      setMotoPlate(defaultMotorcycle?.plate ? formatPlate(defaultMotorcycle.plate) : "");
+      setMotoBrand(defaultMotorcycle?.brand || "Honda");
+      setMotoModel(defaultMotorcycle?.model || "");
+      setMotoVersion(defaultMotorcycle?.version || "");
+      setMotoYear(defaultMotorcycle?.year || "");
+      setMotoColor(defaultMotorcycle?.color || "");
     setActiveTab("ident");
   }, [isOpen, editingClient]);
 
@@ -91,10 +128,33 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
       return;
     }
 
+    // A moto é obrigatória para quem ainda não tem nenhuma: sem placa vinculada,
+    // a próxima OS deste cliente não o encontra pela busca por placa.
+    if (!jaTemMoto && !motoPlate.trim()) {
+      setErroForm("Informe a placa da moto deste cliente. Toda pessoa cadastrada precisa de pelo menos uma moto vinculada.");
+      setActiveTab("ident");
+      return;
+    }
+    if (motoPlate.trim() && !isValidPlate(motoPlate)) {
+      setErroForm("A placa não está num dos padrões brasileiros (ABC-1234 ou ABC-1D23).");
+      setActiveTab("ident");
+      return;
+    }
+    // Placa que já é de outro cliente seria roubada em silêncio: o id da moto
+    // sai da placa, e gravar por cima trocaria o dono da moto de alguém.
+    const donoAtual = allMotorcycles.find((moto) => samePlate(moto.plate, motoPlate));
+    if (motoPlate.trim() && donoAtual && donoAtual.ownerId && donoAtual.ownerId !== editingClient?.id) {
+      const nomeDoDono = allClients.find((cliente) => cliente.id === donoAtual.ownerId)?.name;
+      setErroForm(`A placa ${formatPlate(motoPlate)} já está cadastrada${nomeDoDono ? ` no nome de ${nomeDoDono}` : ""}. Confira a placa ou edite a moto pelo cadastro de motocicletas.`);
+      setActiveTab("ident");
+      return;
+    }
+
     setErroForm("");
     setIsSaving(true);
     try {
       const clientId = editingClient?.id || nextSequentialId(allClients, "CLI");
+      const motoId = motoPlate.trim() ? motorcycleIdFor(motoPlate) : "";
 
       const clientData: ClientRecord = {
         id: clientId,
@@ -107,7 +167,9 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
         condition,
         creditLimit: condition === "Cliente a prazo" ? Number(creditLimit) || 0 : undefined,
         tradeDetails: condition === "Troca de serviços" ? tradeDetails.trim() : undefined,
-        motorcycleIds: editingClient?.motorcycleIds || [],
+        motorcycleIds: motoId
+          ? [...new Set([...(editingClient?.motorcycleIds || []), motoId])]
+          : (editingClient?.motorcycleIds || []),
         detail: condition === "Cliente a prazo" ? `A prazo (Limite: R$ ${creditLimit})` : (condition === "Troca de serviços" ? "Troca de serviços" : "Pagamento no ato"),
         meta: type === "Empresa" ? "Pessoa Jurídica" : "Pessoa Física",
         notes: notes.trim(),
@@ -131,8 +193,25 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
         active: clientData.active,
       });
 
+      // A moto vai junto, no mesmo salvar. Gravar o cliente e deixar a moto
+      // para depois deixaria a oficina com um cliente sem moto — exatamente o
+      // que esta tela passou a impedir.
+      if (motoId) {
+        await saveFirestoreDoc("motorcycles", motoId, {
+          ownerId: clientId,
+          ownerName: clientData.name,
+          plate: formatPlate(motoPlate),
+          brand: motoBrand,
+          model: fullModelName(motoModel, motoVersion),
+          year: motoYear.trim(),
+          color: motoColor.trim(),
+        });
+      }
+
       onSaved(clientData);
-      notify(editingClient ? "Cliente atualizado com sucesso!" : "Cliente cadastrado com sucesso!");
+      notify(editingClient
+        ? "Cliente atualizado com sucesso!"
+        : `Cliente cadastrado${motoId ? ` com a moto ${formatPlate(motoPlate)}` : ""} com sucesso!`);
       onClose();
     } catch (err: unknown) {
       console.error("Erro ao salvar cliente:", err);
@@ -203,6 +282,71 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                   </select>
                 </label>
               </div>
+
+              {/*
+                Numa oficina não existe cliente sem moto. Sem a placa vinculada,
+                a próxima OS dessa pessoa não a encontra pela busca por placa —
+                que é como o balcão procura quando a moto chega no portão.
+
+                Quem já tem moto cadastrada não precisa informar outra: a
+                exigência é ter pelo menos uma, não uma a cada edição.
+              */}
+              <section className="client-moto-block">
+                <header>
+                  <div><strong>Motocicleta do cliente</strong><small>{jaTemMoto ? "Este cliente já tem moto cadastrada. Preencha só se quiser adicionar outra." : "Toda pessoa cadastrada precisa de pelo menos uma moto vinculada."}</small></div>
+                  {jaTemMoto ? <span className="status-badge green">Já vinculada</span> : <span className="status-badge">Obrigatória</span>}
+                </header>
+                <div className="form-grid-3">
+                  <label className="field-group">
+                    <span className="field-label">Placa {jaTemMoto ? null : <b className="req">*</b>}</span>
+                    <input
+                      type="text"
+                      value={motoPlate}
+                      onChange={(e) => setMotoPlate(formatPlate(e.target.value))}
+                      placeholder="ABC-1234 ou ABC-1D23"
+                      maxLength={8}
+                      className="dialog-input"
+                    />
+                    <span className="settings-hint">{motoPlate ? platePattern(motoPlate) : "Padrão antigo ou Mercosul."}</span>
+                  </label>
+                  <label className="field-group">
+                    <span className="field-label">Marca</span>
+                    <select value={motoBrand} onChange={(e) => { setMotoBrand(e.target.value); setMotoModel(""); setMotoVersion(""); }} className="dialog-select">
+                      {brandOptions.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                    </select>
+                  </label>
+                  <label className="field-group">
+                    <span className="field-label">Modelo</span>
+                    {modelsOf(motoBrand).length ? (
+                      <select value={motoModel} onChange={(e) => { setMotoModel(e.target.value); setMotoVersion(""); }} className="dialog-select">
+                        <option value="">Escolha o modelo</option>
+                        {modelsOf(motoBrand).map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                      </select>
+                    ) : (
+                      <input type="text" value={motoModel} onChange={(e) => setMotoModel(e.target.value)} placeholder="Ex: CG 160 Fan" className="dialog-input"/>
+                    )}
+                  </label>
+                  <label className="field-group">
+                    <span className="field-label">Versão</span>
+                    {versionsOf(motoBrand, motoModel).length ? (
+                      <select value={motoVersion} onChange={(e) => setMotoVersion(e.target.value)} className="dialog-select">
+                        <option value="">Sem versão específica</option>
+                        {versionsOf(motoBrand, motoModel).map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                      </select>
+                    ) : (
+                      <input type="text" value={motoVersion} onChange={(e) => setMotoVersion(e.target.value)} placeholder="Ex: ESDI" className="dialog-input"/>
+                    )}
+                  </label>
+                  <label className="field-group">
+                    <span className="field-label">Ano / modelo</span>
+                    <input type="text" value={motoYear} onChange={(e) => setMotoYear(e.target.value)} placeholder="2024 / 2025" className="dialog-input"/>
+                  </label>
+                  <label className="field-group">
+                    <span className="field-label">Cor</span>
+                    <input type="text" value={motoColor} onChange={(e) => setMotoColor(e.target.value)} placeholder="Ex: Vermelha" className="dialog-input"/>
+                  </label>
+                </div>
+              </section>
 
               <div className="form-grid-2">
                 <label className="field-group">

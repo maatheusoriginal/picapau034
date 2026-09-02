@@ -585,6 +585,12 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
 
   await p.locator(".dialog-window input").first().fill("34999998888");
   await p.waitForTimeout(400);
+  // Cliente sem placa vinculada é recusado: numa oficina não existe cliente sem
+  // moto. A placa da OS já vem preenchida aqui, para não digitar duas vezes.
+  await p.locator(".dialog-tabs button", { hasText: /Dados Pessoais/ }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-moto-block input[placeholder*="ABC-1234"]').fill("BOM-7C77");
+  await p.waitForTimeout(500);
   await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
   await p.waitForTimeout(4000);
   if ((await banco("clients")).length !== antes + 1) problemas.push("o cliente completo não foi gravado");
@@ -813,6 +819,118 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   await p.locator(".dialog-footer .ghost-button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
   await p.waitForTimeout(1200);
   if (problemas.length) throw new Error("etapa 1 da OS:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("cliente exige placa vinculada, e a moto vai junto", async () => {
+  // Numa oficina não existe cliente sem moto: sem a placa vinculada, a próxima
+  // OS dessa pessoa não a encontra pela busca por placa.
+  const problemas = [];
+  const antes = (await banco("clients")).length;
+  await ir("Clientes");
+  await p.getByRole("button", { name: /Cadastrar cliente|Novo cliente|Adicionar cliente/i }).first().click();
+  await p.waitForTimeout(2200);
+  if (!(await p.locator(".client-moto-block").count())) problemas.push("o cadastro de cliente não tem o bloco da moto");
+  await p.locator('.dialog-window input[placeholder*="Carlos Eduardo"]').fill("Rayane Souza");
+  await p.locator(".dialog-tabs button", { hasText: /Contato/ }).click();
+  await p.waitForTimeout(600);
+  await p.locator(".dialog-window input").first().fill("34988887777");
+  await p.waitForTimeout(400);
+  await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
+  await p.waitForTimeout(1500);
+  const aviso = await p.locator(".dialog-window .settings-modal-error").innerText().catch(() => "");
+  if (!/placa/i.test(aviso)) problemas.push(`sem placa devia recusar: ${JSON.stringify(aviso)}`);
+  if ((await banco("clients")).length !== antes) problemas.push("gravou sem a placa");
+
+  await p.locator('.client-moto-block input[placeholder*="ABC-1234"]').fill("RAY1B22");
+  await p.waitForTimeout(500);
+  const listas = p.locator(".client-moto-block select");
+  await listas.nth(0).selectOption("Honda"); await p.waitForTimeout(600);
+  await listas.nth(1).selectOption("CG 150"); await p.waitForTimeout(600);
+  await listas.nth(2).selectOption("Titan"); await p.waitForTimeout(500);
+  await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
+  await p.waitForTimeout(4000);
+  const cliente = (await banco("clients")).find((item) => item.name === "Rayane Souza");
+  const moto = (await banco("motorcycles")).find((item) => item.plate === "RAY-1B22");
+  if (!cliente) problemas.push("com a placa, o cliente devia gravar");
+  if (!moto) problemas.push("a moto não foi cadastrada junto");
+  else {
+    if (!/CG 150 Titan/.test(moto.model || "")) problemas.push(`modelo gravado: "${moto.model}"`);
+    if (moto.ownerId !== cliente?._id) problemas.push("a moto não ficou vinculada ao cliente");
+  }
+  if (problemas.length) throw new Error("cliente e placa:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fim", async () => {
+  // A moto chega de guincho, ou o cliente deixa e sai correndo. A OS abre e o
+  // serviço anda; o encerramento é que cobra o nome e o WhatsApp — senão a
+  // oficina fica com serviço feito e ninguém para cobrar.
+  const problemas = [];
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+  const acoes = await p.locator(".os-search-actions button").allInnerTexts();
+  if (acoes.length !== 2) problemas.push(`a etapa 1 tem ${acoes.length} ação(ões), esperado cadastrar e seguir sem cadastrar`);
+  await p.locator(".os-search-actions .ghost-button").click();
+  await p.waitForTimeout(900);
+  if (!(await p.locator(".os-pending-card").count())) problemas.push("não avisou que o cliente ficou pendente");
+  if (/Escolha o cliente acima/.test(await p.locator(".os-block").nth(1).innerText()))
+    problemas.push("o bloco da moto continuou travado");
+
+  await p.locator('.os-inline-form.vehicle input[placeholder*="ABC-1234"]').fill("GUI-4D44");
+  await p.waitForTimeout(500);
+  const listas = p.locator(".os-inline-form.vehicle select");
+  await listas.nth(0).selectOption("Honda"); await p.waitForTimeout(600);
+  await listas.nth(1).selectOption("CG 150"); await p.waitForTimeout(600);
+  await listas.nth(2).selectOption("Fan"); await p.waitForTimeout(500);
+  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
+  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
+  await p.getByPlaceholder("Ex.: 38.420 km").fill("50.000 km");
+  await p.locator(".dialog textarea").first().fill("Chegou de guincho");
+  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
+  await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão");
+  await p.locator(".dialog input[type=number]").first().fill("120");
+  await p.waitForTimeout(300);
+  await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
+  await p.waitForTimeout(900);
+  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
+  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4000);
+
+  const aberta = (await banco("serviceOrders")).find((ordem) => ordem.plate === "GUI-4D44");
+  if (aberta?.customerPending !== true) problemas.push("a OS não ficou marcada como cliente pendente");
+  // A moto precisa existir mesmo sem dono: é a placa que segura a ordem.
+  if (!(await banco("motorcycles")).some((moto) => moto.plate === "GUI-4D44")) problemas.push("a moto não foi cadastrada sem o cliente");
+
+  await p.locator("tr", { hasText: "GUI-4D44" }).locator("button", { hasText: /^Abrir$/ }).first().click();
+  await p.waitForTimeout(2500);
+  await p.locator(".order-status-control select").selectOption("Entrega");
+  await p.waitForTimeout(900);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(2200);
+  if (!(await p.locator(".checkout-pending-customer").count())) problemas.push("o encerramento não pediu os dados que faltam");
+  await p.locator(".payment-methods button").filter({ hasText: "Dinheiro" }).first().click();
+  await p.waitForTimeout(600);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(1800);
+  const recusa = await p.locator(".dialog-error-strip").innerText().catch(() => "");
+  if (!/nome/i.test(recusa)) problemas.push(`devia recusar encerrar sem o nome: ${JSON.stringify(recusa)}`);
+
+  await p.locator('.checkout-pending-customer input[placeholder*="retirar"]').fill("Dono do Guincho");
+  await p.locator('.checkout-pending-customer input[placeholder*="99999"]').fill("34977776666");
+  await p.waitForTimeout(500);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(5000);
+  const fechada = (await banco("serviceOrders")).find((ordem) => ordem.plate === "GUI-4D44");
+  if (fechada?.closed !== true) problemas.push(`a OS não encerrou: ${fechada?.status}`);
+  if (fechada?.customerPending === true) problemas.push("a OS continuou marcada como pendente");
+  const novo = (await banco("clients")).find((item) => item.name === "Dono do Guincho");
+  if (!novo) problemas.push("o cliente informado no encerramento não virou cadastro");
+  const moto = (await banco("motorcycles")).find((item) => item.plate === "GUI-4D44");
+  if (moto?.ownerId !== novo?._id) problemas.push("a moto não passou a ser do cliente identificado");
+  if (problemas.length) throw new Error("OS sem cliente:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("em tela baixa, o botão de salvar continua alcançável", async () => {

@@ -3,6 +3,7 @@ import type { ClientRecord, MotorcycleRecord } from "../types";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { defaultSystemLists } from "../types";
 import { fullModelName, modelsOf, splitModelName, versionsOf } from "../motorcycle-catalog";
+import { motorcycleIdFor } from "../plate";
 
 interface MotorcycleFormModalProps {
   isOpen: boolean;
@@ -151,7 +152,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
     setErroForm("");
     setIsSaving(true);
     try {
-      const motoId = editingMotorcycle?.id || `MOTO-${cleanPlate}`;
+      const motoId = editingMotorcycle?.id || motorcycleIdFor(cleanPlate);
       const ownerObj = clients.find((c) => c.id === ownerId);
 
       const motorcycleData: MotorcycleRecord = {

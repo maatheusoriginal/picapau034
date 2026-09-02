@@ -330,6 +330,15 @@ export type OrderRecord = {
   fuelLevel?: string;
   /** OS entregue e recebida: sai das listas de serviço em andamento. */
   closed?: boolean;
+  /**
+   * A moto entrou sem os dados do dono.
+   *
+   * Acontece o tempo todo: a moto chega no guincho, ou o cliente deixa e sai
+   * correndo. A OS abre assim mesmo — a peça já sai do estoque e o serviço
+   * anda —, mas o encerramento cobra o nome e o WhatsApp antes de deixar
+   * receber. Sem isso a oficina fica com serviço feito e ninguém para cobrar.
+   */
+  customerPending?: boolean;
   /** Empresa parceira que encaminhou a moto e responde pela OS. */
   partnerId?: string;
   partnerName?: string;
@@ -398,7 +407,7 @@ export const defaultSystemLists: SystemLists = {
   units: ["UN", "PC", "LT", "KG", "M", "PAR", "JG", "CX"],
   // Precisa conter todas as marcas de src/motorcycle-catalog.ts: escolher uma
   // marca que o catálogo não conhece não ofereceria modelo nenhum.
-  motorcycleBrands: ["Honda", "Yamaha", "Suzuki", "Kawasaki", "Haojue", "Dafra", "Shineray", "Royal Enfield", "BMW", "Triumph", "Harley-Davidson", "Outra"],
+  motorcycleBrands: ["Honda", "Yamaha", "Suzuki", "Kawasaki", "Haojue", "Dafra", "Shineray", "Traxx", "Kasinski", "Sundown", "Royal Enfield", "BMW", "Triumph", "Harley-Davidson", "KTM", "Ducati", "Outra"],
   partBrands: ["Motul", "Ipiranga", "Yamalube", "Mobil", "Lubrax", "Cobreq", "Fras-le", "NGK", "Bosch", "Magneti Marelli", "DID", "Riffel", "Vedamotors", "Pirelli", "Levorin", "Michelin", "Original Honda", "Original Yamaha"],
   cashAccounts: ["Caixa balcão", "Banco Inter"],
   orderPriorities: ["Normal", "Urgente", "Baixa"],
