@@ -2044,6 +2044,9 @@ export function AppDialog({
   // e sai correndo. A OS abre com a placa e o serviço anda; o encerramento é
   // que cobra o nome e o WhatsApp.
   const [osSkipCustomer, setOsSkipCustomer] = useState(false);
+  // Busca da moto na etapa da parceira: frota tem dezenas de motos, e rolar um
+  // <select> com cinquenta placas não é escolher, é procurar.
+  const [partnerBikeSearch, setPartnerBikeSearch] = useState("");
 
   // Os dados que faltam de uma OS aberta sem cliente, preenchidos no
   // encerramento. Ficam separados dos campos da OS nova para não misturar o
@@ -2261,6 +2264,17 @@ export function AppDialog({
   const customerLookupMatch = clients.find((client) => (lookupDigits.length >= 8 && onlyDigits(client.phone).includes(lookupDigits)) || (!lookupDigits.length && customerLookup.trim().length >= 3 && client.name.toLowerCase().includes(customerLookup.toLowerCase())));
   // Cliente sendo cadastrado agora ainda não tem moto nenhuma: a lista vazia é
   // o que faz o formulário da moto nova aparecer no lugar da escolha.
+  // Motos do sistema com o nome do dono resolvido, para a escolha da parceira.
+  const motosComDono = billableMotorcycles(motorcycles.map((moto) => ({
+    ...moto,
+    ownerName: clients.find((cliente) => cliente.id === moto.ownerId)?.name ?? moto.ownerName,
+  })));
+  const buscaDeMoto = partnerBikeSearch.trim().toLowerCase();
+  const motosDaBusca = buscaDeMoto
+    ? motosComDono.filter((moto) => `${moto.plate} ${moto.brand ?? ""} ${moto.model} ${moto.ownerName ?? ""}`.toLowerCase().includes(buscaDeMoto))
+    : motosComDono;
+  const motoDaParceira = motosComDono.find((moto) => moto.id === selectedMotorcycleId) ?? null;
+
   const customerMotorcycles = !osNewCustomer && !osSkipCustomer && selectedCustomer
     ? motorcycles.filter((motorcycle) => motorcycle.ownerId === selectedCustomer.id)
     : [];
@@ -3522,20 +3536,40 @@ export function AppDialog({
                   </div>
                   {/*
                     A frota traz hoje uma moto que já esteve aqui no mês passado,
-                    e amanhã outra. Procurar pela placa na etapa 1 funciona, mas
-                    quem atende parceira quer ver a lista e escolher.
+                    e amanhã uma que nunca veio. Os dois caminhos precisam estar
+                    aqui: antes só dava para puxar uma já cadastrada, e para
+                    cadastrar uma nova era preciso voltar para a etapa anterior.
+
+                    A busca em cima da lista existe porque frota tem dezenas de
+                    motos: rolar um <select> com cinquenta placas não é escolher,
+                    é procurar.
                   */}
-                  {osOrigin === "partner" && motorcycles.length > 0 ? (
-                    <label className="field field-full">
-                      <span>Puxar uma moto já cadastrada no sistema</span>
-                      <select value={selectedMotorcycleId} onChange={(event) => { const escolhida = event.target.value; if (!escolhida) return; selectMotorcycle(escolhida); }}>
-                        <option value="">Escolha na lista ou informe a placa na etapa anterior</option>
-                        {billableMotorcycles(motorcycles.map((moto) => ({ ...moto, ownerName: clients.find((cliente) => cliente.id === moto.ownerId)?.name ?? moto.ownerName }))).map((moto) => (
-                          <option key={moto.id} value={moto.id}>{motorcycleLabel(moto)}</option>
-                        ))}
-                      </select>
-                      <small className="field-help">Qualquer moto do sistema pode ser atendida pela parceira, mesmo cadastrada no nome de outra pessoa.</small>
-                    </label>
+                  {osOrigin === "partner" ? (
+                    <section className="partner-bike-picker">
+                      <header>
+                        <div><strong>Moto desta OS</strong><small>Escolha uma que já está no sistema ou cadastre a que chegou agora.</small></div>
+                        {motoDaParceira ? <span className="status-badge green">{motorcycleLabel(motoDaParceira)}</span> : <span className="status-badge">Nenhuma escolhida</span>}
+                      </header>
+                      <div className="partner-bike-body">
+                        <label className="field">
+                          <span>Procurar no sistema</span>
+                          <input value={partnerBikeSearch} onChange={(event) => setPartnerBikeSearch(event.target.value)} placeholder="Placa, modelo ou dono"/>
+                        </label>
+                        <label className="field">
+                          <span>Motos cadastradas ({motosDaBusca.length})</span>
+                          <select value={selectedMotorcycleId} onChange={(event) => { const escolhida = event.target.value; if (!escolhida) return; selectMotorcycle(escolhida); }}>
+                            <option value="">Escolha uma moto</option>
+                            {motosDaBusca.map((moto) => (
+                              <option key={moto.id} value={moto.id}>{motorcycleLabel(moto)}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="partner-bike-actions">
+                          <button className="outline-button" onClick={() => setCadastroNaOs("moto")}><Icon name="plus" size={15}/>Cadastrar moto nova</button>
+                          {motosDaBusca.length === 0 && partnerBikeSearch.trim() ? <small className="os-inline-hint">Nenhuma moto com "{partnerBikeSearch.trim()}". Cadastre a que chegou.</small> : <small className="os-inline-hint">Qualquer moto do sistema pode ser atendida pela parceira, mesmo cadastrada no nome de outra pessoa.</small>}
+                        </div>
+                      </div>
+                    </section>
                   ) : null}
                   <div className="info-strip"><Icon name="check" size={18}/><span>{osOrigin === "partner" && osPayer === "partner"
                     ? `${selectedPartner?.name ?? "A parceira"} paga esta OS na fatura com vencimento em ${nextBillingDate()}. O desconto de ${selectedPartner?.laborDiscount ?? 0}% vale só na mão de obra; peça mantém o preço. A baixa do estoque acontece normalmente na entrega.`
@@ -4143,6 +4177,9 @@ export function AppDialog({
               setSelectedMotorcycleId(moto.id);
               setOsPlate(moto.plate);
               setNewVehicleMode(false);
+              // Sem isto a busca anterior continua filtrando e a moto recém
+              // cadastrada não aparece selecionada na lista.
+              setPartnerBikeSearch("");
               if (moto.ownerId) setSelectedCustomerId(moto.ownerId);
               setCadastroNaOs(null);
               notify?.(`Moto placa ${moto.plate} cadastrada e selecionada nesta OS.`);
