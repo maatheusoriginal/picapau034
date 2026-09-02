@@ -701,8 +701,16 @@ export type ClientRecord = {
 
 export type MotorcycleRecord = {
   id: string;
+  /**
+   * Dono da moto. Fica vazio de propósito nas motos de frota: a oficina atende
+   * a moto do aplicativo de entrega sem nunca saber quem é o motoboy da vez —
+   * quem responde é a empresa parceira.
+   */
   ownerId: string;
   ownerName?: string;
+  /** Empresa parceira responsável pela moto, quando não há dono individual. */
+  partnerId?: string;
+  partnerName?: string;
   plate: string;
   brand?: string;
   model: string;

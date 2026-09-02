@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import type { ClientRecord, MotorcycleRecord } from "../types";
+import type { ClientRecord, MotorcycleRecord, PartnerConfig } from "../types";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { defaultSystemLists } from "../types";
 import { fullModelName, modelsOf, splitModelName, versionsOf } from "../motorcycle-catalog";
@@ -16,6 +16,9 @@ interface MotorcycleFormModalProps {
   preselectedClientId?: string;
   /** Marcas configuradas em Configurações → Listas do sistema. */
   brands?: string[];
+  /** Empresas parceiras, para marcar a responsável por uma moto de frota. */
+  partners?: PartnerConfig[];
+  preselectedPartnerId?: string;
 }
 
 export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
@@ -28,6 +31,8 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   allMotorcycles,
   preselectedClientId,
   brands = [],
+  partners = [],
+  preselectedPartnerId,
 }) => {
   const [isSaving, setIsSaving] = useState(false);
   // O que falta preencher, dito DENTRO do formulário.
@@ -49,6 +54,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   const [year, setYear] = useState("");
   const [color, setColor] = useState("");
   const [ownerId, setOwnerId] = useState("");
+  const [partnerId, setPartnerId] = useState("");
   const [mileage, setMileage] = useState<number | "">("");
   const [engineSize, setEngineSize] = useState("");
   const [chassis, setChassis] = useState("");
@@ -95,6 +101,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
       setYear(editingMotorcycle.year || "");
       setColor(editingMotorcycle.color || "");
       setOwnerId(editingMotorcycle.ownerId || "");
+      setPartnerId(editingMotorcycle.partnerId || "");
       setMileage(editingMotorcycle.mileage ?? "");
       setEngineSize(editingMotorcycle.engineSize || "");
       setChassis(editingMotorcycle.chassis || "");
@@ -112,13 +119,14 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
       // cliente da agenda". A moto ficava no nome de alguém que nunca foi dono
       // dela e passava a aparecer na lista de motos daquela pessoa na OS.
       setOwnerId(preselectedClientId || "");
+      setPartnerId(preselectedPartnerId || "");
       setMileage("");
       setEngineSize("160");
       setChassis("");
       setRenavam("");
       setNotes("");
     }
-  }, [isOpen, editingMotorcycle, preselectedClientId, clients]);
+  }, [isOpen, editingMotorcycle, preselectedClientId, preselectedPartnerId, clients]);
 
   const normalizePlateInput = (val: string) => {
     return val.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7);
@@ -162,6 +170,8 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
         id: motoId,
         ownerId,
         ownerName: ownerObj ? ownerObj.name : "",
+        partnerId,
+        partnerName: partners.find((item) => item.id === partnerId)?.name ?? "",
         plate: formattedPlateDisplay(cleanPlate),
         brand,
         model: model.trim(),
@@ -177,6 +187,8 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
       await saveFirestoreDoc("motorcycles", motoId, {
         ownerId: motorcycleData.ownerId,
         ownerName: motorcycleData.ownerName,
+        partnerId: motorcycleData.partnerId,
+        partnerName: motorcycleData.partnerName,
         plate: motorcycleData.plate,
         brand: motorcycleData.brand,
         model: motorcycleData.model,
@@ -254,7 +266,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                   onChange={(e) => setOwnerId(e.target.value)}
                   className="dialog-select"
                 >
-                  <option value="">-- Selecione o cliente proprietário --</option>
+                  <option value="">-- Sem dono individual --</option>
                   {clients.map((cli) => (
                     <option key={cli.id} value={cli.id}>
                       {cli.name} {cli.phone ? `(${cli.phone})` : ""}
@@ -263,6 +275,33 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                 </select>
               </label>
             </div>
+
+            {/*
+              Moto de frota não tem dono individual: a oficina atende a moto do
+              aplicativo de entrega sem nunca saber quem é o motoboy da vez.
+              Quem responde é a empresa parceira, e é por ela que essas motos
+              são encontradas na hora de abrir a OS.
+            */}
+            {partners.length > 0 ? (
+              <label className="field-group">
+                <span className="field-label">Empresa parceira responsável</span>
+                <select
+                  value={partnerId}
+                  onChange={(e) => setPartnerId(e.target.value)}
+                  className="dialog-select"
+                >
+                  <option value="">-- Nenhuma: é moto de cliente --</option>
+                  {partners.map((parceira) => (
+                    <option key={parceira.id} value={parceira.id}>{parceira.name}</option>
+                  ))}
+                </select>
+                <span className="settings-hint">
+                  {partnerId
+                    ? "Esta moto aparece na lista da parceira ao abrir uma OS, mesmo sem dono cadastrado."
+                    : "Use quando a moto é da frota de uma empresa e não tem dono individual."}
+                </span>
+              </label>
+            ) : null}
 
             {/* Linha 2: Marca, Modelo e Versão */}
             <div className="form-grid-3">

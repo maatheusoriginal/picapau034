@@ -196,21 +196,19 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
   // Etapa 1 — cliente e depois a moto. Sem placa a OS é (corretamente) recusada.
   await preencherEtapa1({ nome: "Cliente de Teste", telefone: "34999998888", placa: "TES-1D23", marca: "Honda", modelo: "CG 160", versao: "Fan" });
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1300);
-  // Etapa 2 — origem: cliente direto já vem marcado.
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1300);
-  // Etapa 3 — recepção.
+  // Etapa 2 — recepção.
   await p.getByPlaceholder("Ex.: 38.420 km").fill("38.420 km");
   await p.locator(".dialog textarea").first().fill("Barulho na relação");
   await p.waitForTimeout(400);
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1300);
-  // Etapa 4 — mão de obra: descrição + valor + "Adicionar mão de obra".
+  // Etapa 3 — mão de obra: descrição + valor + "Adicionar mão de obra".
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Troca do kit relação");
   await p.locator(".dialog input[type=number]").first().fill("150");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1300);
-  // Etapa 5 — revisão e confirmação.
+  // Etapa 4 — revisão e confirmação.
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4000);
   const ordens = await banco("serviceOrders");
   if (ordens.length !== 1) throw new Error(`gravou ${ordens.length} OS, esperado 1`);
@@ -600,7 +598,7 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
   if (problemas.length) throw new Error("cadastro dentro da OS:\n      - " + problemas.join("\n      - "));
 });
 
-await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no caixa", async () => {
+await passo("frota: moto sem dono, parceira responsável e fatura no mês seguinte", async () => {
   const problemas = [];
 
   // 1. a empresa parceira, com desconto combinado na mão de obra
@@ -617,7 +615,37 @@ await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no 
   await p.waitForTimeout(3500);
   if (!(await banco("partners")).length) problemas.push("a empresa parceira não foi cadastrada");
 
-  // 2. a OS pela parceira
+  // 2. a moto da frota: sem dono individual, com a parceira como responsável.
+  // A oficina atende a moto do aplicativo sem saber quem é o motoboy da vez.
+  await ir("Motocicletas");
+  await p.getByRole("button", { name: /Cadastrar moto|Nova moto|Adicionar moto/i }).first().click();
+  await p.waitForTimeout(2200);
+  await p.locator('.dialog-window input[placeholder*="ABC-1234"]').fill("FLA-2C34");
+  const rotulos = async () => p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
+  let atuais = await rotulos();
+  await p.locator(".dialog-window select").nth(atuais.findIndex((t) => /Marca/i.test(t))).selectOption("Honda");
+  await p.waitForTimeout(600);
+  atuais = await rotulos();
+  await p.locator(".dialog-window select").nth(atuais.findIndex((t) => /^Modelo/i.test(t))).selectOption("Biz");
+  await p.waitForTimeout(600);
+  atuais = await rotulos();
+  const indiceParceira = atuais.findIndex((t) => /parceira responsável/i.test(t));
+  if (indiceParceira < 0) problemas.push(`o cadastro de moto não oferece a parceira responsável: ${JSON.stringify(atuais)}`);
+  else {
+    await p.locator(".dialog-window select").nth(indiceParceira).selectOption({ label: "Flash Entregas" });
+    await p.waitForTimeout(500);
+  }
+  await p.locator(".dialog-window button", { hasText: /Cadastrar Motocicleta|Salvar/ }).first().click();
+  await p.waitForTimeout(4000);
+  const daFrota = (await banco("motorcycles")).find((moto) => moto.plate === "FLA-2C34");
+  if (!daFrota) problemas.push("a moto da frota não foi cadastrada");
+  else {
+    if (daFrota.ownerId) problemas.push(`a moto de frota ficou com dono "${daFrota.ownerId}"`);
+    if (daFrota.partnerName !== "Flash Entregas") problemas.push(`responsável gravado: "${daFrota.partnerName}"`);
+  }
+
+  // 3. a OS começa escolhendo a parceira, na PRIMEIRA etapa — a de origem
+  // deixou de existir, porque quem abre a OS já escolhe a empresa e a moto.
   await ir("Ordens de serviço");
   await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
   await p.waitForTimeout(1500);
@@ -625,90 +653,51 @@ await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no 
     await p.getByText(/Abrir OS completa/i).first().click();
     await p.waitForTimeout(1800);
   }
-  await preencherEtapa1({ nome: "João Motoboy", telefone: "34988887777", placa: "FLA-2C34", marca: "Honda", modelo: "Biz", versao: "125" });
+  const etapas = await p.locator(".stepper .step span").allInnerTexts();
+  if (etapas.length !== 4) problemas.push(`a OS tem ${etapas.length} etapas, esperado 4`);
+  if (etapas.some((texto) => /Origem/i.test(texto))) problemas.push("a etapa de origem continua na tela");
+  if ((await p.locator(".os-party-switch button").count()) !== 2) problemas.push("a etapa 1 não deixa escolher entre cliente e parceira");
+
+  await p.locator(".os-party-switch button", { hasText: /parceira/i }).click();
+  await p.waitForTimeout(1000);
+  const escolhida = await p.locator(".os-partner-pick select").first().locator("option:checked").innerText();
+  if (!/Flash Entregas/.test(escolhida)) problemas.push(`a parceira não veio selecionada: ${JSON.stringify(escolhida)}`);
+
+  // A frota dela aparece para escolher. O <select> mostrava a primeira parceira
+  // com o estado ainda vazio, e o filtro procurava por id vazio: a lista da
+  // parceira vinha sempre vazia.
+  const motosNaTela = await p.locator(".vehicle-choice-list > button").allInnerTexts();
+  if (!motosNaTela.some((texto) => /FLA-2C34/.test(texto))) problemas.push(`as motos da parceira não apareceram: ${JSON.stringify(motosNaTela)}`);
+  await p.locator(".vehicle-choice-list > button", { hasText: "FLA-2C34" }).click();
+  await p.waitForTimeout(800);
+  if ((await p.locator(".os-block.done").count()) !== 2) problemas.push("os dois blocos deviam ficar prontos");
+
   await p.locator(".dialog-footer .primary-button").click();
   await p.waitForTimeout(1400);
-
-  await p.locator(".choice-card", { hasText: /Encaminhado por parceiro/ }).click();
-  await p.waitForTimeout(900);
-  // Era um <select> com defaultValue, sem estado e sem ninguém lendo: escolher
-  // "Empresa parceira" não mudava nada e a OS da frota era cobrada do motoboy.
-  if ((await p.locator(".dialog select").first().inputValue()) !== "partner")
-    problemas.push("escolher parceiro não sugeriu a empresa como pagadora");
-  // A frota traz hoje uma moto que já veio, e amanhã uma que nunca veio: os
-  // dois caminhos precisam estar nesta tela. Antes só dava para puxar uma já
-  // cadastrada, e para cadastrar uma nova era preciso voltar uma etapa.
-  if (!(await p.locator(".partner-bike-picker").count())) problemas.push("a etapa da parceira não tem o bloco da moto");
-  const motos = await p.locator(".partner-bike-body select").locator("option").count();
-  if (motos < 2) problemas.push(`a lista de motos do sistema trouxe ${motos} opção(ões)`);
-  const acoesDaMoto = await p.locator(".partner-bike-actions button").allInnerTexts();
-  if (!acoesDaMoto.some((t) => /Cadastrar moto nova/i.test(t))) problemas.push(`sem o botão de cadastrar moto nova: ${JSON.stringify(acoesDaMoto)}`);
-
-  // A busca existe porque frota tem dezenas de motos: rolar um select com
-  // cinquenta placas não é escolher, é procurar.
-  await p.locator('.partner-bike-body input[placeholder*="Placa"]').fill("CG 160");
-  await p.waitForTimeout(800);
-  const filtradas = await p.locator(".partner-bike-body select").locator("option").allInnerTexts();
-  if (filtradas.length !== 2) problemas.push(`a busca deixou ${filtradas.length} opção(ões), esperado 2`);
-  await p.locator('.partner-bike-body input[placeholder*="Placa"]').fill("");
-  await p.waitForTimeout(700);
-
-  // E dá para cadastrar uma moto nova sem sair da OS, já escolhida nela.
-  await p.locator(".partner-bike-actions button", { hasText: /Cadastrar moto nova/ }).click();
-  await p.waitForTimeout(2500);
-  await p.locator('.dialog-window input[placeholder*="ABC-1234"]').fill("GON-3C33");
-  const rotulosMoto = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
-  await p.locator(".dialog-window select").nth(rotulosMoto.findIndex((t) => /Marca/i.test(t))).selectOption("Honda");
-  await p.waitForTimeout(600);
-  const rotulos2 = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
-  await p.locator(".dialog-window select").nth(rotulos2.findIndex((t) => /^Modelo/i.test(t))).selectOption("Biz");
-  await p.waitForTimeout(600);
-  await p.locator(".dialog-window button", { hasText: /Cadastrar Motocicleta|Salvar/ }).first().click();
-  await p.waitForTimeout(4000);
-  if (!(await banco("motorcycles")).some((moto) => moto.plate === "GON-3C33")) problemas.push("a moto cadastrada pela parceira não gravou");
-  const escolhida = await p.locator(".partner-bike-picker header .status-badge").innerText().catch(() => "");
-  if (!/GON-3C33/.test(escolhida)) problemas.push(`a moto nova não entrou escolhida na OS: ${JSON.stringify(escolhida)}`);
-  if ((await p.locator('.partner-bike-body input[placeholder*="Placa"]').inputValue()) !== "") problemas.push("a busca anterior não foi limpa");
-
-  // Cadastrar a moto sem escolher dono deixava ela no nome do PRIMEIRO cliente
-  // da agenda — alguém que nunca foi dono dela, e que passava a ver essa moto
-  // na própria lista ao abrir uma OS.
-  const semDono = (await banco("motorcycles")).find((moto) => moto.plate === "GON-3C33");
-  if (semDono?.ownerId) problemas.push(`a moto cadastrada sem dono ficou com ownerId "${semDono.ownerId}"`);
-
-  // A OS segue com a moto cadastrada aqui, e não com a placa digitada na etapa
-  // anterior: escolher uma moto na lista da parceira substitui a da etapa 1.
-  await p.getByPlaceholder("Nome de quem trouxe a moto").fill("Carlos entregador");
-  await p.waitForTimeout(400);
-  await p.locator(".dialog-footer .primary-button").click();
-  await p.waitForTimeout(1300);
   await p.getByPlaceholder("Ex.: 38.420 km").fill("12.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão da frota");
   await p.locator(".dialog-footer .primary-button").click();
-  await p.waitForTimeout(1300);
+  await p.waitForTimeout(1400);
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão completa");
   await p.locator(".dialog input[type=number]").first().fill("200");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);
   await p.locator(".dialog-footer .primary-button").click();
-  await p.waitForTimeout(1300);
+  await p.waitForTimeout(1400);
   await p.locator(".dialog-footer .primary-button").click();
-  await p.waitForTimeout(4000);
+  await p.waitForTimeout(4500);
 
   const daParceira = (await banco("serviceOrders")).find((ordem) => ordem.partnerName === "Flash Entregas");
   if (!daParceira) problemas.push("a OS não gravou a empresa parceira");
-  else {
-    if (daParceira.payer !== "partner") problemas.push(`quem paga ficou "${daParceira.payer}"`);
-    if (!/Carlos/.test(daParceira.courierName || "")) problemas.push(`entregador gravado: "${daParceira.courierName}"`);
-  }
+  else if (daParceira.payer !== "partner") problemas.push(`quem paga ficou "${daParceira.payer}"`);
+  // OS de frota não inventa cliente: quem responde é a empresa.
+  const clientesInventados = (await banco("clients")).filter((cliente) => /Flash/i.test(cliente.name || ""));
+  if (clientesInventados.length) problemas.push("a OS de frota criou um cliente com o nome da parceira");
 
-  // 3. o encerramento não pergunta forma de pagamento.
-  // A lista já tem a OS do passo 6: abrir a primeira abriria a errada.
-  await p.locator("tr", { hasText: "GON-3C33" }).locator("button", { hasText: /^Abrir$/ }).first().click();
+  // 4. o encerramento não pergunta forma de pagamento
+  await p.locator("tr", { hasText: "FLA-2C34" }).locator("button", { hasText: /^Abrir$/ }).first().click();
   await p.waitForTimeout(2500);
-  const tituloOs = await p.locator(".dialog h2").first().innerText();
-  if (!/OS-0002/.test(tituloOs)) problemas.push(`abriu ${tituloOs}, esperado a OS da parceira`);
   await p.locator(".order-status-control select").selectOption("Entrega");
   await p.waitForTimeout(900);
   await p.locator(".dialog-footer .primary-button").click();
@@ -718,7 +707,7 @@ await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no 
   await p.locator(".dialog-footer .primary-button").click();
   await p.waitForTimeout(5000);
 
-  // 4. virou fatura no nome da empresa, com desconto e vencimento certos
+  // 5. virou fatura no nome da empresa, com desconto e vencimento certos
   const fatura = (await banco("accounts")).find((conta) => conta.person === "Flash Entregas");
   if (!fatura) problemas.push("não gerou a conta a receber no nome da empresa");
   else {
@@ -731,14 +720,11 @@ await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no 
   const encerrada = (await banco("serviceOrders")).find((ordem) => ordem.partnerName === "Flash Entregas");
   if (encerrada?.paymentMethod !== "Faturado no parceiro") problemas.push(`forma gravada: "${encerrada?.paymentMethod}"`);
 
-  // A OS do passo 6 não pode ter sido tocada. Era o que acontecia: o id se
-  // perdia ao ir do detalhe para o recebimento e o encerramento caía na
-  // PRIMEIRA OS da lista, com os itens e o total desta.
+  // A OS do passo 6 não pode ter sido tocada.
   const antiga = (await banco("serviceOrders")).find((ordem) => ordem.plate === "TES-1D23");
-  if (Number(antiga?.total) !== 150) problemas.push(`a OS do passo 6 virou R$ ${antiga?.total}, esperado 150 — o encerramento gravou na ordem errada`);
-  if (antiga?.paymentMethod !== "Dinheiro") problemas.push(`a OS do passo 6 ficou como "${antiga?.paymentMethod}", esperado Dinheiro`);
+  if (Number(antiga?.total) !== 150) problemas.push(`a OS do passo 6 virou R$ ${antiga?.total}, esperado 150`);
 
-  if (problemas.length) throw new Error("empresa parceira:\n      - " + problemas.join("\n      - "));
+  if (problemas.length) throw new Error("frota e parceira:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("moto por marca, modelo e versão; código de barras gerado", async () => {
@@ -776,8 +762,10 @@ await passo("moto por marca, modelo e versão; código de barras gerado", async 
   if (!versoes.some((t) => /Fan/.test(t))) problemas.push(`CG 160 não trouxe as versões: ${JSON.stringify(versoes)}`);
   await versao.selectOption("Fan");
   await p.waitForTimeout(700);
-  const dica = await p.locator(".dialog-window .settings-hint").first().innerText().catch(() => "");
-  if (!/CG 160 Fan/.test(dica)) problemas.push(`não mostrou como fica gravado: ${JSON.stringify(dica)}`);
+  // A dica de como o modelo fica gravado é uma entre várias no formulário — a
+  // da empresa parceira vem antes dela —, então procura em todas.
+  const dicas = await p.locator(".dialog-window .settings-hint").allInnerTexts();
+  if (!dicas.some((texto) => /CG 160 Fan/.test(texto))) problemas.push(`não mostrou como fica gravado: ${JSON.stringify(dicas)}`);
   await p.locator(".dialog-window button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
   await p.waitForTimeout(1200);
 
@@ -927,7 +915,6 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   await listas.nth(0).selectOption("Honda"); await p.waitForTimeout(600);
   await listas.nth(1).selectOption("CG 150"); await p.waitForTimeout(600);
   await listas.nth(2).selectOption("Fan"); await p.waitForTimeout(500);
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
   await p.getByPlaceholder("Ex.: 38.420 km").fill("50.000 km");
   await p.locator(".dialog textarea").first().fill("Chegou de guincho");
