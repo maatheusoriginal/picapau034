@@ -635,8 +635,49 @@ await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no 
   // "Empresa parceira" não mudava nada e a OS da frota era cobrada do motoboy.
   if ((await p.locator(".dialog select").first().inputValue()) !== "partner")
     problemas.push("escolher parceiro não sugeriu a empresa como pagadora");
-  const motos = await p.locator(".dialog select").last().locator("option").count();
+  // A frota traz hoje uma moto que já veio, e amanhã uma que nunca veio: os
+  // dois caminhos precisam estar nesta tela. Antes só dava para puxar uma já
+  // cadastrada, e para cadastrar uma nova era preciso voltar uma etapa.
+  if (!(await p.locator(".partner-bike-picker").count())) problemas.push("a etapa da parceira não tem o bloco da moto");
+  const motos = await p.locator(".partner-bike-body select").locator("option").count();
   if (motos < 2) problemas.push(`a lista de motos do sistema trouxe ${motos} opção(ões)`);
+  const acoesDaMoto = await p.locator(".partner-bike-actions button").allInnerTexts();
+  if (!acoesDaMoto.some((t) => /Cadastrar moto nova/i.test(t))) problemas.push(`sem o botão de cadastrar moto nova: ${JSON.stringify(acoesDaMoto)}`);
+
+  // A busca existe porque frota tem dezenas de motos: rolar um select com
+  // cinquenta placas não é escolher, é procurar.
+  await p.locator('.partner-bike-body input[placeholder*="Placa"]').fill("CG 160");
+  await p.waitForTimeout(800);
+  const filtradas = await p.locator(".partner-bike-body select").locator("option").allInnerTexts();
+  if (filtradas.length !== 2) problemas.push(`a busca deixou ${filtradas.length} opção(ões), esperado 2`);
+  await p.locator('.partner-bike-body input[placeholder*="Placa"]').fill("");
+  await p.waitForTimeout(700);
+
+  // E dá para cadastrar uma moto nova sem sair da OS, já escolhida nela.
+  await p.locator(".partner-bike-actions button", { hasText: /Cadastrar moto nova/ }).click();
+  await p.waitForTimeout(2500);
+  await p.locator('.dialog-window input[placeholder*="ABC-1234"]').fill("GON-3C33");
+  const rotulosMoto = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
+  await p.locator(".dialog-window select").nth(rotulosMoto.findIndex((t) => /Marca/i.test(t))).selectOption("Honda");
+  await p.waitForTimeout(600);
+  const rotulos2 = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
+  await p.locator(".dialog-window select").nth(rotulos2.findIndex((t) => /^Modelo/i.test(t))).selectOption("Biz");
+  await p.waitForTimeout(600);
+  await p.locator(".dialog-window button", { hasText: /Cadastrar Motocicleta|Salvar/ }).first().click();
+  await p.waitForTimeout(4000);
+  if (!(await banco("motorcycles")).some((moto) => moto.plate === "GON-3C33")) problemas.push("a moto cadastrada pela parceira não gravou");
+  const escolhida = await p.locator(".partner-bike-picker header .status-badge").innerText().catch(() => "");
+  if (!/GON-3C33/.test(escolhida)) problemas.push(`a moto nova não entrou escolhida na OS: ${JSON.stringify(escolhida)}`);
+  if ((await p.locator('.partner-bike-body input[placeholder*="Placa"]').inputValue()) !== "") problemas.push("a busca anterior não foi limpa");
+
+  // Cadastrar a moto sem escolher dono deixava ela no nome do PRIMEIRO cliente
+  // da agenda — alguém que nunca foi dono dela, e que passava a ver essa moto
+  // na própria lista ao abrir uma OS.
+  const semDono = (await banco("motorcycles")).find((moto) => moto.plate === "GON-3C33");
+  if (semDono?.ownerId) problemas.push(`a moto cadastrada sem dono ficou com ownerId "${semDono.ownerId}"`);
+
+  // A OS segue com a moto cadastrada aqui, e não com a placa digitada na etapa
+  // anterior: escolher uma moto na lista da parceira substitui a da etapa 1.
   await p.getByPlaceholder("Nome de quem trouxe a moto").fill("Carlos entregador");
   await p.waitForTimeout(400);
   await p.locator(".dialog-footer .primary-button").click();
@@ -664,7 +705,7 @@ await passo("empresa parceira: qualquer moto, fatura no mês seguinte e nada no 
 
   // 3. o encerramento não pergunta forma de pagamento.
   // A lista já tem a OS do passo 6: abrir a primeira abriria a errada.
-  await p.locator("tr", { hasText: "FLA-2C34" }).locator("button", { hasText: /^Abrir$/ }).first().click();
+  await p.locator("tr", { hasText: "GON-3C33" }).locator("button", { hasText: /^Abrir$/ }).first().click();
   await p.waitForTimeout(2500);
   const tituloOs = await p.locator(".dialog h2").first().innerText();
   if (!/OS-0002/.test(tituloOs)) problemas.push(`abriu ${tituloOs}, esperado a OS da parceira`);

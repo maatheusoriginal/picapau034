@@ -931,6 +931,33 @@ vem na fatura do mês seguinte**. Tratar isso como venda à vista mentia duas
 vezes: dizia que entrou dinheiro que não entrou, e o caixa do dia fechava com
 quebra.
 
+### A moto da OS da parceira
+
+A frota traz hoje uma moto que já esteve aqui no mês passado, e amanhã uma que
+nunca veio. Os dois caminhos ficam na mesma tela:
+
+- **Puxar uma moto já cadastrada**, com busca por placa, modelo ou dono — frota
+  tem dezenas de motos, e rolar um `<select>` com cinquenta placas não é
+  escolher, é procurar;
+- **Cadastrar moto nova**, que abre o cadastro completo por cima da OS e já
+  deixa a moto escolhida nela.
+
+Antes só existia o primeiro: para cadastrar uma moto nova era preciso voltar uma
+etapa. O cabeçalho do bloco mostra o tempo todo qual moto está escolhida.
+
+#### O terceiro `clients[0]`
+
+Ao testar isto, a moto cadastrada pela tela da parceira apareceu **no nome de
+outro cliente**. O formulário de moto fazia
+`setOwnerId(preselectedClientId || clients[0]?.id)`: sem dono escolhido, a moto
+ia para o primeiro cliente da agenda — alguém que nunca foi dono dela, e que
+passava a ver essa moto na própria lista ao abrir uma OS.
+
+É o mesmo padrão que já tinha derrubado a OS encerrada errada (PR #28) e a lista
+de motos do bloco do cliente (PR #30). Não escolher nada nunca pode significar
+"o primeiro da lista": o `|| clients[0]` saiu, e o campo fica em "Selecione o
+cliente proprietário".
+
 Na etapa **Origem** da OS, escolher "Encaminhado por parceiro" agora:
 
 - marca a empresa como responsável pelo pagamento (era um `<select>` com

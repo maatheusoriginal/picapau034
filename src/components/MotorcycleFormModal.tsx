@@ -108,7 +108,10 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
       setCatalogVersion("");
       setYear(`${new Date().getFullYear()}`);
       setColor("Preta");
-      setOwnerId(preselectedClientId || (clients[0] ? clients[0].id : ""));
+      // Sem o `|| clients[0]`: não escolher dono não pode significar "o primeiro
+      // cliente da agenda". A moto ficava no nome de alguém que nunca foi dono
+      // dela e passava a aparecer na lista de motos daquela pessoa na OS.
+      setOwnerId(preselectedClientId || "");
       setMileage("");
       setEngineSize("160");
       setChassis("");
