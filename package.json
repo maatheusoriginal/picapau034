@@ -28,6 +28,8 @@
     "check:barcode": "tsx scripts/check-barcode.ts",
     "check:motorcycle-catalog": "tsx scripts/check-motorcycle-catalog.ts",
     "check:plate": "tsx scripts/check-plate.ts",
+    "check:history": "tsx scripts/check-history.ts",
+    "check:text-case": "tsx scripts/check-text-case.ts",
     "e2e:emulador": "node scripts/emulador/e2e.mjs"
   },
   "dependencies": {

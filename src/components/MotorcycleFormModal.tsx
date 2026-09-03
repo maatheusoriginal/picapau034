@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { ClientRecord, MotorcycleRecord, PartnerConfig } from "../types";
+import { emMaiusculo } from "../text-case";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { defaultSystemLists } from "../types";
 import { fullModelName, modelsOf, splitModelName, versionsOf } from "../motorcycle-catalog";
@@ -251,7 +252,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                   required
                   maxLength={8}
                   value={plate}
-                  onChange={(e) => setPlate(e.target.value.toUpperCase())}
+                  onChange={(e) => setPlate(emMaiusculo(emMaiusculo(e.target.value)))}
                   placeholder="ABC-1234 ou ABC1D23"
                   className="dialog-input bold-number"
                   style={{ textTransform: "uppercase", letterSpacing: "1px" }}
@@ -355,7 +356,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                   <input
                     type="text"
                     value={model}
-                    onChange={(e) => setModel(e.target.value)}
+                    onChange={(e) => setModel(emMaiusculo(e.target.value))}
                     placeholder="Ex: CG 160 Fan"
                     className="dialog-input"
                   />
@@ -378,8 +379,8 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                     type="text"
                     value={modeloForaDoCatalogo ? model.trim() : catalogVersion}
                     onChange={(e) => {
-                      if (modeloForaDoCatalogo) return setModel(e.target.value);
-                      setCatalogVersion(e.target.value);
+                      if (modeloForaDoCatalogo) return setModel(emMaiusculo(e.target.value));
+                      setCatalogVersion(emMaiusculo(e.target.value));
                       setModel(fullModelName(catalogModel, e.target.value));
                     }}
                     placeholder={modeloForaDoCatalogo ? "Ex: CG 160 Fan ESDI" : "Ex: ESDI"}
@@ -397,7 +398,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                 <input
                   type="text"
                   value={year}
-                  onChange={(e) => setYear(e.target.value)}
+                  onChange={(e) => setYear(emMaiusculo(e.target.value))}
                   placeholder="Ex: 2023"
                   className="dialog-input"
                 />
@@ -433,7 +434,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                 <input
                   type="text"
                   value={engineSize}
-                  onChange={(e) => setEngineSize(e.target.value)}
+                  onChange={(e) => setEngineSize(emMaiusculo(e.target.value))}
                   placeholder="160"
                   className="dialog-input"
                 />
@@ -447,7 +448,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                 <input
                   type="text"
                   value={chassis}
-                  onChange={(e) => setChassis(e.target.value.toUpperCase())}
+                  onChange={(e) => setChassis(emMaiusculo(emMaiusculo(e.target.value)))}
                   placeholder="9C2..."
                   className="dialog-input"
                 />
@@ -458,7 +459,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
                 <input
                   type="text"
                   value={renavam}
-                  onChange={(e) => setRenavam(e.target.value)}
+                  onChange={(e) => setRenavam(emMaiusculo(e.target.value))}
                   placeholder="00123456789"
                   className="dialog-input"
                 />
