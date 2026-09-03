@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { SupplierConfig } from "../types";
+import { emMaiusculo } from "../text-case";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
 import { nextSequentialId } from "../firestore-data";
@@ -204,7 +205,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                     type="text"
                     required
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => setName(emMaiusculo(e.target.value))}
                     placeholder="Ex: Moto Peças Distribuidora Ltda"
                     className="dialog-input"
                     autoFocus
@@ -215,7 +216,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   <input
                     type="text"
                     value={tradeName}
-                    onChange={(e) => setTradeName(e.target.value)}
+                    onChange={(e) => setTradeName(emMaiusculo(e.target.value))}
                     placeholder="Ex: MegaMoto Distribuidora"
                     className="dialog-input"
                   />
@@ -228,7 +229,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   <input
                     type="text"
                     value={document}
-                    onChange={(e) => setDocument(e.target.value)}
+                    onChange={(e) => setDocument(emMaiusculo(e.target.value))}
                     placeholder="00.000.000/0001-00"
                     className="dialog-input"
                   />
@@ -238,7 +239,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   <input
                     type="text"
                     value={categories}
-                    onChange={(e) => setCategories(e.target.value)}
+                    onChange={(e) => setCategories(emMaiusculo(e.target.value))}
                     placeholder="Ex: Motores, Freios, Lubrificantes, Pneus"
                     className="dialog-input"
                   />
@@ -257,7 +258,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                     type="text"
                     required
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setPhone(emMaiusculo(e.target.value))}
                     placeholder="(11) 98765-4321"
                     className="dialog-input bold-number"
                   />
@@ -267,7 +268,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   <input
                     type="text"
                     value={phoneSecondary}
-                    onChange={(e) => setPhoneSecondary(e.target.value)}
+                    onChange={(e) => setPhoneSecondary(emMaiusculo(e.target.value))}
                     placeholder="(11) 3344-5566"
                     className="dialog-input"
                   />
@@ -290,7 +291,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   <input
                     type="text"
                     value={representative}
-                    onChange={(e) => setRepresentative(e.target.value)}
+                    onChange={(e) => setRepresentative(emMaiusculo(e.target.value))}
                     placeholder="Ex: Carlos Oliveira"
                     className="dialog-input"
                   />
@@ -319,7 +320,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   <input
                     type="text"
                     value={paymentTerms}
-                    onChange={(e) => setPaymentTerms(e.target.value)}
+                    onChange={(e) => setPaymentTerms(emMaiusculo(e.target.value))}
                     placeholder="Ex: Boleto 28 dias / PIX 5% desc."
                     className="dialog-input"
                   />
@@ -349,7 +350,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                 <input
                   type="text"
                   value={address}
-                  onChange={(e) => setAddress(e.target.value)}
+                  onChange={(e) => setAddress(emMaiusculo(e.target.value))}
                   placeholder="Ex: Av. das Nações, 1400 - Distrito Industrial"
                   className="dialog-input"
                 />
@@ -360,7 +361,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   <input
                     type="text"
                     value={city}
-                    onChange={(e) => setCity(e.target.value)}
+                    onChange={(e) => setCity(emMaiusculo(e.target.value))}
                     placeholder="Ex: São Paulo"
                     className="dialog-input"
                   />
@@ -371,7 +372,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                     type="text"
                     maxLength={2}
                     value={state}
-                    onChange={(e) => setState(e.target.value.toUpperCase())}
+                    onChange={(e) => setState(emMaiusculo(emMaiusculo(e.target.value)))}
                     placeholder="SP"
                     className="dialog-input"
                   />

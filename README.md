@@ -47,6 +47,8 @@ npm run dev             # http://localhost:3000
 | `npm run check:firestore-data` | Confere que nenhum campo vazio (`undefined`) escapa para o Firestore |
 | `npm run check:number-input` | Confere que o campo de número deixa apagar o que está escrito |
 | `npm run check:partner` | Confere o faturamento por empresa parceira (desconto, vencimento e caixa) |
+| `npm run check:history` | Confere o histórico de atendimento (ordenação, total e o que entra) |
+| `npm run check:text-case` | Confere o cadastro em maiúsculo, e varre os formulários atrás de campo que escapou |
 | `npm run check:barcode` | Confere o gerador de código de barras interno (EAN-13) |
 | `npm run check:motorcycle-catalog` | Confere o catálogo de marca, modelo e versão de moto |
 | `npm run check:plate` | Confere as regras de placa (padrão antigo, Mercosul e comparação) |
@@ -898,6 +900,66 @@ causa era a mesma da OS encerrada errada: `selectedCustomer` caía num
 `?? clients[0]` quando ninguém estava escolhido, e o bloco listava as motos do
 primeiro cliente da agenda. Escolher ninguém não pode significar "o primeiro da
 lista" — o fallback saiu.
+
+## Histórico do cliente e da moto
+
+Com a moto no portão a pergunta é sempre a mesma: **o que já foi feito nela, e
+quando?**. A resposta estava só no caderno — e sem ela o mecânico refaz serviço
+que ainda está na garantia, e ninguém lembra que a relação foi trocada mês
+passado.
+
+O histórico sai das ordens de serviço que já existem: não é cadastro novo para
+alguém manter. Aparece em dois lugares, com a mesma tela:
+
+- **Na nova OS**, atrás de **"Ver histórico"** — fechado por padrão, porque quem
+  abre OS o dia inteiro não quer rolar dez atendimentos antigos antes de digitar
+  a placa. O cabeçalho do cliente já diz quantos atendimentos ele tem.
+- **Na aba Clientes e na de Motocicletas**, no botão **Histórico** de cada linha,
+  que abre um de cada vez.
+
+Cada linha traz data, o que foi feito, a moto, o valor e se já foi entregue.
+Em cima: quantos atendimentos, quanto o cliente já gastou e a última visita.
+
+O "já gastou" conta **só OS entregue**: o que ainda está na bancada pode mudar
+de valor até a entrega, e somar isso mentiria sobre o cliente.
+
+`clientHistory` junta pelo id do cliente **e** pelas placas das motos dele — OS
+antiga, aberta antes de o cadastro existir, guarda a placa e não o id, e é
+justamente essa que o balcão quer ver. `npm run check:history` confere as 22
+regras, incluindo a ordenação: data brasileira ordenada como texto coloca 02/01
+depois de 28/06, e um histórico embaralhado é pior do que nenhum, porque parece
+certo.
+
+## Procurar pela placa
+
+A moto chega no portão e o balcão lê a **placa** — ninguém pergunta o nome antes.
+A busca da nova OS e a da aba Clientes agora acham pela placa, com ou sem hífen,
+maiúscula ou minúscula. Achando pela placa, **a moto já vem escolhida** na OS:
+um cliente com quatro motos, sem isso, obrigaria a procurar a placa outra vez no
+bloco 2.
+
+Encontrado ao testar: digitar `TES1D23` virava `(12) 3` na tela. O campo
+formatava como telefone qualquer coisa que tivesse dígito, e a placa nunca
+achava nada. Telefone é o que é **só número**; o que tem letra é placa ou nome.
+
+## Todo cadastro em maiúsculo
+
+O mesmo produto entrava três vezes escrito de três jeitos — "Óleo 20W50",
+"oleo 20w50", "ÓLEO 20W50". A busca do balcão não achava, o relatório contava
+como três produtos e o estoque nunca fechava.
+
+Cliente, peça, moto, fornecedor, funcionário e os cadastros rápidos de dentro da
+OS agora entram **em maiúsculo já na digitação**, com `toLocaleUpperCase("pt-BR")`
+— que é o que mantém "manutenção" virando "MANUTENÇÃO" com o cedilha e o til nos
+lugares certos.
+
+Ficam de fora **e-mail e senha**: e-mail é o que a pessoa usa para entrar no
+sistema.
+
+`npm run check:text-case` não confere só a regra: **varre os cinco formulários de
+cadastro** procurando campo de texto que grave sem passar pelo maiúsculo. Sem
+isso, o próximo campo adicionado a qualquer um deles entraria minúsculo em
+silêncio, e só se descobriria meses depois com o cadastro já sujo.
 
 ## Cadastro de moto: marca, modelo e versão
 

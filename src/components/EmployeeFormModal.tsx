@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { UserConfig } from "../types";
+import { emMaiusculo } from "../text-case";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
 import { nextSequentialId } from "../firestore-data";
@@ -229,7 +230,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                     type="text"
                     required
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => setName(emMaiusculo(e.target.value))}
                     placeholder="Ex: Roberto Silva"
                     className="dialog-input"
                     autoFocus
@@ -255,7 +256,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   <input
                     type="text"
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setPhone(emMaiusculo(e.target.value))}
                     placeholder="(11) 98765-4321"
                     className="dialog-input"
                   />
@@ -265,7 +266,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
                   <input
                     type="text"
                     value={document}
-                    onChange={(e) => setDocument(e.target.value)}
+                    onChange={(e) => setDocument(emMaiusculo(e.target.value))}
                     placeholder="000.000.000-00"
                     className="dialog-input"
                   />

@@ -60,6 +60,9 @@ const banco = async (colecao) => {
   }));
   return (j.documents || []).map((d) => ({ _id: d.name.split("/").pop(), ...plano(d.fields) }));
 };
+// Cadastro entra em maiúsculo: comparar nome com maiúscula/minúscula fixa
+// quebraria o roteiro sem nada estar errado no sistema.
+const mesmoNome = (valor, esperado) => (valor || "").toLocaleUpperCase("pt-BR") === esperado.toLocaleUpperCase("pt-BR");
 const passo = async (nome, fn) => {
   const antes = erros.length;
   ordem += 1;
@@ -139,20 +142,20 @@ await passo("cadastrar produto: custo 25, estoque 10", async () => {
   await p.locator(".dialog-actions-row .primary-button").click();
   await p.waitForTimeout(4000);
   const t = await txt();
-  if (!/Óleo 20W50/.test(t)) throw new Error("não entrou: " + t.slice(0, 250));
+  if (!/Óleo 20W50/i.test(t)) throw new Error("não entrou: " + t.slice(0, 250));
 });
 await foto("estoque");
 
 await passo("preço gravado formatado (custo 25 + margem 60% = R$ 40,00)", async () => {
   const t = await txt();
   if (/R\$\s?40,00/.test(t)) return;
-  const m = t.match(/Óleo 20W50[\s\S]{0,180}/);
+  const m = t.match(/Óleo 20W50[\s\S]{0,180}/i);
   throw new Error("preço não saiu formatado: " + (m ? m[0].replace(/\n/g, " | ") : "?"));
 });
 
 await passo("vender no PDV em dinheiro com desconto", async () => {
   await ir("PDV Balcão");
-  await p.getByRole("button", { name: /Óleo 20W50 Mineral/ }).first().click({ timeout: 10000 });
+  await p.getByRole("button", { name: /Óleo 20W50 Mineral/i }).first().click({ timeout: 10000 });
   await p.waitForTimeout(1200);
   await p.locator(".summary-lines button", { hasText: /Adicionar/ }).click();
   await p.waitForTimeout(500);
@@ -180,7 +183,7 @@ await passo("estoque baixou de 10 para 9", async () => {
   if (!produto) throw new Error("produto sumiu do banco");
   if (produto.stock !== 9) throw new Error(`estoque no banco é ${produto.stock}, esperado 9`);
   await ir("Produtos e estoque");
-  const m = (await txt()).match(/Óleo 20W50[\s\S]{0,200}/);
+  const m = (await txt()).match(/Óleo 20W50[\s\S]{0,200}/i);
   if (!m || !/\b9\b/.test(m[0])) throw new Error("a tela não mostra o saldo 9: " + (m ? m[0].replace(/\n/g, " | ") : "?"));
 });
 
@@ -213,9 +216,9 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
   const ordens = await banco("serviceOrders");
   if (ordens.length !== 1) throw new Error(`gravou ${ordens.length} OS, esperado 1`);
   const os = ordens[0];
-  if (!/Cliente de Teste/.test(os.customer || "")) throw new Error(`cliente gravado: "${os.customer}"`);
+  if (!/Cliente de Teste/i.test(os.customer || "")) throw new Error(`cliente gravado: "${os.customer}"`);
   if (!/TES-1D23/i.test(os.plate || "")) throw new Error(`placa gravada: "${os.plate}"`);
-  if (!/Barulho na relação/.test(os.problem || "")) throw new Error(`problema gravado: "${os.problem}"`);
+  if (!/Barulho na relação/i.test(os.problem || "")) throw new Error(`problema gravado: "${os.problem}"`);
   if ((os.items || []).length !== 1) throw new Error(`gravou ${(os.items || []).length} item(ns), esperado a mão de obra`);
   if (Number(os.total) !== 150) throw new Error(`total gravado ${os.total}, esperado 150`);
   // A moto e o cliente novos precisam virar cadastro, não só texto na OS.
@@ -223,7 +226,7 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
   if (!os.motorcycleId) throw new Error("a OS não vinculou a motocicleta cadastrada");
   if ((await banco("clients")).length !== 1) throw new Error("o cliente novo não foi cadastrado");
   if ((await banco("motorcycles")).length !== 1) throw new Error("a moto nova não foi cadastrada");
-  if (!/Honda CG 160 Fan/.test(os.bike || "")) throw new Error(`moto gravada: "${os.bike}", esperado do catálogo`);
+  if (!/Honda CG 160 Fan/i.test(os.bike || "")) throw new Error(`moto gravada: "${os.bike}", esperado do catálogo`);
   if (!/OS-/.test(await txt())) throw new Error("a OS não aparece na lista da tela");
 });
 await foto("os-aberta");
@@ -765,7 +768,7 @@ await passo("moto por marca, modelo e versão; código de barras gerado", async 
   // A dica de como o modelo fica gravado é uma entre várias no formulário — a
   // da empresa parceira vem antes dela —, então procura em todas.
   const dicas = await p.locator(".dialog-window .settings-hint").allInnerTexts();
-  if (!dicas.some((texto) => /CG 160 Fan/.test(texto))) problemas.push(`não mostrou como fica gravado: ${JSON.stringify(dicas)}`);
+  if (!dicas.some((texto) => /CG 160 Fan/i.test(texto))) problemas.push(`não mostrou como fica gravado: ${JSON.stringify(dicas)}`);
   await p.locator(".dialog-window button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
   await p.waitForTimeout(1200);
 
@@ -826,7 +829,7 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   await p.locator(".os-search-results > button", { hasText: "Cliente de Teste" }).first().click();
   await p.waitForTimeout(1000);
   const achado = await p.locator(".os-picked").innerText().catch(() => "");
-  if (!/Cliente de Teste/.test(achado)) problemas.push(`não achou o cliente: ${JSON.stringify(achado)}`);
+  if (!/Cliente de Teste/i.test(achado)) problemas.push(`não achou o cliente: ${JSON.stringify(achado)}`);
   if (!/1 moto cadastrada/.test(achado)) problemas.push(`não contou as motos dele: ${JSON.stringify(achado)}`);
 
   // A moto dele aparece para escolher, e não um formulário em branco.
@@ -846,7 +849,7 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   if (!(await p.locator(".vehicle-choice-list").count())) problemas.push("voltar não trouxe as motos do cliente de volta");
 
   // Trocar de cliente limpa a escolha, em vez de manter a moto do anterior.
-  await p.locator(".os-picked-change").click();
+  await p.locator(".os-picked-change", { hasText: /^Trocar$/ }).click();
   await p.waitForTimeout(800);
   if (!(await p.locator(".os-search input").count())) problemas.push("trocar não voltou para a busca");
   if (!/Escolha o cliente acima/.test(await p.locator(".os-block").nth(1).innerText()))
@@ -885,7 +888,7 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
     await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
     await p.waitForTimeout(3500);
   }
-  const oFilho = (await banco("clients")).find((item) => item.name === "Joaquim Ribeiro Filho");
+  const oFilho = (await banco("clients")).find((item) => mesmoNome(item.name, "Joaquim Ribeiro Filho"));
   if (!oFilho) throw new Error("os dois homônimos não foram cadastrados");
 
   await ir("Ordens de serviço");
@@ -907,7 +910,7 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
   await p.locator(".os-search-results > button", { hasText: "Joaquim Ribeiro Filho" }).first().click();
   await p.waitForTimeout(1100);
   const escolhido = await p.locator(".os-picked").innerText().catch(() => "");
-  if (!/Joaquim Ribeiro Filho/.test(escolhido)) problemas.push(`escolheu outro cliente: ${JSON.stringify(escolhido)}`);
+  if (!/Joaquim Ribeiro Filho/i.test(escolhido)) problemas.push(`escolheu outro cliente: ${JSON.stringify(escolhido)}`);
   const motoDoBloco = await p.locator(".os-block").nth(1).innerText();
   if (/JOA-1A11/.test(motoDoBloco)) problemas.push("mostrou a moto do homônimo");
 
@@ -927,10 +930,115 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
   const aberta = (await banco("serviceOrders")).find((ordem) => ordem.plate === "JOA-2A22");
   if (!aberta) problemas.push("a OS do homônimo escolhido não foi gravada");
   else {
-    if (aberta.customer !== "Joaquim Ribeiro Filho") problemas.push(`a OS saiu no nome de "${aberta.customer}"`);
+    if (!mesmoNome(aberta.customer, "Joaquim Ribeiro Filho")) problemas.push(`a OS saiu no nome de "${aberta.customer}"`);
     if (aberta.clientId !== oFilho._id) problemas.push("a OS ficou vinculada ao cliente errado");
   }
   if (problemas.length) throw new Error("homônimos na busca:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("busca por placa acha o dono, e o histórico dele abre quando pedido", async () => {
+  // A moto chega no portão e o balcão lê a PLACA — ninguém pergunta o nome
+  // antes. E com a moto na frente a pergunta seguinte é sempre a mesma: o que
+  // já foi feito nela? A resposta estava só no caderno.
+  const problemas = [];
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+
+  // A placa do passo 6, digitada sem hífen, como quem lê a moto de longe.
+  await p.locator(".os-search input").first().fill("tes1d23");
+  await p.waitForTimeout(1300);
+  const achados = await p.locator(".os-search-results > button").allInnerTexts();
+  if (achados.length !== 1) problemas.push(`a busca por placa achou ${achados.length}, esperado só o dono`);
+  if (!achados.some((texto) => /Cliente de Teste/i.test(texto))) problemas.push(`a placa não achou o dono: ${JSON.stringify(achados)}`);
+  if (!(await p.locator(".os-search-hit").count())) problemas.push("não marcou qual placa bateu");
+
+  await p.locator(".os-search-results > button").first().click();
+  await p.waitForTimeout(1200);
+  // Achou pela placa: a moto já tem de vir escolhida, sem procurar de novo.
+  const blocoDaMoto = await p.locator(".os-block").nth(1).innerText();
+  if (!/TES-1D23/.test(blocoDaMoto)) problemas.push(`a moto da placa não veio escolhida: ${JSON.stringify(blocoDaMoto.slice(0, 120))}`);
+
+  // O histórico fica FECHADO até alguém pedir.
+  if (await p.locator(".history-panel").count()) problemas.push("o histórico apareceu sem ninguém pedir");
+  await p.locator(".os-picked-change", { hasText: /Ver histórico/ }).click();
+  await p.waitForTimeout(900);
+  const historico = await p.locator(".history-panel").innerText().catch(() => "");
+  if (!historico) problemas.push("o botão de ver histórico não abriu nada");
+  // A OS do passo 6 foi encerrada por R$ 150 em dinheiro: é o que tem de estar lá.
+  if (!/Troca do kit relação/i.test(historico)) problemas.push(`o histórico não traz o serviço feito: ${JSON.stringify(historico.slice(0, 200))}`);
+  if (!/150,00/.test(historico)) problemas.push(`o histórico não traz o valor: ${JSON.stringify(historico.slice(0, 200))}`);
+  if (!/TES-1D23/.test(historico)) problemas.push("o histórico não diz em qual moto foi");
+  await p.locator(".os-picked-change", { hasText: /Ocultar histórico/ }).click();
+  await p.waitForTimeout(700);
+  if (await p.locator(".history-panel").count()) problemas.push("não deu para fechar o histórico");
+
+  await p.locator(".dialog-footer .ghost-button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+
+  // A mesma busca por placa, e o mesmo histórico, na aba de Clientes.
+  await ir("Clientes");
+  await p.locator(".mini-search input").first().fill("tes1d23");
+  await p.waitForTimeout(1200);
+  const linhas = await p.locator(".registry-item").count();
+  if (linhas !== 1) problemas.push(`a aba de clientes achou ${linhas} pela placa, esperado 1`);
+  await p.locator(".registry-history-button").first().click();
+  await p.waitForTimeout(900);
+  const naLista = await p.locator(".history-panel").innerText().catch(() => "");
+  if (!/Troca do kit relação/i.test(naLista)) problemas.push(`o histórico da aba de clientes veio vazio: ${JSON.stringify(naLista.slice(0, 200))}`);
+  if (!/Entregue/.test(naLista)) problemas.push("o histórico não mostra que a OS foi entregue");
+  await p.locator(".mini-search input").first().fill("");
+  await p.waitForTimeout(800);
+  if (problemas.length) throw new Error("placa e histórico:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("cadastro novo entra em maiúsculo, sem depender de quem digita", async () => {
+  // O mesmo produto entrava três vezes escrito de três jeitos — "Óleo 20W50",
+  // "oleo 20w50", "ÓLEO 20W50" — e aí a busca do balcão não achava, o
+  // relatório contava três produtos e o estoque nunca fechava.
+  const problemas = [];
+  await ir("Produtos e estoque");
+  await p.getByRole("button", { name: /Adicionar produto/i }).first().click();
+  await p.waitForTimeout(2200);
+  const nomeDaPeca = p.locator('.dialog-window input[placeholder*="Óleo Yamalube"]').first();
+  await nomeDaPeca.fill("óleo lubrificante 20w50");
+  await p.waitForTimeout(600);
+  const naTela = await nomeDaPeca.inputValue();
+  if (naTela !== "ÓLEO LUBRIFICANTE 20W50") problemas.push(`a tela mostra ${JSON.stringify(naTela)}, esperado em maiúsculo com os acentos`);
+  await p.locator(".dialog-window button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+
+  // E o que é gravado no banco também: a tela pode mostrar o que quiser.
+  await ir("Clientes");
+  await p.getByRole("button", { name: /Cadastrar cliente|Novo cliente|Adicionar cliente/i }).first().click();
+  await p.waitForTimeout(2200);
+  await p.locator('.dialog-window input[placeholder*="Carlos Eduardo"]').fill("márcia gonçalves de assunção");
+  await p.locator(".dialog-tabs button", { hasText: /Contato/ }).click();
+  await p.waitForTimeout(600);
+  await p.locator(".dialog-window input").first().fill("34955554444");
+  const email = p.locator('.dialog-window input[type="email"]');
+  if (await email.count()) await email.fill("Marcia@Oficina.com");
+  await p.locator(".dialog-tabs button", { hasText: /Dados Pessoais/ }).click();
+  await p.waitForTimeout(600);
+  await p.locator('.client-moto-block input[placeholder*="ABC-1234"]').fill("MAI-3C33");
+  await p.waitForTimeout(400);
+  const listas = p.locator(".client-moto-block select");
+  await listas.nth(0).selectOption("Honda"); await p.waitForTimeout(600);
+  await listas.nth(1).selectOption("Biz"); await p.waitForTimeout(600);
+  await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
+  await p.waitForTimeout(4000);
+  const gravado = (await banco("clients")).find((item) => /MÁRCIA/.test(item.name || ""));
+  if (!gravado) problemas.push("o cliente não foi gravado em maiúsculo");
+  else {
+    if (gravado.name !== "MÁRCIA GONÇALVES DE ASSUNÇÃO") problemas.push(`gravou "${gravado.name}", esperado maiúsculo com cedilha e til`);
+    // E-mail é o que a pessoa usa para entrar: maiúsculo ali atrapalha.
+    if (gravado.email && gravado.email !== "Marcia@Oficina.com") problemas.push(`o e-mail foi mexido: "${gravado.email}"`);
+  }
+  if (problemas.length) throw new Error("cadastro em maiúsculo:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("cliente exige placa vinculada, e a moto vai junto", async () => {
@@ -961,12 +1069,12 @@ await passo("cliente exige placa vinculada, e a moto vai junto", async () => {
   await listas.nth(2).selectOption("Titan"); await p.waitForTimeout(500);
   await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
   await p.waitForTimeout(4000);
-  const cliente = (await banco("clients")).find((item) => item.name === "Rayane Souza");
+  const cliente = (await banco("clients")).find((item) => mesmoNome(item.name, "Rayane Souza"));
   const moto = (await banco("motorcycles")).find((item) => item.plate === "RAY-1B22");
   if (!cliente) problemas.push("com a placa, o cliente devia gravar");
   if (!moto) problemas.push("a moto não foi cadastrada junto");
   else {
-    if (!/CG 150 Titan/.test(moto.model || "")) problemas.push(`modelo gravado: "${moto.model}"`);
+    if (!/CG 150 Titan/i.test(moto.model || "")) problemas.push(`modelo gravado: "${moto.model}"`);
     if (moto.ownerId !== cliente?._id) problemas.push("a moto não ficou vinculada ao cliente");
   }
   if (problemas.length) throw new Error("cliente e placa:\n      - " + problemas.join("\n      - "));
@@ -1037,7 +1145,7 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   const fechada = (await banco("serviceOrders")).find((ordem) => ordem.plate === "GUI-4D44");
   if (fechada?.closed !== true) problemas.push(`a OS não encerrou: ${fechada?.status}`);
   if (fechada?.customerPending === true) problemas.push("a OS continuou marcada como pendente");
-  const novo = (await banco("clients")).find((item) => item.name === "Dono do Guincho");
+  const novo = (await banco("clients")).find((item) => mesmoNome(item.name, "Dono do Guincho"));
   if (!novo) problemas.push("o cliente informado no encerramento não virou cadastro");
   const moto = (await banco("motorcycles")).find((item) => item.plate === "GUI-4D44");
   if (moto?.ownerId !== novo?._id) problemas.push("a moto não passou a ser do cliente identificado");

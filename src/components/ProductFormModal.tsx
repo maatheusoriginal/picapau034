@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsConfig, StockEntryRecord, SupplierConfig } from "../types";
+import { emMaiusculo } from "../text-case";
 import { defaultProductCategories, defaultSystemLists } from "../types";
 import { markupFromPrice, movementTotals, priceFromMarkup, productMovements } from "../inventory";
 import { nextSequentialId } from "../firestore-data";
@@ -331,7 +332,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     type="text"
                     required
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => setName(emMaiusculo(e.target.value))}
                     placeholder="Ex: Óleo Yamalube 20W50 4T 1L"
                     className="dialog-input"
                     autoFocus
@@ -357,7 +358,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <input
                     type="text"
                     value={code}
-                    onChange={(e) => setCode(e.target.value)}
+                    onChange={(e) => setCode(emMaiusculo(e.target.value))}
                     placeholder="Ex: PRD-001"
                     className="dialog-input"
                   />
@@ -376,7 +377,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     <input
                       type="text"
                       value={barcode}
-                      onChange={(e) => setBarcode(e.target.value)}
+                      onChange={(e) => setBarcode(emMaiusculo(e.target.value))}
                       placeholder="789..."
                       className="dialog-input"
                     />
@@ -407,7 +408,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <input
                     type="text"
                     value={partNumber}
-                    onChange={(e) => setPartNumber(e.target.value)}
+                    onChange={(e) => setPartNumber(emMaiusculo(e.target.value))}
                     placeholder="Ex: 90793-AB401"
                     className="dialog-input"
                   />
@@ -437,7 +438,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     <input
                       type="text"
                       value={brand.trim()}
-                      onChange={(e) => setBrand(e.target.value)}
+                      onChange={(e) => setBrand(emMaiusculo(e.target.value))}
                       placeholder="Ex: Yamalube, Mobil, Cobreq"
                       className="dialog-input"
                       style={{ marginTop: "8px" }}
@@ -463,7 +464,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <input
                     type="text"
                     value={location}
-                    onChange={(e) => setLocation(e.target.value)}
+                    onChange={(e) => setLocation(emMaiusculo(e.target.value))}
                     placeholder="Ex: Prateleira B - Gaveta 4"
                     className="dialog-input"
                   />

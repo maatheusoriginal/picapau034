@@ -6,6 +6,9 @@ import { NumberField } from "../src/components/NumberField";
 import { billingDescription, isPartnerBilled, motorcycleLabel, nextBillingDate, partnerTotals, PARTNER_PAYMENT_METHOD } from "../src/partner";
 import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
 import { formatPlate, motorcycleIdFor, normalizePlate, platePattern } from "../src/plate";
+import { emMaiusculo } from "../src/text-case";
+import { clientHistory, motorcycleHistory } from "../src/history";
+import { HistoryPanel } from "../src/components/HistoryPanel";
 import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
@@ -1564,6 +1567,9 @@ export function ModuleWorkspace({
 }) {
   const [query, setQuery] = useState("");
   const [listFilter, setListFilter] = useState("Todos");
+  // Qual cliente está com o histórico aberto na lista. Um de cada vez: abrir
+  // todos empurraria a lista para longe e ninguém acha mais ninguém.
+  const [historicoDe, setHistoricoDe] = useState("");
 
   // Todo hook desta função precisa ficar acima dos returns antecipados abaixo.
   // Estes dois useMemo estavam depois deles: ao trocar de uma aba que retorna
@@ -1794,7 +1800,19 @@ export function ModuleWorkspace({
   };
   const config = configs[active] ?? configs.Clientes;
 
-  const defaultRecords = clients.map((client) => ({ id: client.id, name: client.name, sub: client.phone || "Sem telefone", meta: client.detail || "Cliente cadastrado", initials: (client.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "CL").toUpperCase() }));
+  // A placa entra no registro do cliente porque é por ela que o balcão procura:
+  // a moto chega no portão e ninguém pergunta o nome antes de ler a placa.
+  const defaultRecords = clients.map((client) => {
+    const placas = motorcycles.filter((moto) => moto.ownerId === client.id).map((moto) => formatPlate(moto.plate)).filter(Boolean);
+    return {
+      id: client.id,
+      name: client.name,
+      sub: [client.phone || "Sem telefone", ...placas.slice(0, 3)].join(" · "),
+      meta: client.detail || "Cliente cadastrado",
+      initials: (client.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "CL").toUpperCase(),
+      busca: `${client.name} ${client.phone} ${client.detail ?? ""} ${placas.join(" ")} ${placas.map(normalizePlate).join(" ")}`,
+    };
+  });
   const motorcycleRecords = motorcycles.map((moto) => {
     const owner = clients.find((c) => c.id === moto.ownerId);
     return {
@@ -1823,7 +1841,15 @@ export function ModuleWorkspace({
     if (active === "Relatórios") return notify("Relatório exportado em formato PDF.");
     return openDialog("record");
   };
-  const filteredRecords = records.filter((record) => `${record.name} ${record.sub} ${record.meta}`.toLowerCase().includes(query.toLowerCase()));
+  // Procurar "abc1d23" precisa achar a moto gravada como "ABC-1D23": o hífen
+  // que a tela mostra não é o que a pessoa digita com a moto na frente.
+  const buscaCrua = query.trim().toLowerCase();
+  const buscaPlaca = normalizePlate(query);
+  const filteredRecords = records.filter((record) => {
+    const texto = `${record.name} ${record.sub} ${record.meta} ${(record as { busca?: string }).busca ?? ""}`.toLowerCase();
+    if (!buscaCrua) return true;
+    return texto.includes(buscaCrua) || (buscaPlaca.length >= 3 && texto.toUpperCase().includes(buscaPlaca));
+  });
 
   return (
     <>
@@ -1839,13 +1865,42 @@ export function ModuleWorkspace({
       <section className="panel module-panel registry-list">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Buscar em ${active.toLowerCase()}...`}/></label><button className="outline-button large" onClick={() => setListFilter(listFilter === "Todos" ? "Recentes" : "Todos")}>{listFilter === "Todos" ? "Mais recentes" : "Mostrar todos"}</button></div>
         {filteredRecords.length > 0 ? (
-          filteredRecords.map((record) => (
-            <button className="registry-row" key={record.id} onClick={() => canOperate ? openDialog(active === "Fornecedores" ? "supplier" : active === "Compras e entradas" ? "purchase" : active === "Financeiro" ? "finance" : active === "Motocicletas" ? "motorcycle" : active === "Clientes" ? "client" : "record", record.id) : notify("Seu perfil possui acesso de consulta a este cadastro.")}>
-              <span className="registry-avatar">{record.initials}</span>
-              <span><strong>{record.name}</strong><small>{record.sub}</small></span>
-              <span className="registry-meta">{record.meta}</span><Icon name="arrow" size={17}/>
-            </button>
-          ))
+          filteredRecords.map((record) => {
+            const abrirCadastro = () => canOperate
+              ? openDialog(active === "Fornecedores" ? "supplier" : active === "Compras e entradas" ? "purchase" : active === "Financeiro" ? "finance" : active === "Motocicletas" ? "motorcycle" : active === "Clientes" ? "client" : "record", record.id)
+              : notify("Seu perfil possui acesso de consulta a este cadastro.");
+            // Só cliente e moto têm histórico de oficina: fornecedor e conta não
+            // guardam "o que já foi feito nessa moto".
+            const temHistorico = active === "Clientes" || active === "Motocicletas";
+            if (!temHistorico) return (
+              <button className="registry-row" key={record.id} onClick={abrirCadastro}>
+                <span className="registry-avatar">{record.initials}</span>
+                <span><strong>{record.name}</strong><small>{record.sub}</small></span>
+                <span className="registry-meta">{record.meta}</span><Icon name="arrow" size={17}/>
+              </button>
+            );
+            const aberto = historicoDe === record.id;
+            const historico = active === "Clientes"
+              ? clientHistory({ id: record.id }, orders, motorcycles)
+              : motorcycleHistory(motorcycles.find((moto) => moto.id === record.id), orders);
+            return (
+              <div className={`registry-item ${aberto ? "aberto" : ""}`} key={record.id}>
+                <div className="registry-row-wrap">
+                  <button className="registry-row" onClick={abrirCadastro}>
+                    <span className="registry-avatar">{record.initials}</span>
+                    <span><strong>{record.name}</strong><small>{record.sub}</small></span>
+                    <span className="registry-meta">{record.meta}</span><Icon name="arrow" size={17}/>
+                  </button>
+                  <button className="registry-history-button" onClick={() => setHistoricoDe(aberto ? "" : record.id)}>
+                    <Icon name="clock" size={15}/>
+                    {aberto ? "Ocultar" : "Histórico"}
+                    {historico.visits ? <b>{historico.visits}</b> : null}
+                  </button>
+                </div>
+                {aberto ? <HistoryPanel historico={historico} vazio={active === "Clientes" ? "Este cliente ainda não tem atendimento registrado." : "Esta moto ainda não passou pela oficina."} /> : null}
+              </div>
+            );
+          })
         ) : (
           <div style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>
             Nenhum registro encontrado em {active.toLowerCase()}.
@@ -2047,6 +2102,9 @@ export function AppDialog({
   // e sai correndo. A OS abre com a placa e o serviço anda; o encerramento é
   // que cobra o nome e o WhatsApp.
   const [osSkipCustomer, setOsSkipCustomer] = useState(false);
+  // O histórico do cliente fica fechado até alguém pedir: quem abre OS o dia
+  // inteiro não quer rolar dez atendimentos antigos antes de digitar a placa.
+  const [verHistorico, setVerHistorico] = useState(false);
   // Busca da moto na etapa da parceira: frota tem dezenas de motos, e rolar um
   // <select> com cinquenta placas não é escolher, é procurar.
   const [partnerBikeSearch, setPartnerBikeSearch] = useState("");
@@ -2279,15 +2337,32 @@ export function AppDialog({
    * e a OS acabava no nome errado, com a moto errada aparecendo para escolher.
    * Agora a busca lista quem bateu e a escolha é um clique.
    */
+  const lookupPlaca = normalizePlate(customerLookup);
   const clientesEncontrados = (lookupDigits.length >= 3 || lookupTexto.length >= 2)
     ? clients
-        .filter((client) => (lookupDigits.length >= 3 && onlyDigits(client.phone).includes(lookupDigits))
-          || (lookupDigits.length < 3 && lookupTexto.length >= 2 && client.name.toLowerCase().includes(lookupTexto)))
-        .sort((um, outro) => um.name.localeCompare(outro.name, "pt-BR"))
+        .map((client) => {
+          const motosDele = motorcycles.filter((motorcycle) => motorcycle.ownerId === client.id);
+          // A moto chega no portão e o balcão lê a placa, não pergunta o nome:
+          // procurar pela placa precisa cair no dono dela, com a moto certa
+          // já escolhida. Um cliente com quatro motos, sem isso, obriga a achar
+          // a placa de novo na lista do bloco 2.
+          const porPlaca = lookupPlaca.length >= 3
+            ? motosDele.find((motorcycle) => normalizePlate(motorcycle.plate).includes(lookupPlaca))
+            : undefined;
+          const porTelefone = lookupDigits.length >= 3 && onlyDigits(client.phone).includes(lookupDigits);
+          const porNome = lookupTexto.length >= 2 && client.name.toLowerCase().includes(lookupTexto);
+          if (!porPlaca && !porTelefone && !porNome) return null;
+          return { client, motoDaBusca: porPlaca ?? null, motos: motosDele };
+        })
+        .filter((achado): achado is { client: ClientRecord; motoDaBusca: MotorcycleRecord | null; motos: MotorcycleRecord[] } => achado !== null)
+        // Quem bateu pela placa vem primeiro: é a busca mais específica das três.
+        .sort((um, outro) => (Number(Boolean(outro.motoDaBusca)) - Number(Boolean(um.motoDaBusca)))
+          || um.client.name.localeCompare(outro.client.name, "pt-BR"))
         .slice(0, 12)
     : [];
   // O cliente da OS é o que foi ESCOLHIDO na lista — digitar não escolhe.
   const osCustomer = !osNewCustomer && !osSkipCustomer ? selectedCustomer : null;
+  const historicoDoCliente = clientHistory(osCustomer, orders, motorcycles);
   // Cliente sendo cadastrado agora ainda não tem moto nenhuma: a lista vazia é
   // o que faz o formulário da moto nova aparecer no lugar da escolha.
   // O bloco da moto só abre depois de escolhida a empresa parceira ou o
@@ -2434,29 +2509,31 @@ export function AppDialog({
   // Digitar só procura: quem escolhe o cliente é a pessoa, clicando no
   // resultado. Antes o próprio campo já selecionava o primeiro que batesse.
   const handleCustomerLookup = (value: string) => {
-    setCustomerLookup(onlyDigits(value) ? formatPhone(value) : value);
+    // "TES1D23" tem dígitos, mas não é telefone: formatar como telefone
+    // transformava a placa em "(12) 3" e a busca por placa nunca achava nada.
+    // Quem tem letra é placa ou nome; só o que é puro número vira telefone.
+    const temLetra = /\p{L}/u.test(value);
+    setCustomerLookup(!temLetra && onlyDigits(value) ? formatPhone(value) : emMaiusculo(value));
     if (selectedCustomerId) {
       setSelectedCustomerId("");
       setSelectedMotorcycleId("");
       setOsPlate("");
       setNewVehicleMode(false);
+      setVerHistorico(false);
     }
   };
-  const escolherCliente = (client: ClientRecord) => {
+  const escolherCliente = (client: ClientRecord, motoDaBusca?: MotorcycleRecord | null) => {
     setSelectedCustomerId(client.id);
     setOsNewCustomer(false);
     setOsSkipCustomer(false);
-    // Cliente de uma moto só: já deixa escolhida, que é o caso mais comum.
+    setVerHistorico(false);
+    setNewVehicleMode(false);
+    // Achou pela placa? Já é essa a moto. Senão, cliente de uma moto só também
+    // vem escolhida — que é o caso mais comum no balcão.
     const doDono = motorcycles.filter((motorcycle) => motorcycle.ownerId === client.id);
-    if (doDono.length === 1) {
-      setSelectedMotorcycleId(doDono[0].id);
-      setOsPlate(doDono[0].plate);
-      setNewVehicleMode(false);
-    } else {
-      setSelectedMotorcycleId("");
-      setOsPlate("");
-      setNewVehicleMode(false);
-    }
+    const escolhida = motoDaBusca ?? (doDono.length === 1 ? doDono[0] : null);
+    setSelectedMotorcycleId(escolhida?.id ?? "");
+    setOsPlate(escolhida?.plate ?? "");
   };
   const handleOsPlate = (value: string) => {
     const formatted = formatPlate(value);
@@ -3507,17 +3584,28 @@ export function AppDialog({
                           <button className="os-picked-change" onClick={() => setOsSkipCustomer(false)}>Identificar</button>
                         </div>
                       ) : osCustomer ? (
-                        <div className="os-picked">
-                          <span className="registry-avatar">{osCustomer.name.split(" ").map((parte) => parte[0]).slice(0, 2).join("")}</span>
-                          <div>
-                            <strong>{osCustomer.name}</strong>
-                            <small>{osCustomer.phone || "Sem telefone"} · {customerMotorcycles.length} moto{customerMotorcycles.length === 1 ? "" : "s"} cadastrada{customerMotorcycles.length === 1 ? "" : "s"}</small>
+                        <>
+                          <div className="os-picked">
+                            <span className="registry-avatar">{osCustomer.name.split(" ").map((parte) => parte[0]).slice(0, 2).join("")}</span>
+                            <div>
+                              <strong>{osCustomer.name}</strong>
+                              <small>{osCustomer.phone || "Sem telefone"} · {customerMotorcycles.length} moto{customerMotorcycles.length === 1 ? "" : "s"} cadastrada{customerMotorcycles.length === 1 ? "" : "s"}{historicoDoCliente.visits ? ` · ${historicoDoCliente.visits} atendimento${historicoDoCliente.visits === 1 ? "" : "s"}` : ""}</small>
+                            </div>
+                            {/*
+                              Fechado até alguém pedir: quem abre OS o dia
+                              inteiro não quer rolar dez atendimentos antigos
+                              antes de digitar a placa. Mas com a moto no
+                              portão a pergunta "o que já foi feito nela?" é
+                              constante, e a resposta estava só no caderno.
+                            */}
+                            <button className="os-picked-change" onClick={() => setVerHistorico((atual) => !atual)}>{verHistorico ? "Ocultar histórico" : "Ver histórico"}</button>
+                            <button className="os-picked-change" onClick={() => { setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setVerHistorico(false); }}>Trocar</button>
                           </div>
-                          <button className="os-picked-change" onClick={() => { setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); }}>Trocar</button>
-                        </div>
+                          {verHistorico ? <HistoryPanel historico={historicoDoCliente} vazio="Primeira vez deste cliente na oficina." /> : null}
+                        </>
                       ) : osNewCustomer ? (
                         <div className="os-inline-form">
-                          <label className="field"><span>Nome completo <b className="req">*</b></span><input value={newCustomerName} onChange={(event) => setNewCustomerName(event.target.value)} placeholder="Nome do cliente" autoFocus/></label>
+                          <label className="field"><span>Nome completo <b className="req">*</b></span><input value={newCustomerName} onChange={(event) => setNewCustomerName(emMaiusculo(event.target.value))} placeholder="Nome do cliente" autoFocus/></label>
                           <label className="field"><span>WhatsApp</span><input value={customerLookup} onChange={(event) => setCustomerLookup(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label>
                           <div className="os-inline-actions">
                             <button className="ghost-button" onClick={() => { setOsNewCustomer(false); setNewCustomerName(""); setCustomerLookup(""); }}>Voltar para a busca</button>
@@ -3527,7 +3615,7 @@ export function AppDialog({
                         </div>
                       ) : (
                         <div className="os-search">
-                          <label className="mini-search"><Icon name="search" size={17}/><input value={customerLookup} onChange={(event) => handleCustomerLookup(event.target.value)} placeholder="WhatsApp ou nome do cliente"/></label>
+                          <label className="mini-search"><Icon name="search" size={17}/><input value={customerLookup} onChange={(event) => handleCustomerLookup(event.target.value)} placeholder="Placa, WhatsApp ou nome do cliente"/></label>
                           {/*
                             A lista de quem bateu com a busca. Mostrar telefone e
                             quantas motos tem é o que deixa escolher entre dois
@@ -3536,19 +3624,17 @@ export function AppDialog({
                           {clientesEncontrados.length ? (
                             <>
                               <div className="os-search-results">
-                                {clientesEncontrados.map((client) => {
-                                  const motosDele = motorcycles.filter((motorcycle) => motorcycle.ownerId === client.id);
-                                  return (
-                                    <button key={client.id} onClick={() => escolherCliente(client)}>
-                                      <span className="registry-avatar">{client.name.split(" ").map((parte) => parte[0]).slice(0, 2).join("")}</span>
-                                      <div>
-                                        <strong>{client.name}</strong>
-                                        <small>{client.phone || "Sem telefone"}{motosDele.length ? ` · ${motosDele.map((motorcycle) => formatPlate(motorcycle.plate)).slice(0, 3).join(", ")}` : " · sem moto cadastrada"}</small>
-                                      </div>
-                                      <Icon name="arrow" size={16}/>
-                                    </button>
-                                  );
-                                })}
+                                {clientesEncontrados.map(({ client, motoDaBusca, motos }) => (
+                                  <button key={client.id} onClick={() => escolherCliente(client, motoDaBusca)}>
+                                    <span className="registry-avatar">{client.name.split(" ").map((parte) => parte[0]).slice(0, 2).join("")}</span>
+                                    <div>
+                                      <strong>{client.name}</strong>
+                                      <small>{client.phone || "Sem telefone"}{motos.length ? ` · ${motos.map((motorcycle) => formatPlate(motorcycle.plate)).slice(0, 3).join(", ")}` : " · sem moto cadastrada"}</small>
+                                    </div>
+                                    {motoDaBusca ? <span className="os-search-hit">{formatPlate(motoDaBusca.plate)}</span> : null}
+                                    <Icon name="arrow" size={16}/>
+                                  </button>
+                                ))}
                               </div>
                               <small className="os-search-count">{clientesEncontrados.length === 1 ? "1 cliente encontrado" : `${clientesEncontrados.length} clientes encontrados`}. Clique em quem é o dono desta OS.</small>
                             </>
@@ -3558,7 +3644,7 @@ export function AppDialog({
                               <button className="primary-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); setNewCustomerName(onlyDigits(customerLookup) ? "" : customerLookup.trim()); if (onlyDigits(customerLookup)) setCustomerLookup(formatPhone(customerLookup)); else setCustomerLookup(""); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
                             </div>
                           ) : (
-                            <div className="os-search-hint"><Icon name="users" size={17}/><span>Digite o telefone ou o nome. Cliente novo? Digite o nome e o botão de cadastrar aparece.</span></div>
+                            <div className="os-search-hint"><Icon name="users" size={17}/><span>Digite a <b>placa</b>, o telefone ou o nome. Pela placa, a moto já vem escolhida. Cliente novo? Digite o nome e o botão de cadastrar aparece.</span></div>
                           )}
                           <div className="os-search-actions">
                             <button className="outline-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
@@ -3625,7 +3711,7 @@ export function AppDialog({
                                     {modelsOf(newVehicleBrand).map((modelo) => <option key={modelo} value={modelo}>{modelo}</option>)}
                                   </select>
                                 ) : (
-                                  <input value={newVehicleModel} onChange={(event) => setNewVehicleModel(event.target.value)} placeholder="Ex.: CG 160 Fan"/>
+                                  <input value={newVehicleModel} onChange={(event) => setNewVehicleModel(emMaiusculo(event.target.value))} placeholder="Ex.: CG 160 Fan"/>
                                 )}
                               </label>
                               <label className="field"><span>Versão</span>
@@ -3635,11 +3721,11 @@ export function AppDialog({
                                     {versionsOf(newVehicleBrand, newVehicleCatalogModel).map((versao) => <option key={versao} value={versao}>{versao}</option>)}
                                   </select>
                                 ) : (
-                                  <input value={newVehicleVersion} onChange={(event) => { setNewVehicleVersion(event.target.value); setNewVehicleModel(fullModelName(newVehicleCatalogModel || newVehicleModel, event.target.value)); }} placeholder="Ex.: ESDI" disabled={!newVehicleCatalogModel && modelsOf(newVehicleBrand).length > 0}/>
+                                  <input value={newVehicleVersion} onChange={(event) => { const versao = emMaiusculo(event.target.value); setNewVehicleVersion(versao); setNewVehicleModel(fullModelName(newVehicleCatalogModel || newVehicleModel, versao)); }} placeholder="Ex.: ESDI" disabled={!newVehicleCatalogModel && modelsOf(newVehicleBrand).length > 0}/>
                                 )}
                               </label>
-                              <label className="field"><span>Ano / modelo</span><input value={newVehicleYear} onChange={(event) => setNewVehicleYear(event.target.value)} placeholder="2024 / 2025"/></label>
-                              <label className="field"><span>Cor</span><input value={newVehicleColor} onChange={(event) => setNewVehicleColor(event.target.value)} placeholder="Ex.: Vermelha"/></label>
+                              <label className="field"><span>Ano / modelo</span><input value={newVehicleYear} onChange={(event) => setNewVehicleYear(emMaiusculo(event.target.value))} placeholder="2024 / 2025"/></label>
+                              <label className="field"><span>Cor</span><input value={newVehicleColor} onChange={(event) => setNewVehicleColor(emMaiusculo(event.target.value))} placeholder="Ex.: Vermelha"/></label>
                               <div className="os-inline-actions">
                                 {motosParaEscolher.length > 0 || osOrigin === "partner" ? <button className="ghost-button" onClick={() => { setNewVehicleMode(false); setOsPlate(""); }}>Voltar para a lista</button> : <span className="os-inline-hint">{newVehicleModel.trim() ? `Fica gravado como: ${[newVehicleBrand, newVehicleModel].filter(Boolean).join(" ")}` : "Marca → modelo → versão."}</span>}
                                 {canManageCustomers ? <button className="outline-button" onClick={() => setCadastroNaOs("moto")}><Icon name="bike" size={15}/>Cadastro completo</button> : null}
@@ -3690,7 +3776,7 @@ export function AppDialog({
                   <div className="form-intro"><span className="form-icon"><Icon name="box"/></span><div><h3>Peças e mão de obra</h3><p>Peças usam o preço fixo do cadastro. A mão de obra é informada manualmente.</p></div></div>
                   <div className="os-items-builder">
                     <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{products.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{products.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
-                    <section className="os-labor-panel"><div className="os-builder-title"><div><strong>Adicionar mão de obra</strong><small>Descrição e valor digitados para esta OS</small></div></div><div className="form-grid"><label className="field field-full"><span>Descrição</span><input value={laborDescription} onChange={(event) => setLaborDescription(event.target.value)} placeholder="Ex.: Troca do kit relação"/></label><label className="field"><span>Valor da mão de obra</span><input type="number" value={laborValue} onChange={(event) => setLaborValue(event.target.value)}/></label><button className="primary-button labor-add-button" onClick={() => { if (!laborDescription.trim()) return setDialogError("Descreva a mão de obra antes de adicionar."); if (!(Number(laborValue) > 0)) return setDialogError("Informe o valor da mão de obra."); setDialogError(""); setOsItems((current) => [...current, { id: `LAB-${Date.now()}`, type: "Mão de obra", name: laborDescription.trim(), price: Number(laborValue) }]); setLaborDescription(""); setLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar mão de obra</button></div><div className="labor-rule"><Icon name="check" size={17}/><span>O valor vale somente para esta OS e não altera o cadastro de serviços.</span></div></section>
+                    <section className="os-labor-panel"><div className="os-builder-title"><div><strong>Adicionar mão de obra</strong><small>Descrição e valor digitados para esta OS</small></div></div><div className="form-grid"><label className="field field-full"><span>Descrição</span><input value={laborDescription} onChange={(event) => setLaborDescription(emMaiusculo(event.target.value))} placeholder="Ex.: Troca do kit relação"/></label><label className="field"><span>Valor da mão de obra</span><input type="number" value={laborValue} onChange={(event) => setLaborValue(event.target.value)}/></label><button className="primary-button labor-add-button" onClick={() => { if (!laborDescription.trim()) return setDialogError("Descreva a mão de obra antes de adicionar."); if (!(Number(laborValue) > 0)) return setDialogError("Informe o valor da mão de obra."); setDialogError(""); setOsItems((current) => [...current, { id: `LAB-${Date.now()}`, type: "Mão de obra", name: laborDescription.trim(), price: Number(laborValue) }]); setLaborDescription(""); setLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar mão de obra</button></div><div className="labor-rule"><Icon name="check" size={17}/><span>O valor vale somente para esta OS e não altera o cadastro de serviços.</span></div></section>
                   </div>
                   <div className="selected-os-items"><div className="os-builder-title"><div><strong>Itens incluídos</strong><small>{osItems.length ? `${osItems.length} item${osItems.length === 1 ? "" : "s"} nesta OS` : "Nenhum item adicionado ainda"}</small></div></div>{osItems.length ? osItems.map((item) => <div className="selected-os-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do cadastro" : "Valor manual desta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setOsItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>×</button></div>) : <div className="empty-os-items"><Icon name="box"/><span>Adicione as peças e a mão de obra que já souber. Você poderá completar depois.</span></div>}<div className="os-items-total"><span>Peças <b>{formatBRL(partsTotal)}</b></span><span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>{partnerDiscount > 0 ? <span className="discount">Desconto parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}<strong>Total inicial {formatBRL(osTotal)}</strong></div></div>
                 </div>
@@ -4120,7 +4206,7 @@ export function AppDialog({
                   <div className="checkout-pending-customer">
                     <div className="checkout-pending-head"><span><Icon name="alert" size={18}/></span><div><strong>Falta identificar o cliente</strong><small>Esta OS foi aberta sem cadastro. Sem nome e WhatsApp a oficina fica com o serviço feito e ninguém para cobrar.</small></div></div>
                     <div className="form-grid">
-                      <label className="field"><span>Nome do cliente <b className="req">*</b></span><input value={checkoutCustomerName} onChange={(event) => setCheckoutCustomerName(event.target.value)} placeholder="Nome de quem vai retirar a moto" autoFocus/></label>
+                      <label className="field"><span>Nome do cliente <b className="req">*</b></span><input value={checkoutCustomerName} onChange={(event) => setCheckoutCustomerName(emMaiusculo(event.target.value))} placeholder="Nome de quem vai retirar a moto" autoFocus/></label>
                       <label className="field"><span>WhatsApp <b className="req">*</b></span><input value={checkoutCustomerPhone} onChange={(event) => setCheckoutCustomerPhone(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label>
                     </div>
                     <small className="os-inline-hint">Ao encerrar, o cliente é cadastrado e a moto {currentOrder.plate} passa a ser dele.</small>

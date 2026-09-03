@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import type { ClientRecord, MotorcycleRecord } from "../types";
+import { emMaiusculo } from "../text-case";
 import { defaultSystemLists } from "../types";
 import { fullModelName, modelsOf, versionsOf } from "../motorcycle-catalog";
 import { formatPlate, isValidPlate, motorcycleIdFor, platePattern, samePlate } from "../plate";
@@ -264,7 +265,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                     type="text"
                     required
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => setName(emMaiusculo(e.target.value))}
                     placeholder="Ex: Carlos Eduardo dos Santos"
                     className="dialog-input"
                     autoFocus
@@ -302,7 +303,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                     <input
                       type="text"
                       value={motoPlate}
-                      onChange={(e) => setMotoPlate(formatPlate(e.target.value))}
+                      onChange={(e) => setMotoPlate(formatPlate(emMaiusculo(e.target.value)))}
                       placeholder="ABC-1234 ou ABC-1D23"
                       maxLength={8}
                       className="dialog-input"
@@ -323,7 +324,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                         {modelsOf(motoBrand).map((nome) => <option key={nome} value={nome}>{nome}</option>)}
                       </select>
                     ) : (
-                      <input type="text" value={motoModel} onChange={(e) => setMotoModel(e.target.value)} placeholder="Ex: CG 160 Fan" className="dialog-input"/>
+                      <input type="text" value={motoModel} onChange={(e) => setMotoModel(emMaiusculo(e.target.value))} placeholder="Ex: CG 160 Fan" className="dialog-input"/>
                     )}
                   </label>
                   <label className="field-group">
@@ -334,16 +335,16 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                         {versionsOf(motoBrand, motoModel).map((nome) => <option key={nome} value={nome}>{nome}</option>)}
                       </select>
                     ) : (
-                      <input type="text" value={motoVersion} onChange={(e) => setMotoVersion(e.target.value)} placeholder="Ex: ESDI" className="dialog-input"/>
+                      <input type="text" value={motoVersion} onChange={(e) => setMotoVersion(emMaiusculo(e.target.value))} placeholder="Ex: ESDI" className="dialog-input"/>
                     )}
                   </label>
                   <label className="field-group">
                     <span className="field-label">Ano / modelo</span>
-                    <input type="text" value={motoYear} onChange={(e) => setMotoYear(e.target.value)} placeholder="2024 / 2025" className="dialog-input"/>
+                    <input type="text" value={motoYear} onChange={(e) => setMotoYear(emMaiusculo(e.target.value))} placeholder="2024 / 2025" className="dialog-input"/>
                   </label>
                   <label className="field-group">
                     <span className="field-label">Cor</span>
-                    <input type="text" value={motoColor} onChange={(e) => setMotoColor(e.target.value)} placeholder="Ex: Vermelha" className="dialog-input"/>
+                    <input type="text" value={motoColor} onChange={(e) => setMotoColor(emMaiusculo(e.target.value))} placeholder="Ex: Vermelha" className="dialog-input"/>
                   </label>
                 </div>
               </section>
@@ -354,7 +355,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                   <input
                     type="text"
                     value={document}
-                    onChange={(e) => setDocument(e.target.value)}
+                    onChange={(e) => setDocument(emMaiusculo(e.target.value))}
                     placeholder={type === "Empresa" ? "00.000.000/0001-00" : "000.000.000-00"}
                     className="dialog-input"
                   />
@@ -373,7 +374,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                     type="text"
                     required
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setPhone(emMaiusculo(e.target.value))}
                     placeholder="(11) 98765-4321"
                     className="dialog-input bold-number"
                   />
@@ -400,7 +401,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                 <input
                   type="text"
                   value={address}
-                  onChange={(e) => setAddress(e.target.value)}
+                  onChange={(e) => setAddress(emMaiusculo(e.target.value))}
                   placeholder="Ex: Rua das Palmeiras, 342 - Centro"
                   className="dialog-input"
                 />
@@ -449,7 +450,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                     <input
                       type="text"
                       value={tradeDetails}
-                      onChange={(e) => setTradeDetails(e.target.value)}
+                      onChange={(e) => setTradeDetails(emMaiusculo(e.target.value))}
                       placeholder="Ex: Parceria de marketing / Troca de peças por serviços de guincho"
                       className="dialog-input"
                     />
