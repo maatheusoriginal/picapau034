@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx server/index.ts",
     "dev:emulador": "vite --mode emulador --port 5199",
+    "preview:emulador": "vite build --mode emulador --outDir dist-emulador && vite preview --outDir dist-emulador --port 5199 --strictPort",
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
@@ -31,6 +32,9 @@
     "check:history": "tsx scripts/check-history.ts",
     "check:text-case": "tsx scripts/check-text-case.ts",
     "check:team-link": "tsx scripts/check-team-link.ts",
+    "check:pricing": "tsx scripts/check-pricing.ts",
+    "check:help": "tsx scripts/check-help.ts",
+    "check:nfe": "tsx scripts/check-nfe.ts",
     "e2e:emulador": "node scripts/emulador/e2e.mjs"
   },
   "dependencies": {

@@ -10,10 +10,13 @@ import { emMaiusculo } from "../src/text-case";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
 import { nextSequentialId, withoutUndefined } from "../src/firestore-data";
+import { addToList } from "../src/quick-list";
+import { helpTopic, searchHelp } from "../src/help-topics";
+import { conferirNota, custoUnitario, fatorProblema, lerNfe, quantidadeQueEntra, resumoDaConferencia, type ItemConferido, type NfeNota } from "../src/nfe";
 import { HistoryPanel } from "../src/components/HistoryPanel";
 import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
-import { mergeParts, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
+import { mergeParts, priceFromMarkup, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking } from "../src/mechanic";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
@@ -1849,6 +1852,7 @@ export function ModuleWorkspace({
           <div><p>Produtos e peças</p><h1>Controle de estoque</h1><span>Veja saldos, preços e itens que precisam de reposição.</span></div>
           {canOperate ? <div className="heading-actions">
             <button className="outline-button large" onClick={downloadStockTemplate}>Baixar modelo Sheets</button>
+            <button className="outline-button large" onClick={() => openDialog("nfe")}>Importar nota (XML)</button>
             <button className="outline-button large" onClick={() => openDialog("import")}>Importar planilha</button>
             <button className="primary-button" onClick={() => openDialog("product")}><Icon name="plus" size={18}/>Adicionar produto</button>
           </div> : <span className="system-healthy"><i/><b>Estoque em consulta</b></span>}
@@ -2262,6 +2266,17 @@ export function AppDialog({
   const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
   const [importFileName, setImportFileName] = useState("");
   const [importReading, setImportReading] = useState(false);
+  /*
+    A nota do fornecedor.
+
+    Cada linha é um item da nota já conferido contra o cadastro, mais o que a
+    pessoa pode mexer: quantas unidades vêm em cada volume (a nota diz "1 CX" e
+    entram 6) e se aquele item entra nesta baixa.
+  */
+  const [nfeNota, setNfeNota] = useState<NfeNota | null>(null);
+  const [nfeLinhas, setNfeLinhas] = useState<Array<ItemConferido & { fatorTexto: string; incluir: boolean; cadastrar: boolean }>>([]);
+  const [nfeFileName, setNfeFileName] = useState("");
+  const [nfeReading, setNfeReading] = useState(false);
 
   // Cadastro completo de cliente ou moto sem sair da OS.
   //
@@ -2305,7 +2320,7 @@ export function AppDialog({
   }, [dialog]);
 
   useEffect(() => {
-    if (dialog === "import") return;
+    if (dialog === "import" || dialog === "nfe") return;
     setImportPlan(null);
     setImportFileName("");
     setImportReading(false);
@@ -2342,6 +2357,47 @@ export function AppDialog({
     setCashCounted("");
   }, [dialog]);
 
+  /*
+    Criar categoria e marca sem sair do cadastro.
+
+    Descobrir no meio do cadastro que a categoria da peça não existe obrigava a
+    fechar o formulário, ir em Configurações, criar, voltar e digitar tudo de
+    novo. Na prática ninguém faz isso: joga em "Peças" e segue — e o filtro do
+    estoque para de significar alguma coisa.
+
+    Categoria é documento próprio; marca é item de uma lista dentro de
+    settings/lists. A regra de o que entra e o que é repetido está em
+    src/quick-list.ts, para valer igual nos dois casos.
+  */
+  const criarCategoriaDeProduto = async (nome: string) => {
+    /*
+      A oficina que ainda não cadastrou categoria nenhuma vê as nove padrão.
+      Elas não são documentos — são o texto que aparece enquanto a coleção está
+      vazia. Gravar só a categoria nova fazia a coleção deixar de estar vazia e
+      as outras NOVE SUMIREM da tela de uma vez.
+
+      Então a primeira criação materializa as padrão junto: elas viram cadastro
+      de verdade, editável em Configurações, e nada desaparece.
+    */
+    const doBanco = categories.filter((item) => item.group === "Produtos");
+    const visiveis = orDefault(doBanco, defaultProductCategories);
+    const resultado = addToList(visiveis.map((item) => item.name), nome);
+    if (resultado.status !== "criado") return;
+    const aGravar = doBanco.length ? [] : defaultProductCategories.map((item) => ({ ...item }));
+    const jaExistentes = [...categories, ...aGravar];
+    aGravar.push({ id: nextSequentialId(jaExistentes, "CAT"), name: resultado.value, group: "Produtos", active: true });
+    for (const categoria of aGravar) {
+      await saveFirestoreDoc("categories", categoria.id, { name: categoria.name, group: categoria.group, active: categoria.active });
+    }
+  };
+  const criarItemDeLista = async (chave: "partBrands" | "motorcycleBrands", nome: string) => {
+    const resultado = addToList(systemList(lists, chave), nome);
+    if (resultado.status !== "criado") return;
+    // Só a chave mexida vai no write: `saveFirestoreDoc` grava com merge, então
+    // mandar o documento inteiro sobrescreveria alterações feitas em outra aba.
+    await saveFirestoreDoc("settings", "lists", { [chave]: resultado.list });
+  };
+
   if (!dialog) return null;
 
   // Estes cinco formulários ficavam ACIMA de todos os useState/useEffect
@@ -2363,6 +2419,8 @@ export function AppDialog({
           allProducts={products}
           units={systemList(lists, "units")}
           partBrands={systemList(lists, "partBrands")}
+          onCreateCategory={criarCategoriaDeProduto}
+          onCreatePartBrand={(nome) => criarItemDeLista("partBrands", nome)}
           settings={settings}
           movementSources={{ stockEntries, sales, orders }}
         />
@@ -2397,6 +2455,7 @@ export function AppDialog({
           notify={notify || finish}
           allMotorcycles={motorcycles}
           brands={systemList(lists, "motorcycleBrands")}
+          onCreateBrand={(nome) => criarItemDeLista("motorcycleBrands", nome)}
           partners={activePartners}
         />
       </Suspense></ErrorBoundary>
@@ -2415,6 +2474,7 @@ export function AppDialog({
           allClients={clients}
           allMotorcycles={motorcycles}
           brands={systemList(lists, "motorcycleBrands")}
+          onCreateBrand={(nome) => criarItemDeLista("motorcycleBrands", nome)}
         />
       </Suspense></ErrorBoundary>
     );
@@ -2701,6 +2761,7 @@ export function AppDialog({
     quick: "Lançar serviço rápido",
     product: "Adicionar produto",
     import: "Importar cadastro de estoque",
+    nfe: "Importar nota do fornecedor",
     payment: "Receber pagamento",
     catalog: "Catálogo de produtos",
     client: "Selecionar ou cadastrar cliente",
@@ -2727,6 +2788,7 @@ export function AppDialog({
     quick: "Para trocas e ajustes sem cadastro completo.",
     product: "Cadastre a peça e já defina o saldo inicial.",
     import: "Use o modelo CSV preenchido no Google Sheets.",
+    nfe: "Suba o XML da nota: o sistema confere o que já existe, compara o custo e dá a entrada.",
     payment: "Aceite uma ou mais formas de pagamento.",
     catalog: "Pesquise por nome, código de barras ou SKU.",
     client: "Use um cadastro existente ou crie um novo rapidamente.",
@@ -3071,6 +3133,63 @@ export function AppDialog({
       setImportPlan(planStockImport(sheet.rows, products, sheet.issues));
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const lerNotaDoFornecedor = (file: File | null | undefined) => {
+    if (!file) return;
+    setDialogError("");
+    setNfeNota(null);
+    setNfeLinhas([]);
+    setNfeFileName(file.name);
+    if (file.size > 5 * 1024 * 1024) {
+      setNfeFileName("");
+      return setDialogError("O arquivo passa de 5 MB. O XML de uma nota costuma ter poucos KB — confira se é o arquivo certo.");
+    }
+    setNfeReading(true);
+    const reader = new FileReader();
+    reader.onerror = () => { setNfeReading(false); setDialogError("Não foi possível ler o arquivo escolhido."); };
+    reader.onload = () => {
+      setNfeReading(false);
+      try {
+        const nota = lerNfe(String(reader.result ?? ""));
+        if (!nota.itens.length) throw new Error("A nota não tem nenhum item.");
+        const conferidos = conferirNota(nota, products.map((produto) => ({
+          id: produto.id,
+          code: produto.code,
+          name: produto.name,
+          barcode: produto.barcode,
+          partNumber: produto.partNumber,
+          cost: parseBRL(produto.cost),
+          stock: produto.stock,
+        })));
+        setNfeNota(nota);
+        // Item já cadastrado entra marcado; item novo começa marcado para
+        // cadastrar, porque é o que a oficina quer em 9 de 10 notas — e dá
+        // para desmarcar o que não quiser.
+        setNfeLinhas(conferidos.map((linha) => ({ ...linha, fatorTexto: String(linha.fator), incluir: true, cadastrar: !linha.produto })));
+      } catch (erro) {
+        setNfeFileName("");
+        setDialogError(erro instanceof Error ? erro.message : "Não foi possível ler a nota.");
+      }
+    };
+    reader.readAsText(file, "utf-8");
+  };
+
+  const mexerNaLinha = (numero: number, mudanca: Partial<{ fatorTexto: string; incluir: boolean; cadastrar: boolean }>) => {
+    setNfeLinhas((atuais) => atuais.map((linha) => {
+      if (linha.item.numero !== numero) return linha;
+      const proxima = { ...linha, ...mudanca };
+      if (mudanca.fatorTexto !== undefined) {
+        const fator = Number(mudanca.fatorTexto);
+        proxima.fator = Number.isFinite(fator) ? fator : 0;
+        proxima.entra = quantidadeQueEntra(linha.item.quantidade, proxima.fator);
+        proxima.custoNovo = custoUnitario(linha.item.valorUnitario, proxima.fator);
+        proxima.variacao = proxima.custoAnterior > 0
+          ? Math.round(((proxima.custoNovo - proxima.custoAnterior) / proxima.custoAnterior) * 10000) / 100
+          : 0;
+      }
+      return proxima;
+    }));
   };
 
   const submit = async () => {
@@ -3448,6 +3567,77 @@ export function AppDialog({
       }
     }
 
+    if (dialog === "nfe") {
+      const escolhidas = nfeLinhas.filter((linha) => linha.incluir);
+      if (!escolhidas.length) return setDialogError("Marque ao menos um item da nota para dar entrada.");
+      const fatorRuim = escolhidas.find((linha) => fatorProblema(linha.fator));
+      if (fatorRuim) return setDialogError(`Item ${fatorRuim.item.numero} (${fatorRuim.item.descricao}): ${fatorProblema(fatorRuim.fator)}`);
+      // Item novo que não vai ser cadastrado não tem onde entrar: dar entrada
+      // dele seria somar estoque em produto nenhum.
+      const semCadastro = escolhidas.find((linha) => !linha.produto && !linha.cadastrar);
+      if (semCadastro) return setDialogError(`Item ${semCadastro.item.numero} (${semCadastro.item.descricao}) ainda não está no estoque. Marque "cadastrar" ou tire o item da entrada.`);
+      setSaving(true);
+      try {
+        // Os produtos novos nascem antes da entrada, e o id de cada um volta
+        // para a linha: sem isso a baixa tentaria somar num produto que ainda
+        // não existe.
+        const jaCadastrados = [...products];
+        const comProduto = [] as Array<{ productId: string; nome: string; quantidade: number; custo: number }>;
+        for (const linha of escolhidas) {
+          let productId = linha.produto?.id ?? "";
+          if (!productId) {
+            const codigo = nextSequentialId(jaCadastrados, "PRD");
+            const novo: ProductRecord = {
+              id: codigo,
+              code: codigo,
+              name: emMaiusculo(linha.item.descricao),
+              barcode: linha.item.gtin,
+              partNumber: emMaiusculo(linha.item.codigoFornecedor),
+              category: categories.find((item) => item.group === "Produtos" && item.active !== false)?.name ?? "Peças",
+              unit: settings?.defaultUnit ?? "UN",
+              cost: formatBRL(linha.custoNovo),
+              markup: settings?.suggestedMarkup ?? 45,
+              price: formatBRL(priceFromMarkup(linha.custoNovo, settings?.suggestedMarkup ?? 45)),
+              // O saldo entra pela baixa, e não aqui: contar duas vezes é o
+              // jeito mais fácil de o estoque nascer errado.
+              stock: 0,
+              minimum: settings?.defaultMinStock ?? 2,
+              status: "Normal",
+              active: true,
+              supplierName: nfeNota?.fornecedor.nome ?? "",
+            };
+            await saveFirestoreDoc("products", codigo, withoutUndefined(novo as unknown as Record<string, unknown>));
+            jaCadastrados.push(novo);
+            productId = codigo;
+          }
+          comProduto.push({ productId, nome: emMaiusculo(linha.item.descricao), quantidade: linha.entra, custo: linha.custoNovo });
+        }
+        const entryId = `ENT-${String(highestSequence(stockEntries, "ENT") + 1).padStart(4, "0")}`;
+        const totalDaEntrada = comProduto.reduce((soma, item) => soma + item.quantidade * item.custo, 0);
+        await recordStockEntry(entryId, {
+          supplierId: "",
+          supplierName: nfeNota?.fornecedor.nome ?? "",
+          date: nfeNota?.emissao || new Date().toLocaleDateString("pt-BR"),
+          entryAt: new Date().toISOString(),
+          payment: `NF-e ${nfeNota?.numero ?? ""}`,
+          costMode: useAverageCost ? "Custo médio" : "Último preço",
+          total: totalDaEntrada,
+          items: comProduto.map((item) => ({ productId: item.productId, name: item.nome, quantity: item.quantidade, unitCost: item.custo, total: item.quantidade * item.custo })),
+          operatorUid: currentUser?.uid ?? "",
+          operatorName: currentUser?.displayName ?? "",
+        }, comProduto.map((item) => ({ productId: item.productId, quantity: item.quantidade, unitCost: item.custo })), useAverageCost);
+        const novos = escolhidas.filter((linha) => !linha.produto).length;
+        setNfeNota(null);
+        setNfeLinhas([]);
+        setNfeFileName("");
+        return finish(`Nota ${nfeNota?.numero ?? ""} lançada: ${escolhidas.length} item(ns), ${novos} peça(s) nova(s) e ${formatBRL(totalDaEntrada)} em estoque.`);
+      } catch (error) {
+        return setDialogError(error instanceof Error ? error.message : "Não foi possível lançar a nota.");
+      } finally {
+        setSaving(false);
+      }
+    }
+
     if (dialog === "catalog") {
       const chosen = products.find((product) => product.code === catalogSelection);
       if (!chosen) return setDialogError("Escolha um produto da lista.");
@@ -3569,6 +3759,7 @@ export function AppDialog({
       quick: "Serviço rápido lançado e pronto para recebimento.",
       product: "Produto adicionado ao estoque.",
       import: "Planilha recebida e pronta para importação.",
+      nfe: "Nota lida e conferida com o cadastro.",
       payment: "Pagamento recebido e comprovante gerado.",
       catalog: "Produto selecionado e adicionado à venda.",
       client: "Cliente selecionado para o atendimento.",
@@ -3596,6 +3787,7 @@ export function AppDialog({
     // Depois da prévia o botão diz o que vai acontecer, e não "conferir" —
     // a conferência já é a tela que está na frente da pessoa.
     import: importPlan ? `Importar ${importPlan.create.length + importPlan.update.length} peça(s)` : "Escolher planilha",
+    nfe: nfeLinhas.length ? `Dar entrada de ${nfeLinhas.filter((linha) => linha.incluir).length} item(ns)` : "Escolher o XML",
     payment: "Confirmar recebimento",
     catalog: "Adicionar selecionado",
     client: showQuickCustomer ? "Salvar cliente" : "Usar selecionado",
@@ -3939,6 +4131,91 @@ export function AppDialog({
             </div>
             <div className="quick-service-total"><div><span>{quickService}</span><small>{quickProduct === "Sem produto" ? "Somente mão de obra" : `${quickQuantity}x ${quickProduct} · ${quickPayment}`}</small></div><strong>{formatBRL(quickTotal)}</strong></div>
             <div className="info-strip"><Icon name="check" size={18}/><span>Ao finalizar, o produto será baixado do estoque, o recebimento entra no caixa e um cupom não fiscal fica pronto para impressão.</span></div>
+          </div>
+        ) : null}
+
+        {dialog === "nfe" ? (
+          <div className="dialog-body form-section">
+            {/*
+              Cadastrar peça a peça depois de cada compra é o que ninguém faz:
+              a nota chega com trinta itens e o estoque do sistema fica meses
+              atrás do estoque da prateleira. O XML já traz tudo — inclusive o
+              custo REAL pago — e vem junto com a compra, de graça.
+            */}
+            <div className="upload-zone">
+              <span className="upload-icon"><Icon name="file"/></span>
+              <strong>{nfeFileName || "Selecione o XML da nota do fornecedor"}</strong>
+              <p>{nfeReading ? "Lendo a nota…" : "É o arquivo .xml que o fornecedor manda por e-mail junto com a compra."}</p>
+              <label className="outline-button large file-picker">{nfeNota ? "Trocar arquivo" : "Escolher arquivo"}<input type="file" accept=".xml,text/xml,application/xml" onChange={(event) => { lerNotaDoFornecedor(event.target.files?.[0]); event.target.value = ""; }}/></label>
+            </div>
+
+            {nfeNota ? (
+              <>
+                <div className="nfe-head">
+                  <div><span>Fornecedor</span><strong>{nfeNota.fornecedor.nome || "Não informado"}</strong></div>
+                  <div><span>Nota</span><strong>{nfeNota.numero}{nfeNota.serie ? ` · série ${nfeNota.serie}` : ""}</strong></div>
+                  <div><span>Emissão</span><strong>{nfeNota.emissao || "—"}</strong></div>
+                  <div><span>Total da nota</span><strong>{formatBRL(nfeNota.total)}</strong></div>
+                </div>
+                {(() => {
+                  const resumo = resumoDaConferencia(nfeLinhas);
+                  return (
+                    <div className="module-summary">
+                      <article><span>Já cadastradas</span><strong>{resumo.jaCadastrados}</strong><small>Só entra estoque</small></article>
+                      <article><span>Peças novas</span><strong>{resumo.novos}</strong><small>{resumo.novos ? "Serão cadastradas" : "Nenhuma"}</small></article>
+                      <article className={resumo.subiramDePreco ? "summary-danger" : ""}><span>Subiram de preço</span><strong>{resumo.subiramDePreco}</strong><small>{resumo.caiuDePreco ? `${resumo.caiuDePreco} baixou de preço` : "Comparado ao custo do cadastro"}</small></article>
+                    </div>
+                  );
+                })()}
+
+                <div className="table-scroll">
+                  <table className="nfe-table">
+                    <thead><tr>
+                      <th>Entra</th><th>Item</th><th className="col-secondary">Situação</th>
+                      <th className="num">Nota</th><th className="num">Un. por volume</th><th className="num">Entra no estoque</th>
+                      <th className="num">Custo antes</th><th className="num">Custo agora</th><th className="num">Variação</th>
+                    </tr></thead>
+                    <tbody>{nfeLinhas.map((linha) => {
+                      const problema = linha.incluir ? fatorProblema(linha.fator) : "";
+                      return (
+                        <tr key={linha.item.numero} className={linha.incluir ? "" : "nfe-fora"}>
+                          <td><input type="checkbox" checked={linha.incluir} aria-label={`Incluir ${linha.item.descricao}`} onChange={(evento) => mexerNaLinha(linha.item.numero, { incluir: evento.target.checked })}/></td>
+                          <td>
+                            <strong>{linha.item.descricao}</strong>
+                            <span className="mono">{linha.item.gtin || "SEM GTIN"}{linha.item.codigoFornecedor ? ` · ${linha.item.codigoFornecedor}` : ""}</span>
+                          </td>
+                          <td className="col-secondary">
+                            {linha.produto
+                              ? <><span className="status green"><i/>Já cadastrada</span><span>{linha.produto.code} · achada por {linha.achadoPor}</span></>
+                              : <label className="nfe-cadastrar"><input type="checkbox" checked={linha.cadastrar} onChange={(evento) => mexerNaLinha(linha.item.numero, { cadastrar: evento.target.checked })}/>Cadastrar esta peça</label>}
+                          </td>
+                          <td className="num">{linha.item.quantidade} {linha.item.unidade}</td>
+                          {/*
+                            A nota diz "1 CX" e na prateleira entram 6. Sem
+                            isto o estoque entra com 1, a peça "acaba" no
+                            sistema com cinco ainda na caixa, e o custo
+                            unitário fica seis vezes maior do que é. O número
+                            é um palpite tirado da descrição — dá para
+                            corrigir, porque errar aqui estraga o estoque.
+                          */}
+                          <td className="num">
+                            <input className="nfe-fator" inputMode="numeric" value={linha.fatorTexto} aria-label={`Unidades por volume de ${linha.item.descricao}`} onChange={(evento) => mexerNaLinha(linha.item.numero, { fatorTexto: evento.target.value.replace(/[^\d]/g, "") })}/>
+                            {problema ? <small className="nfe-erro">{problema}</small> : null}
+                          </td>
+                          <td className="num"><strong>{linha.entra}</strong></td>
+                          <td className="num">{linha.custoAnterior > 0 ? formatBRL(linha.custoAnterior) : "—"}</td>
+                          <td className="num"><strong>{formatBRL(linha.custoNovo)}</strong></td>
+                          <td className="num">{linha.custoAnterior > 0
+                            ? <span className={`nfe-variacao ${linha.variacao > 0 ? "subiu" : linha.variacao < 0 ? "caiu" : ""}`}>{linha.variacao > 0 ? "+" : ""}{linha.variacao.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</span>
+                            : <span className="nfe-variacao">nova</span>}</td>
+                        </tr>
+                      );
+                    })}</tbody>
+                  </table>
+                </div>
+                <div className="info-strip"><Icon name="check" size={17}/><span>A entrada usa <b>{useAverageCost ? "custo médio" : "o último preço"}</b>, como está em Configurações. Peça nova nasce com o preço de venda calculado pela margem padrão da oficina.</span></div>
+              </>
+            ) : null}
           </div>
         ) : null}
 
@@ -4448,6 +4725,7 @@ export function AppDialog({
             allClients={clients}
             allMotorcycles={motorcycles}
             brands={systemList(lists, "motorcycleBrands")}
+            onCreateBrand={(nome) => criarItemDeLista("motorcycleBrands", nome)}
             defaultMotorcycle={{ plate: osPlate, brand: newVehicleBrand, model: newVehicleCatalogModel, version: newVehicleVersion, year: newVehicleYear, color: newVehicleColor }}
             onSaved={(cliente) => {
               setSelectedCustomerId(cliente.id);
@@ -4468,6 +4746,7 @@ export function AppDialog({
             notify={notify || finish}
             allMotorcycles={motorcycles}
             brands={systemList(lists, "motorcycleBrands")}
+            onCreateBrand={(nome) => criarItemDeLista("motorcycleBrands", nome)}
             partners={activePartners}
             preselectedPartnerId={osOrigin === "partner" ? (selectedPartner?.id ?? "") : ""}
             preselectedClientId={selectedCustomerId}
@@ -4707,6 +4986,11 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [globalSearch, setGlobalSearch] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  // A central de ajuda. Fica fora do roteador de diálogos porque precisa abrir
+  // de qualquer tela, inclusive por cima de um cadastro já aberto.
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpTopicId, setHelpTopicId] = useState("");
+  const [helpSearch, setHelpSearch] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
     const canOperate = firebaseAdmin
     || (["Ordens de serviço", "Orçamentos"].includes(active) && (canUpdateOrders || canCreateOrders))
@@ -4913,9 +5197,13 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
         </nav>
 
         <div className="sidebar-footer">
-          <button className="support-card" onClick={() => notify("Central de ajuda aberta. Escolha: OS, estoque, PDV ou financeiro.")}>
+          {/*
+            Este botão abria um aviso e mais nada. Ajuda que não responde nada é
+            pior do que não ter: a pessoa clica, não acha, e não clica de novo.
+          */}
+          <button className="support-card" onClick={() => { setHelpTopicId(""); setHelpOpen(true); }}>
             <span className="support-icon">?</span>
-            <div><strong>Precisa de ajuda?</strong><small>Fale com o suporte</small></div>
+            <div><strong>Precisa de ajuda?</strong><small>Como abrir OS, preço, estoque e caixa</small></div>
             <Icon name="arrow" size={16} />
           </button>
           <div className="user-card">
@@ -5067,6 +5355,56 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
         </div>
       </section>
       <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      {helpOpen ? (
+        <div className="dialog-layer" role="presentation" onMouseDown={(evento) => evento.target === evento.currentTarget && setHelpOpen(false)}>
+          <section className="dialog dialog-wide help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">
+            <header className="dialog-header">
+              <div><span>Central de ajuda</span><h2 id="help-title">Como fazer as coisas no sistema</h2><p>Escrito para o dia a dia da oficina, não para quem programa.</p></div>
+              <button aria-label="Fechar" onClick={() => setHelpOpen(false)}>×</button>
+            </header>
+            <div className="dialog-body help-body">
+              {(() => {
+                const assunto = helpTopic(helpTopicId);
+                if (assunto) return (
+                  <div className="help-detail">
+                    <button className="help-back" onClick={() => setHelpTopicId("")}>← Todos os assuntos</button>
+                    <h3>{assunto.title}</h3>
+                    <p className="help-summary">{assunto.summary}</p>
+                    <ol className="help-steps">
+                      {assunto.steps.map((passo) => (
+                        <li key={passo.title}><strong>{passo.title}</strong><span>{passo.detail}</span></li>
+                      ))}
+                    </ol>
+                    <button className="primary-button" onClick={() => { setHelpOpen(false); goToSearchResult(assunto.destination); }}>
+                      Ir para {assunto.destination}<Icon name="arrow" size={16}/>
+                    </button>
+                  </div>
+                );
+                const achados = searchHelp(helpSearch);
+                return (
+                  <>
+                    <label className="mini-search help-search"><Icon name="search" size={17}/><input value={helpSearch} onChange={(evento) => setHelpSearch(evento.target.value)} placeholder="O que você quer fazer? Ex.: sangria, desconto, parceira"/></label>
+                    {achados.length ? (
+                      <div className="help-list">
+                        {achados.map((assuntoDaLista) => (
+                          <button key={assuntoDaLista.id} onClick={() => setHelpTopicId(assuntoDaLista.id)}>
+                            <div><strong>{assuntoDaLista.title}</strong><small>{assuntoDaLista.summary}</small></div>
+                            <span className="help-steps-count">{assuntoDaLista.steps.length} passos</span>
+                            <Icon name="arrow" size={16}/>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="help-empty"><Icon name="search" size={18}/><span>Nada encontrado com "{helpSearch.trim()}". Tente por outra palavra — OS, preço, estoque, caixa, parceira ou acesso.</span></div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+            <footer className="dialog-footer"><button className="ghost-button" onClick={() => setHelpOpen(false)}>Fechar</button></footer>
+          </section>
+        </div>
+      ) : null}
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );

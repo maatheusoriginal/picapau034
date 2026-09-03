@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsConfig, StockEntryRecord, SupplierConfig } from "../types";
 import { emMaiusculo } from "../text-case";
+import { QuickAddSelect } from "./QuickAddSelect";
+import { marginOnPrice, maxDiscountPercent, priceWarning } from "../pricing";
 import { defaultProductCategories, defaultSystemLists } from "../types";
 import { markupFromPrice, movementTotals, priceFromMarkup, productMovements } from "../inventory";
 import { nextSequentialId } from "../firestore-data";
@@ -20,6 +22,16 @@ interface ProductFormModalProps {
   /** Unidades configuradas em Configurações → Listas do sistema. */
   units?: string[];
   partBrands?: string[];
+  /**
+   * Criar categoria e marca sem sair do cadastro.
+   *
+   * Sem isso, descobrir que a categoria da peça não existe obrigava a fechar o
+   * formulário, ir em Configurações, criar, voltar e digitar tudo de novo. Na
+   * prática ninguém faz: joga em "Peças" e segue, e o filtro do estoque para
+   * de significar alguma coisa.
+   */
+  onCreateCategory?: (nome: string) => Promise<void> | void;
+  onCreatePartBrand?: (nome: string) => Promise<void> | void;
   /** Padrões da oficina (markup sugerido, estoque mínimo, unidade e modo de preço). */
   settings?: Partial<SettingsConfig> | null;
   /** Compras, vendas e OS, para montar o histórico da peça. */
@@ -41,6 +53,8 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   allProducts,
   units = [],
   partBrands = [],
+  onCreateCategory,
+  onCreatePartBrand,
   settings = null,
   movementSources,
 }) => {
@@ -338,18 +352,28 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     autoFocus
                   />
                 </label>
-                <label className="field-group">
+                {/*
+                  <div>, não <label>: um <button> dentro de <label> faz o
+                  clique no "+" acionar TAMBÉM o controle do label (o próprio
+                  select). O botão às vezes não abria o campo de criar.
+                */}
+                <div className="field-group">
                   <span className="field-label">Categoria do Produto <b className="req">*</b></span>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="dialog-select"
-                  >
-                    {defaultCategories.map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </label>
+                  {onCreateCategory ? (
+                    <QuickAddSelect
+                      value={category}
+                      onChange={setCategory}
+                      options={defaultCategories}
+                      onCreate={onCreateCategory}
+                      placeholder="Ex: FILTROS"
+                      createTitle="Criar uma categoria sem sair do cadastro"
+                    />
+                  ) : (
+                    <select value={category} onChange={(e) => setCategory(e.target.value)} className="dialog-select">
+                      {defaultCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                    </select>
+                  )}
+                </div>
               </div>
 
               <div className="form-grid-3">
@@ -416,7 +440,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               </div>
 
               <div className="form-grid-3">
-                <label className="field-group">
+                <div className="field-group">
                   <span className="field-label">Marca / Fabricante</span>
                   {/*
                     Só dava para digitar, e cada pessoa escrevia de um jeito
@@ -425,27 +449,27 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     Configurações → Listas do sistema, com "Outra" para o que
                     ainda não está lá.
                   */}
-                  <select
-                    value={brand === "" || brandOptions.includes(brand) ? brand : "__outra__"}
-                    onChange={(e) => setBrand(e.target.value === "__outra__" ? " " : e.target.value)}
-                    className="dialog-input"
-                  >
-                    <option value="">Sem marca definida</option>
-                    {brandOptions.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
-                    <option value="__outra__">Outra (digitar abaixo)</option>
-                  </select>
-                  {brand !== "" && !brandOptions.includes(brand) && (
-                    <input
-                      type="text"
+                  {onCreatePartBrand ? (
+                    <QuickAddSelect
                       value={brand.trim()}
-                      onChange={(e) => setBrand(emMaiusculo(e.target.value))}
-                      placeholder="Ex: Yamalube, Mobil, Cobreq"
-                      className="dialog-input"
-                      style={{ marginTop: "8px" }}
-                      autoFocus
+                      onChange={setBrand}
+                      options={brandOptions}
+                      onCreate={onCreatePartBrand}
+                      emptyLabel="Sem marca definida"
+                      placeholder="Ex: COBREQ"
+                      createTitle="Criar uma marca sem sair do cadastro"
                     />
+                  ) : (
+                    <select
+                      value={brand === "" || brandOptions.includes(brand) ? brand : "__outra__"}
+                      onChange={(e) => setBrand(e.target.value === "__outra__" ? " " : e.target.value)}
+                      className="dialog-input"
+                    >
+                      <option value="">Sem marca definida</option>
+                      {brandOptions.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                    </select>
                   )}
-                </label>
+                </div>
                 <label className="field-group">
                   <span className="field-label">Unidade de Medida</span>
                   <select
@@ -540,23 +564,47 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 <div className="profit-summary-card">
                   <div className="profit-item">
                     <span>Custo:</span>
-                    <strong>{cost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong>
+                    <strong>{money(cost)}</strong>
+                  </div>
+                  {/*
+                    Duas margens, de propósito.
+
+                    O campo "+60%" é margem sobre o CUSTO: custo 25 vira preço
+                    40. Sobre a VENDA isso é 37,5% — e é a porcentagem sobre a
+                    venda que se compara com a do cartão e com a do
+                    concorrente. Ver só o número maior faz a oficina achar que
+                    ganha mais do que ganha.
+                  */}
+                  <div className="profit-item">
+                    <span>Margem sobre o custo:</span>
+                    <strong className="profit-percent">+{markup}%</strong>
                   </div>
                   <div className="profit-item">
-                    <span>Margem:</span>
-                    <strong className="profit-percent">+{markup}%</strong>
+                    <span>Margem sobre a venda:</span>
+                    <strong className="profit-percent">{marginOnPrice(cost, price).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong>
                   </div>
                   <div className="profit-item">
                     <span>Lucro Bruto Unitário:</span>
                     <strong className={grossProfit >= 0 ? "profit-positive" : "profit-negative"}>
-                      {grossProfit.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                      {money(grossProfit)}
                     </strong>
+                  </div>
+                  {/*
+                    O PDV deixa descontar. Sem saber o piso, o desconto "de bom
+                    moço" vende abaixo do que se pagou ao fornecedor.
+                  */}
+                  <div className="profit-item">
+                    <span>Desconto máximo sem prejuízo:</span>
+                    <strong>{maxDiscountPercent(cost, price).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% · até {money(cost)}</strong>
                   </div>
                   <div className="profit-item final-price">
                     <span>Venda Balcão:</span>
-                    <strong>{price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong>
+                    <strong>{money(price)}</strong>
                   </div>
                 </div>
+                {priceWarning(cost, price) ? (
+                  <div className="price-warning" role="alert"><b>!</b><span>{priceWarning(cost, price)}</span></div>
+                ) : null}
               </div>
             </div>
           )}

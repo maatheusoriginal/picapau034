@@ -516,14 +516,13 @@ await passo("cadastro de peça: marca em lista e sem gravar antes da hora", asyn
   await p.waitForTimeout(2200);
 
   // A marca era texto livre: cada pessoa escrevia de um jeito e o filtro do
-  // estoque não juntava nada.
-  const marca = p.locator(".dialog-window select").nth(1);
+  // estoque não juntava nada. Agora sai da lista, com o "+" ao lado para
+  // criar o que ainda não está nela.
+  const marca = p.locator(".dialog-window .quick-add select").nth(1);
   const marcas = await marca.locator("option").allInnerTexts();
   if (marcas.length < 6) problemas.push(`lista de marcas com ${marcas.length} opção(ões)`);
-  await marca.selectOption("__outra__");
-  await p.waitForTimeout(600);
-  if (!(await p.locator('.dialog-window input[placeholder="Ex: Yamalube, Mobil, Cobreq"]').count()))
-    problemas.push('"Outra" não abriu o campo para digitar');
+  if ((await p.locator(".dialog-window .quick-add-open").count()) < 2)
+    problemas.push("falta o botão de criar do lado da categoria e da marca");
   await marca.selectOption("Motul");
   await p.waitForTimeout(400);
 
@@ -623,7 +622,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
   await p.getByRole("button", { name: /Cadastrar moto|Nova moto|Adicionar moto/i }).first().click();
   await p.waitForTimeout(2200);
   await p.locator('.dialog-window input[placeholder*="ABC-1234"]').fill("FLA-2C34");
-  const rotulos = async () => p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
+  const rotulos = async () => p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label, .field-group")?.innerText || "").split("\n")[0]));
   let atuais = await rotulos();
   await p.locator(".dialog-window select").nth(atuais.findIndex((t) => /Marca/i.test(t))).selectOption("Honda");
   await p.waitForTimeout(600);
@@ -734,7 +733,7 @@ await passo("moto por marca, modelo e versão; código de barras gerado", async 
   await ir("Motocicletas");
   await p.getByRole("button", { name: /Cadastrar moto|Nova moto|Adicionar moto/i }).first().click();
   await p.waitForTimeout(2200);
-  const rotulos = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
+  const rotulos = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label, .field-group")?.innerText || "").split("\n")[0]));
   const marca = p.locator(".dialog-window select").nth(rotulos.findIndex((t) => /Marca/i.test(t)));
   const modelo = p.locator(".dialog-window select").nth(rotulos.findIndex((t) => /^Modelo/i.test(t)));
   if (!(await marca.count()) || !(await modelo.count())) problemas.push(`o formulário não tem marca e modelo em lista: ${JSON.stringify(rotulos)}`);
@@ -755,7 +754,7 @@ await passo("moto por marca, modelo e versão; código de barras gerado", async 
   await p.waitForTimeout(600);
   await modelo.selectOption("CG 160");
   await p.waitForTimeout(700);
-  const rotulos2 = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label")?.innerText || "").split("\n")[0]));
+  const rotulos2 = await p.locator(".dialog-window select").evaluateAll((els) => els.map((e) => (e.closest("label, .field-group")?.innerText || "").split("\n")[0]));
   const versao = p.locator(".dialog-window select").nth(rotulos2.findIndex((t) => /Versão/i.test(t)));
   const versoes = await versao.locator("option").allInnerTexts();
   if (!versoes.some((t) => /Fan/.test(t))) problemas.push(`CG 160 não trouxe as versões: ${JSON.stringify(versoes)}`);
@@ -1085,6 +1084,285 @@ await passo("lista de peças: colunas, filtro por grupo e contagem", async () =>
   await p.locator(".stock-toolbar .outline-button", { hasText: /Limpar/ }).click();
   await p.waitForTimeout(700);
   if (problemas.length) throw new Error("lista de peças:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("criar categoria e marca sem sair do cadastro, e o preço mostrar a conta certa", async () => {
+  // Descobrir no meio do cadastro que a categoria da peça não existe obrigava a
+  // fechar o formulário, ir em Configurações, criar, voltar e digitar tudo de
+  // novo. Na prática ninguém faz: joga em "Peças" e segue, e o filtro do
+  // estoque para de significar alguma coisa.
+  const problemas = [];
+  const categoriasAntes = (await banco("categories")).length;
+  await ir("Produtos e estoque");
+  await p.getByRole("button", { name: /Adicionar produto/i }).first().click();
+  await p.waitForTimeout(2200);
+
+  // O "+" fica do lado do campo, na mesma linha.
+  const botoesDeCriar = await p.locator(".dialog-window .quick-add-open").count();
+  if (botoesDeCriar < 2) problemas.push(`achei ${botoesDeCriar} botão(ões) de criar, esperado categoria e marca`);
+
+  // Pelo rótulo, e não pela ordem: qual "+" é o primeiro no HTML muda com
+  // qualquer campo novo, e o erro sairia como "não achei o input".
+  const campoCategoria = p.locator(".dialog-window .field-group", { hasText: "Categoria do Produto" }).first();
+  // O campo de digitar é achado pelo placeholder, e não por "o input daqui":
+  // quando um passo falha por seletor, a mensagem precisa dizer o que faltou.
+  const novaCategoria = campoCategoria.getByPlaceholder("Ex: FILTROS");
+  const camadasAntes = await p.evaluate(() => ({
+    backdrops: document.querySelectorAll(".dialog-backdrop").length,
+    janelas: document.querySelectorAll(".dialog-window").length,
+    camadas: document.querySelectorAll(".dialog-layer").length,
+  }));
+  await campoCategoria.locator(".quick-add-open").click();
+  // Instrumentado: o campo abria e sumia antes de dar para digitar, e a
+  // mensagem de erro só dizia "não achei o input".
+  if (!await novaCategoria.waitFor({ timeout: 10000 }).then(() => true).catch(() => false)) {
+    await foto("diag-categoria");
+    throw new Error(`o "+" da categoria não abriu o campo.\n      camadas antes: ${JSON.stringify(camadasAntes)}\n      html: ${(await campoCategoria.innerHTML().catch(() => "?")).slice(0, 320)}`);
+  }
+  // Digitado como quem digita — clicar e teclar —, e não com `fill`: e quando
+  // não dá, a mensagem traz o motivo que o Playwright deu, em vez de só
+  // "esgotou o tempo".
+  const digitar = async (campo, valor) => {
+    try {
+      await campo.click({ timeout: 10000 });
+      await campo.fill("", { timeout: 5000 });
+      await campo.pressSequentially(valor, { delay: 15, timeout: 10000 });
+    } catch (erro) {
+      await foto("diag-digitar");
+      throw new Error(`não deu para digitar "${valor}".\n      ${String(erro).split("\n").slice(0, 8).join("\n      ")}\n      html: ${(await campoCategoria.innerHTML().catch(() => "?")).slice(0, 320)}`);
+    }
+  };
+  // Nome repetido não vira item novo: sem isso a lista encheria de "Filtros",
+  // "FILTROS" e "filtros " — o problema que a lista veio resolver. "Filtros"
+  // é uma das categorias padrão da oficina.
+  await digitar(novaCategoria, "filtros");
+  await p.waitForTimeout(400);
+  await campoCategoria.locator(".quick-add-confirm").click();
+  await p.waitForTimeout(900);
+  const aviso = await campoCategoria.locator(".quick-add-error").innerText().catch(() => "");
+  if (!/já está na lista/i.test(aviso)) problemas.push(`devia recusar a categoria repetida: ${JSON.stringify(aviso)}`);
+  if (!(await novaCategoria.count())) problemas.push("recusar o nome repetido fechou o campo em vez de deixar corrigir");
+
+  await digitar(novaCategoria, "filtros de ar");
+  await p.waitForTimeout(400);
+  await campoCategoria.locator(".quick-add-confirm").click();
+  await p.waitForTimeout(3000);
+  const categoriasDepois = await banco("categories");
+  const criada = categoriasDepois.find((item) => /^FILTROS DE AR$/i.test(item.name || ""));
+  if (!criada) problemas.push("a categoria não foi gravada");
+  else {
+    if (criada.name !== "FILTROS DE AR") problemas.push(`gravou "${criada.name}", esperado em maiúsculo`);
+    if (criada.group !== "Produtos") problemas.push(`gravou no grupo "${criada.group}"`);
+  }
+  // A oficina sem categoria cadastrada vê as nove padrão. Elas não são
+  // documentos: gravar só a nova fazia a coleção deixar de estar vazia e as
+  // outras NOVE SUMIREM da tela de uma vez.
+  if (categoriasAntes === 0) {
+    if (!categoriasDepois.some((item) => /^Filtros$/i.test(item.name || ""))) {
+      problemas.push(`criar a primeira categoria apagou as padrão da tela: ${JSON.stringify(categoriasDepois.map((item) => item.name))}`);
+    }
+    if (categoriasDepois.length < 10) problemas.push(`ficaram ${categoriasDepois.length} categorias, esperado as 9 padrão mais a nova`);
+  } else if (categoriasDepois.length !== categoriasAntes + 1) {
+    problemas.push("criou mais de uma categoria");
+  }
+  // E já fica escolhida: o cadastro continua de onde estava.
+  const escolhida = await campoCategoria.locator("select").inputValue();
+  if (escolhida !== "FILTROS DE AR") problemas.push(`a categoria nova não ficou selecionada: ${JSON.stringify(escolhida)}`);
+
+  // A marca é item de uma lista dentro de settings/lists, e não documento.
+  const campoMarca = p.locator(".dialog-window .field-group", { hasText: "Marca / Fabricante" }).first();
+  const novaMarca = campoMarca.getByPlaceholder("Ex: COBREQ");
+  await campoMarca.locator(".quick-add-open").click();
+  if (!await novaMarca.waitFor({ timeout: 10000 }).then(() => true).catch(() => false)) {
+    await foto("diag-marca");
+    throw new Error(`o "+" da marca não abriu o campo. html: ${(await campoMarca.innerHTML().catch(() => "?")).slice(0, 320)}`);
+  }
+  // "Cobreq" já vem na lista padrão da oficina: tem de ser recusada.
+  await digitar(novaMarca, "cobreq");
+  await p.waitForTimeout(400);
+  await campoMarca.locator(".quick-add-confirm").click();
+  await p.waitForTimeout(1000);
+  const avisoMarca = await campoMarca.locator(".quick-add-error").innerText().catch(() => "");
+  if (!/já está na lista/i.test(avisoMarca)) problemas.push(`devia recusar a marca repetida: ${JSON.stringify(avisoMarca)}`);
+
+  await digitar(novaMarca, "piapetro");
+  await p.waitForTimeout(400);
+  await campoMarca.locator(".quick-add-confirm").click();
+  await p.waitForTimeout(3500);
+  const listas = (await banco("settings")).find((item) => item._id === "lists");
+  const marcas = (listas?.partBrands || []).map((nome) => String(nome));
+  if (!marcas.some((nome) => /^PIAPETRO$/i.test(nome))) {
+    problemas.push(`a marca não entrou na lista: ${JSON.stringify(marcas)}`);
+  }
+  // A lista padrão não pode sumir quando a primeira marca é criada.
+  if (!marcas.some((nome) => /^Motul$/i.test(nome))) {
+    problemas.push(`criar a marca apagou as padrão: ${JSON.stringify(marcas)}`);
+  }
+
+  // --- o preço mostra a conta que decide a venda ---
+  await p.locator(".dialog-window .dialog-input").first().fill("FILTRO DE AR TESTE");
+  await p.locator(".dialog-window .dialog-tabs button, .dialog-window .settings-tab-button", { hasText: /Preço|Preços/i }).first().click();
+  await p.waitForTimeout(900);
+  const camposDePreco = p.locator(".pricing-box input");
+  await camposDePreco.nth(0).fill("25");
+  await p.waitForTimeout(500);
+  await camposDePreco.nth(1).fill("60");
+  await p.waitForTimeout(900);
+  const cartao = await p.locator(".profit-summary-card").innerText();
+  // "+60%" é margem sobre o CUSTO. Sobre a VENDA isso é 37,5% — e é essa a
+  // porcentagem que se compara com a do cartão e a do concorrente.
+  if (!/Margem sobre o custo/i.test(cartao)) problemas.push("o cartão não diz que a margem é sobre o custo");
+  if (!/Margem sobre a venda/i.test(cartao)) problemas.push("falta a margem sobre a venda");
+  if (!/37,5%/.test(cartao)) problemas.push(`a margem sobre a venda de 25→40 devia ser 37,5%: ${JSON.stringify(cartao)}`);
+  if (!/Desconto máximo sem prejuízo/i.test(cartao)) problemas.push("falta o desconto máximo sem prejuízo");
+
+  // Preço abaixo do custo precisa avisar, não só ficar vermelho.
+  await camposDePreco.nth(2).fill("20").catch(() => {});
+  await p.waitForTimeout(900);
+  const alerta = await p.locator(".price-warning").innerText().catch(() => "");
+  if (alerta && !/abaixo do custo/i.test(alerta)) problemas.push(`aviso inesperado: ${JSON.stringify(alerta)}`);
+
+  await p.locator(".dialog-window button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+  if (problemas.length) throw new Error("criar na hora e preço:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("nota do fornecedor: confere, compara o custo e dá entrada com o fator certo", async () => {
+  // Cadastrar peça a peça depois de cada compra é o que ninguém faz: a nota
+  // chega com trinta itens e o estoque do sistema fica meses atrás do estoque
+  // da prateleira. O XML já traz tudo, inclusive o custo real pago.
+  const problemas = [];
+  const antesDaNota = await banco("products");
+  const oleo = antesDaNota.find((produto) => /ÓLEO 20W50 MINERAL/i.test(produto.name || ""));
+  if (!oleo) throw new Error("o produto do passo 2 sumiu; sem ele não dá para comparar custo");
+  const estoqueAntes = Number(oleo.stock) || 0;
+
+  // O óleo do passo 2 foi cadastrado sem código de barras — como acontece com
+  // peça de moto o tempo todo. Então a nota traz a descrição igualzinha à do
+  // cadastro, que é o último recurso do casamento, e o fator é digitado à mão:
+  // "2 CX" sem dizer quantas unidades vêm na caixa é exatamente o caso em que
+  // o balcão precisa corrigir o número.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+ <NFe><infNFe Id="NFe35260612345678000199550010000098761000098765" versao="4.00">
+  <ide><nNF>9876</nNF><serie>1</serie><dhEmi>2026-06-28T09:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>12345678000199</CNPJ><xNome>DISTRIBUIDORA TESTE LTDA</xNome></emit>
+  <det nItem="1"><prod><cProd>OL-2050</cProd><cEAN>SEM GTIN</cEAN>
+   <xProd>${oleo.name}</xProd><NCM>27101932</NCM>
+   <uCom>CX</uCom><qCom>2.0000</qCom><vUnCom>360.0000</vUnCom><vProd>720.00</vProd></prod></det>
+  <det nItem="2"><prod><cProd>REL-428</cProd><cEAN>SEM GTIN</cEAN>
+   <xProd>KIT RELACAO 428H</xProd><NCM>87141000</NCM>
+   <uCom>UN</uCom><qCom>3.0000</qCom><vUnCom>90.0000</vUnCom><vProd>270.00</vProd></prod></det>
+ </infNFe></NFe>
+</nfeProc>`;
+
+  await ir("Produtos e estoque");
+  await p.getByRole("button", { name: /Importar nota/i }).first().click();
+  await p.waitForTimeout(1500);
+  await p.locator('.dialog input[type="file"]').setInputFiles({ name: "nota-9876.xml", mimeType: "text/xml", buffer: Buffer.from(xml, "utf-8") });
+  await p.waitForTimeout(2500);
+
+  const cabecalho = await p.locator(".nfe-head").innerText().catch(() => "");
+  if (!/DISTRIBUIDORA TESTE/i.test(cabecalho)) problemas.push(`não leu o fornecedor: ${JSON.stringify(cabecalho)}`);
+  if (!/9876/.test(cabecalho)) problemas.push("não leu o número da nota");
+  if (!/28\/06\/2026/.test(cabecalho)) problemas.push("não leu a data no formato brasileiro");
+
+  const linhas = await p.locator(".nfe-table tbody tr").count();
+  if (linhas !== 2) problemas.push(`a nota apareceu com ${linhas} linha(s), esperado 2`);
+  const linhaDoOleo = p.locator(".nfe-table tbody tr").first();
+  const primeira = await linhaDoOleo.innerText();
+  // Achou o produto já cadastrado, e diz por quê.
+  if (!/Já cadastrada/i.test(primeira)) problemas.push(`não reconheceu o produto já cadastrado: ${JSON.stringify(primeira)}`);
+  if (!/descrição/i.test(primeira)) problemas.push(`não diz como achou o produto: ${JSON.stringify(primeira)}`);
+  // A descrição não diz quantas unidades vêm na caixa: o palpite é 1, e é o
+  // balcão que corrige. Errar aqui é o que faz a peça "acabar" no sistema com
+  // cinco ainda na caixa e o custo unitário ficar doze vezes maior.
+  const fatorSugerido = await linhaDoOleo.locator(".nfe-fator").inputValue();
+  if (fatorSugerido !== "1") problemas.push(`sem pista na descrição o fator devia ficar em 1, veio ${JSON.stringify(fatorSugerido)}`);
+  await linhaDoOleo.locator(".nfe-fator").fill("12");
+  await p.waitForTimeout(900);
+  const comFator = await linhaDoOleo.innerText();
+  if (!/\b24\b/.test(comFator)) problemas.push(`não recalculou 2 caixas × 12 = 24: ${JSON.stringify(comFator)}`);
+  // A nota traz R$ 360 a caixa; o custo da unidade é 30, não 360.
+  if (!/30,00/.test(comFator)) problemas.push(`o custo unitário devia ser R$ 30,00: ${JSON.stringify(comFator)}`);
+  // E a comparação com o custo que estava no cadastro. O custo vem do banco,
+  // e não escrito aqui: a entrada do passo 9 recalcula o custo médio, e fixar
+  // o número reprovaria a tela por causa de outro passo.
+  const custoAntes = Number(String(oleo.cost ?? "").replace(/[^\d,.-]/g, "").replace(".", "").replace(",", ".")) || 0;
+  if (custoAntes > 0) {
+    if (!comFator.includes(custoAntes.toLocaleString("pt-BR", { minimumFractionDigits: 2 }))) {
+      problemas.push(`não mostrou o custo anterior de ${custoAntes}: ${JSON.stringify(comFator)}`);
+    }
+    const esperada = Math.round(((30 - custoAntes) / custoAntes) * 1000) / 10;
+    if (!comFator.includes(`${esperada > 0 ? "+" : ""}${esperada.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`)) {
+      problemas.push(`não mostrou a variação de ${esperada}%: ${JSON.stringify(comFator)}`);
+    }
+  }
+  // Fator zero é recusado, em vez de virar 1 em silêncio.
+  await linhaDoOleo.locator(".nfe-fator").fill("0");
+  await p.waitForTimeout(700);
+  if (!/Informe quantas unidades/i.test(await linhaDoOleo.innerText())) problemas.push("fator zero devia ser recusado com aviso");
+  await linhaDoOleo.locator(".nfe-fator").fill("12");
+  await p.waitForTimeout(700);
+  const segunda = await p.locator(".nfe-table tbody tr").nth(1).innerText();
+  if (!/Cadastrar esta peça/i.test(segunda)) problemas.push("a peça nova não oferece cadastrar");
+
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(6000);
+
+  const depois = await banco("products");
+  const oleoDepois = depois.find((produto) => produto._id === oleo._id);
+  const nova = depois.find((produto) => /KIT RELACAO 428H/i.test(produto.name || ""));
+  if (Number(oleoDepois?.stock) !== estoqueAntes + 24) problemas.push(`o estoque foi para ${oleoDepois?.stock}, esperado ${estoqueAntes + 24}`);
+  if (!nova) problemas.push("a peça nova da nota não foi cadastrada");
+  else {
+    if (Number(nova.stock) !== 3) problemas.push(`a peça nova entrou com ${nova.stock}, esperado 3`);
+    if (nova.name !== "KIT RELACAO 428H") problemas.push(`a peça nova gravou "${nova.name}", esperado em maiúsculo`);
+    // Peça sem GTIN não pode nascer com "SEM GTIN" como código de barras.
+    if (nova.barcode) problemas.push(`peça sem GTIN nasceu com código de barras "${nova.barcode}"`);
+  }
+  const entradas = await banco("stockEntries");
+  const daNota = entradas.find((entrada) => /9876/.test(String(entrada.payment || "")));
+  if (!daNota) problemas.push("a entrada de estoque da nota não foi gravada");
+  else if (Number(daNota.total) !== 990) problemas.push(`a entrada gravou ${daNota.total}, esperado 990 (24×30 + 3×90)`);
+  if (problemas.length) throw new Error("nota do fornecedor:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("o botão de ajuda responde de verdade", async () => {
+  // Ele abria um aviso e mais nada. Ajuda que não responde é pior do que não
+  // ter: a pessoa clica, não acha, e não clica de novo.
+  const problemas = [];
+  await p.locator(".support-card").click();
+  await p.waitForTimeout(1200);
+  const assuntos = await p.locator(".help-list > button").allInnerTexts();
+  if (assuntos.length < 5) problemas.push(`a ajuda abriu com ${assuntos.length} assunto(s)`);
+  for (const esperado of [/OS/i, /preço/i, /estoque/i, /caixa/i]) {
+    if (!assuntos.some((texto) => esperado.test(texto))) problemas.push(`falta o assunto ${esperado}`);
+  }
+
+  // A busca serve para quem sabe o que quer fazer, não o nome da tela.
+  await p.locator(".help-search input").fill("sangria");
+  await p.waitForTimeout(900);
+  const filtrados = await p.locator(".help-list > button").allInnerTexts();
+  if (filtrados.length !== 1 || !/caixa/i.test(filtrados[0] || "")) problemas.push(`buscar "sangria" devia achar o caixa: ${JSON.stringify(filtrados)}`);
+  await p.locator(".help-search input").fill("");
+  await p.waitForTimeout(700);
+
+  await p.locator(".help-list > button", { hasText: /preço/i }).first().click();
+  await p.waitForTimeout(900);
+  const detalhe = await p.locator(".help-detail").innerText();
+  if ((await p.locator(".help-steps li").count()) < 3) problemas.push("o assunto abriu sem passos");
+  // A conta que o cadastro mostra precisa estar explicada aqui.
+  if (!/sobre a venda/i.test(detalhe)) problemas.push("a ajuda de preço não explica a margem sobre a venda");
+  if (!/desconto/i.test(detalhe)) problemas.push("a ajuda de preço não fala de desconto");
+
+  // E leva para a tela que resolve, em vez de só explicar.
+  await p.locator(".help-detail .primary-button").click();
+  await p.waitForTimeout(2000);
+  if (await p.locator(".help-dialog").count()) problemas.push("o atalho não fechou a ajuda");
+  const titulo = await p.locator("h1").first().innerText().catch(() => "");
+  if (!/estoque/i.test(titulo)) problemas.push(`o atalho não levou para a tela certa: ${JSON.stringify(titulo)}`);
+  if (problemas.length) throw new Error("central de ajuda:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("cadastro novo entra em maiúsculo, sem depender de quem digita", async () => {

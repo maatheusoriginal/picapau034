@@ -29,6 +29,8 @@ export type DialogKind =
   | "quick"
   | "product"
   | "import"
+  /** Importar o XML da NF-e do fornecedor: confere, compara custo e dá entrada. */
+  | "nfe"
   | "payment"
   | "catalog"
   | "client"
