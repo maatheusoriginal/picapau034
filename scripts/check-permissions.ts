@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 /**
  * Confere quem recebe qual permissão.
  *
@@ -61,6 +63,25 @@ const casos: Array<[string, unknown, unknown]> = [
   ["nenhum cargo recebe permissão inexistente", json(inventadas), json([])],
   ["mecânico é o mais restrito dos três", mecanico.length < balcao.length && balcao.length < admin.length, true],
 ];
+
+/*
+  A tela e as regras do Firestore precisam falar da mesma permissão.
+
+  Foi assim que "Configurações" ficou presa em Super Admin: a tela checava
+  `firebaseAdmin` e as regras `isSuperAdmin()`, e não existia permissão nenhuma
+  para a tela — não havia como dar esse acesso a quem toca o balcão sem
+  entregar junto o poder de criar usuário e mudar a permissão dos outros.
+
+  Esta conferência lê o firestore.rules e cobra que toda permissão citada lá
+  exista na lista do sistema, e que as que mandam nas Configurações estejam
+  realmente usadas nas regras.
+*/
+const regras = readFileSync("firestore.rules", "utf8");
+const citadasNasRegras = Array.from(new Set(Array.from(regras.matchAll(/can\('([a-z.]+)'\)/g)).map((m) => m[1])));
+const foraDaLista = citadasNasRegras.filter((permissao) => !(allFirebasePermissions as string[]).includes(permissao));
+casos.push(["toda permissão citada nas regras existe no sistema", foraDaLista.join(","), ""]);
+casos.push(["as regras usam settings.manage", citadasNasRegras.includes("settings.manage"), true]);
+casos.push(["as regras usam team.manage", citadasNasRegras.includes("team.manage"), true]);
 
 let falhas = 0;
 for (const [nome, obtido, esperado] of casos) {

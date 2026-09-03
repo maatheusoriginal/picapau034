@@ -49,6 +49,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:partner` | Confere o faturamento por empresa parceira (desconto, vencimento e caixa) |
 | `npm run check:history` | Confere o histórico de atendimento (ordenação, total e o que entra) |
 | `npm run check:text-case` | Confere o cadastro em maiúsculo, e varre os formulários atrás de campo que escapou |
+| `npm run check:team-link` | Confere a ponte entre conta de acesso e cadastro de funcionário |
 | `npm run check:barcode` | Confere o gerador de código de barras interno (EAN-13) |
 | `npm run check:motorcycle-catalog` | Confere o catálogo de marca, modelo e versão de moto |
 | `npm run check:plate` | Confere as regras de placa (padrão antigo, Mercosul e comparação) |
@@ -938,6 +939,73 @@ Também entraram o **filtro por grupo** ("todos os óleos"), o botão **Limpar**
 sem ele o filtro fica preso e a peça seguinte "some" do sistema para quem não
 percebeu que havia busca ativa — e a **contagem de registros**, que acompanha o
 filtro.
+
+## O mecânico que não aparecia na OS
+
+O sistema tem duas telas que parecem "cadastrar uma pessoa":
+
+| Tela | Coleção | Para que serve |
+| --- | --- | --- |
+| **Funcionários** | `employees` | Quem trabalha na oficina: é daqui que sai a lista de mecânicos da OS, a comissão e o "minhas OS" do mecânico |
+| **Usuários e acessos** | `users` / `userAccess` | A conta de login, o cargo e as permissões |
+
+Cadastrar alguém como Mecânico **só em "Usuários e acessos"** criava uma pessoa
+que entra no sistema mas **não existe para a oficina**: não aparecia no seletor
+de mecânicos da OS, não recebia serviço e não entrava em comissão. E nada
+avisava — o seletor simplesmente não tinha aquele nome.
+
+Agora:
+
+- A tela de Usuários **aponta** quem está assim, com o efeito escrito ("não
+  aparece na abertura de OS"), e resolve com **um clique**;
+- Mecânico **novo já nasce** com cadastro de funcionário;
+- O vínculo volta para a conta, gravado direto no perfil — sem ele, o próximo
+  carregamento casaria pelo nome outra vez e criaria um segundo cadastro da
+  mesma pessoa.
+
+As regras ficam em `src/team-link.ts`, e `npm run check:team-link` confere as 22.
+
+### A tela de Usuários ficava vazia quando o backend administrativo falhava
+
+Encontrado ao testar o item acima. `callAdmin` só caía no plano B — ler os
+perfis direto do Firestore — para três códigos de erro. Uma resposta que **não
+é o JSON esperado** (a função não subiu, um proxy devolveu uma página de erro,
+o ambiente serve o index.html em qualquer rota) virava "erro interno", o plano
+B não era usado, e a tela mostrava **"Nenhum usuário encontrado"** — como se as
+contas tivessem sumido.
+
+Resposta que não é o JSON da API administrativa, e erro 5xx, passaram a contar
+como indisponibilidade. A tela mostra o que consegue ler e diz por quê.
+
+## Configurações sem precisar ser Super Admin
+
+A Rayane foi cadastrada como Balcão e parou de conseguir abrir as
+Configurações. Não era engano de marcação: **não existia permissão nenhuma para
+essa tela**. Ela era liberada só para Super Admin, no código — e quem precisava
+mexer numa categoria tinha de virar Super Admin, o que dá junto o poder de
+criar usuário e mudar a permissão dos outros.
+
+Entraram quatro permissões novas, marcáveis na tela:
+
+| Permissão | O que libera |
+| --- | --- |
+| `settings.view` | Abrir as Configurações (vem por padrão no Balcão) |
+| `settings.manage` | Criar e editar categorias, marcas, parceiras, formas de pagamento |
+| `team.view` | Ver a equipe (já existia) |
+| `team.manage` | Cadastrar e editar funcionários |
+
+**Ver e alterar são separados**: quem atende precisa consultar categoria e
+forma de pagamento o tempo todo; alterar é decisão do dono, marcada na tela.
+Criar usuário e mexer na permissão dos outros continua só no Admin.
+
+As `firestore.rules` acompanharam: `categories`, `quickServices`, `partners`,
+`paymentMethods`, `paymentMachines`, `settings` e `employees` deixaram de exigir
+`isSuperAdmin()`. Salário e comissão (`employeeCompensation`) continuam só de
+Super Admin.
+
+`npm run check:permissions` agora **lê o `firestore.rules`** e cobra que toda
+permissão citada lá exista na lista do sistema — foi essa desconexão entre tela
+e regra que prendeu as Configurações em Super Admin sem ninguém notar.
 
 ## Histórico do cliente e da moto
 

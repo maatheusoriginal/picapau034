@@ -1227,6 +1227,23 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .access-summary article:nth-child(2) { background: linear-gradient(145deg, #fff8f7, #fff); border-color: #efd0cd; }
 .access-summary article:nth-child(2) strong { color: var(--red); }
 .access-credentials-banner { position: relative; min-height: 74px; display: flex; align-items: center; gap: 12px; margin-top: 13px; padding: 12px 48px 12px 14px; border: 1px solid #bde0cd; border-radius: 12px; background: #eef9f3; }
+
+/* Mecânico com login mas sem cadastro de funcionário: some do seletor da OS
+   sem nada avisar. A tela aponta quem está assim e resolve com um clique. */
+.access-fix-banner {
+  display: flex; align-items: center; gap: 12px; margin-top: 13px; padding: 12px 14px;
+  border: 1px solid #f0d5a8; border-radius: 12px; background: #fffaf0;
+}
+.access-fix-banner > span { flex: 0 0 auto; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: #f7e9cd; color: #8a6d2f; }
+.access-fix-banner > div { flex: 1; min-width: 0; }
+.access-fix-banner strong { display: block; color: #6f5620; font-size: 12px; }
+.access-fix-banner p { margin: 4px 0 0; color: #8a7748; font-size: 10px; line-height: 1.5; }
+.access-fix-banner button {
+  flex: 0 0 auto; height: 36px; padding: 0 15px; border: 1px solid #dcbb7a; border-radius: 9px;
+  background: #fff; color: #7a5f24; font-size: 11px; font-weight: 750; cursor: pointer;
+}
+.access-fix-banner button:hover { background: #fdf6e8; }
+.access-fix-banner button:disabled { opacity: .6; cursor: default; }
 .access-credentials-banner > span { width: 35px; height: 35px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 10px; background: #d8f0e3; color: var(--green); }
 .access-credentials-banner > div { flex: 1; min-width: 0; }
 .access-credentials-banner small, .access-credentials-banner strong, .access-credentials-banner p { display: block; }

@@ -989,6 +989,66 @@ await passo("busca por placa acha o dono, e o histórico dele abre quando pedido
   if (problemas.length) throw new Error("placa e histórico:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("mecânico com login mas sem cadastro entra na OS pelo aviso", async () => {
+  // O caso real: a pessoa é criada em "Usuários e acessos" com o cargo
+  // Mecânico. Isso grava em `userAccess`/`users`; a OS lê `employees`. O
+  // resultado era alguém que entra no sistema e não existe para a oficina —
+  // não aparecia no seletor de mecânicos e nada avisava.
+  const problemas = [];
+  const texto = (valor) => ({ stringValue: valor });
+  await fetch("http://127.0.0.1:8080/v1/projects/picapau-teste/databases/(default)/documents/userAccess/uid-erasmo", {
+    method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" },
+    body: JSON.stringify({ fields: {
+      uid: texto("uid-erasmo"), name: texto("ERASMO SOUZA"), email: texto("erasmo@picapau.test"),
+      phone: texto("(34) 98888-1111"), role: texto("Mecânico"), employeeId: texto(""),
+      active: { booleanValue: true }, mustChangePassword: { booleanValue: false },
+      permissions: { arrayValue: { values: ["orders.view", "orders.update", "budgets.view", "inventory.view", "customers.view"].map(texto) } },
+    } }),
+  });
+  await fetch("http://127.0.0.1:8080/v1/projects/picapau-teste/databases/(default)/documents/users/uid-erasmo", {
+    method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" },
+    body: JSON.stringify({ fields: { uid: texto("uid-erasmo"), name: texto("ERASMO SOUZA"), email: texto("erasmo@picapau.test"), role: texto("Mecânico"), active: { booleanValue: true } } }),
+  });
+  await p.reload();
+  await p.waitForTimeout(4000);
+
+  const antesDaCorrecao = (await banco("employees")).some((item) => /ERASMO/i.test(item.name || ""));
+  if (antesDaCorrecao) problemas.push("o funcionário já existia; o teste não reproduz o caso");
+
+  await p.locator(".nav-item", { hasText: "Usuários e acessos" }).first().click();
+  await p.waitForTimeout(2500);
+  const aviso = await p.locator(".access-fix-banner").innerText().catch(() => "");
+  if (!/ERASMO SOUZA/i.test(aviso)) problemas.push(`a tela não apontou o mecânico sem cadastro: ${JSON.stringify(aviso)}`);
+  if (!/abertura de OS/i.test(aviso)) problemas.push("o aviso não explica o efeito");
+
+  await p.locator(".access-fix-banner button").click();
+  await p.waitForTimeout(5000);
+  const criado = (await banco("employees")).find((item) => /ERASMO/i.test(item.name || ""));
+  if (!criado) problemas.push("o botão não criou o cadastro de funcionário");
+  else {
+    if (criado.isMechanic !== true) problemas.push("o funcionário criado não ficou como mecânico");
+    // Sem o vínculo de volta, o próximo carregamento criaria um segundo
+    // cadastro da mesma pessoa, casando pelo nome outra vez.
+    const conta = (await banco("userAccess")).find((item) => item.uid === "uid-erasmo");
+    if (conta?.employeeId !== criado._id) problemas.push(`a conta não guardou o vínculo: ${JSON.stringify(conta?.employeeId)}`);
+  }
+  if (await p.locator(".access-fix-banner").count()) problemas.push("o aviso continuou depois de resolvido");
+
+  // A prova que importa: agora ele aparece para escolher na nova OS.
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+  const mecanicos = await p.locator(".mechanic-picker button").allInnerTexts();
+  if (!mecanicos.some((linha) => /ERASMO/i.test(linha))) problemas.push(`o mecânico continua fora da OS: ${JSON.stringify(mecanicos)}`);
+  await p.locator(".dialog-footer .ghost-button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+  if (problemas.length) throw new Error("mecânico sem cadastro:\n      - " + problemas.join("\n      - "));
+});
+
 await passo("lista de peças: colunas, filtro por grupo e contagem", async () => {
   // A lista era um cartão por peça, com nome e pouco mais: para conferir código,
   // localização ou código de barras era preciso abrir o cadastro de cada uma.

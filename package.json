@@ -30,6 +30,7 @@
     "check:plate": "tsx scripts/check-plate.ts",
     "check:history": "tsx scripts/check-history.ts",
     "check:text-case": "tsx scripts/check-text-case.ts",
+    "check:team-link": "tsx scripts/check-team-link.ts",
     "e2e:emulador": "node scripts/emulador/e2e.mjs"
   },
   "dependencies": {
