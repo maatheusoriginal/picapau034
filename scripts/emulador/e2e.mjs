@@ -198,20 +198,19 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
   }
   // Etapa 1 — cliente e depois a moto. Sem placa a OS é (corretamente) recusada.
   await preencherEtapa1({ nome: "Cliente de Teste", telefone: "34999998888", placa: "TES-1D23", marca: "Honda", modelo: "CG 160", versao: "Fan" });
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1300);
-  // Etapa 2 — recepção.
+  // Tela única: recepção, mão de obra e confirmação sem trocar de tela.
+  if (await p.locator(".stepper").count()) throw new Error("a OS voltou a ser por etapas");
   await p.getByPlaceholder("Ex.: 38.420 km").fill("38.420 km");
   await p.locator(".dialog textarea").first().fill("Barulho na relação");
   await p.waitForTimeout(400);
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1300);
-  // Etapa 3 — mão de obra: descrição + valor + "Adicionar mão de obra".
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Troca do kit relação");
   await p.locator(".dialog input[type=number]").first().fill("150");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1300);
-  // Etapa 4 — revisão e confirmação.
+  // O total fica no rodapé, à vista o tempo todo enquanto se monta a OS.
+  const rodape = await p.locator(".os-single-total").innerText().catch(() => "");
+  if (!/150,00/.test(rodape)) throw new Error(`o rodapé não mostra o total: ${JSON.stringify(rodape)}`);
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4000);
   const ordens = await banco("serviceOrders");
   if (ordens.length !== 1) throw new Error(`gravou ${ordens.length} OS, esperado 1`);
@@ -647,8 +646,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
     if (daFrota.partnerName !== "Flash Entregas") problemas.push(`responsável gravado: "${daFrota.partnerName}"`);
   }
 
-  // 3. a OS começa escolhendo a parceira, na PRIMEIRA etapa — a de origem
-  // deixou de existir, porque quem abre a OS já escolhe a empresa e a moto.
+  // 3. a OS começa escolhendo a parceira, e tudo cabe numa tela só.
   await ir("Ordens de serviço");
   await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
   await p.waitForTimeout(1500);
@@ -656,10 +654,14 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
     await p.getByText(/Abrir OS completa/i).first().click();
     await p.waitForTimeout(1800);
   }
-  const etapas = await p.locator(".stepper .step span").allInnerTexts();
-  if (etapas.length !== 4) problemas.push(`a OS tem ${etapas.length} etapas, esperado 4`);
-  if (etapas.some((texto) => /Origem/i.test(texto))) problemas.push("a etapa de origem continua na tela");
-  if ((await p.locator(".os-party-switch button").count()) !== 2) problemas.push("a etapa 1 não deixa escolher entre cliente e parceira");
+  if (await p.locator(".stepper").count()) problemas.push("a OS voltou a ser por etapas");
+  if ((await p.locator(".os-single-columns").count()) !== 1) problemas.push("a OS não abriu na tela única");
+  // Quem, qual moto, a recepção e os itens: tudo à vista de uma vez.
+  const naTela = await p.locator(".os-single").innerText();
+  for (const pedaco of ["Quem responde por esta OS", "Motocicleta", "Quilometragem", "Adicionar peças", "Adicionar mão de obra"]) {
+    if (!naTela.includes(pedaco)) problemas.push(`a tela única não traz "${pedaco}"`);
+  }
+  if ((await p.locator(".os-party-switch button").count()) !== 2) problemas.push("não dá para escolher entre cliente e parceira");
 
   await p.locator(".os-party-switch button", { hasText: /parceira/i }).click();
   await p.waitForTimeout(1000);
@@ -675,19 +677,13 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
   await p.waitForTimeout(800);
   if ((await p.locator(".os-block.done").count()) !== 2) problemas.push("os dois blocos deviam ficar prontos");
 
-  await p.locator(".dialog-footer .primary-button").click();
-  await p.waitForTimeout(1400);
   await p.getByPlaceholder("Ex.: 38.420 km").fill("12.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão da frota");
-  await p.locator(".dialog-footer .primary-button").click();
-  await p.waitForTimeout(1400);
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão completa");
   await p.locator(".dialog input[type=number]").first().fill("200");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click();
-  await p.waitForTimeout(1400);
   await p.locator(".dialog-footer .primary-button").click();
   await p.waitForTimeout(4500);
 
@@ -914,16 +910,13 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
   const motoDoBloco = await p.locator(".os-block").nth(1).innerText();
   if (/JOA-1A11/.test(motoDoBloco)) problemas.push("mostrou a moto do homônimo");
 
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
   await p.getByPlaceholder("Ex.: 38.420 km").fill("21.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão dos 20 mil");
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão");
   await p.locator(".dialog input[type=number]").first().fill("90");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4500);
 
   // A conferência que vale: no banco, a OS é do filho, com a moto do filho.
@@ -994,6 +987,44 @@ await passo("busca por placa acha o dono, e o histórico dele abre quando pedido
   await p.locator(".mini-search input").first().fill("");
   await p.waitForTimeout(800);
   if (problemas.length) throw new Error("placa e histórico:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("lista de peças: colunas, filtro por grupo e contagem", async () => {
+  // A lista era um cartão por peça, com nome e pouco mais: para conferir código,
+  // localização ou código de barras era preciso abrir o cadastro de cada uma.
+  // Agora é uma linha por peça, com tudo o que o balcão pergunta.
+  const problemas = [];
+  await ir("Produtos e estoque");
+  const colunas = await p.locator(".stock-table thead th").allInnerTexts();
+  for (const coluna of ["CÓDIGO", "REFERÊNCIA", "CÓD. BARRAS", "DESCRIÇÃO", "GRUPO", "LOCAL", "PREÇO", "ESTOQUE", "UN."]) {
+    if (!colunas.some((texto) => texto.trim().toUpperCase() === coluna)) problemas.push(`falta a coluna ${coluna}: ${JSON.stringify(colunas)}`);
+  }
+  const total = await p.locator(".stock-table tbody tr").count();
+  if (!total) problemas.push("a lista de peças veio vazia");
+  if (!/registro/.test(await p.locator(".stock-count").innerText())) problemas.push("não mostra quantos registros");
+
+  // Procurar pelo CÓDIGO, que é como a peça é pedida no balcão.
+  await p.locator(".stock-toolbar .mini-search input").fill("PRD-001");
+  await p.waitForTimeout(900);
+  if ((await p.locator(".stock-table tbody tr").count()) !== 1) problemas.push("procurar pelo código não filtrou");
+  const contagem = await p.locator(".stock-count").innerText();
+  if (!/1 de/.test(contagem)) problemas.push(`a contagem não acompanha o filtro: ${JSON.stringify(contagem)}`);
+
+  // "Limpar" devolve a lista inteira — sem isso o filtro fica preso e a peça
+  // seguinte "some" do sistema para quem não percebeu que havia busca ativa.
+  await p.locator(".stock-toolbar .outline-button", { hasText: /Limpar/ }).click();
+  await p.waitForTimeout(900);
+  if ((await p.locator(".stock-table tbody tr").count()) !== total) problemas.push("Limpar não devolveu a lista inteira");
+
+  // O filtro por grupo: a oficina procura "todos os óleos".
+  const grupos = await p.locator(".stock-group-filter select option").allInnerTexts();
+  if (grupos.length < 2) problemas.push(`o filtro de grupo veio vazio: ${JSON.stringify(grupos)}`);
+  await p.locator(".stock-group-filter select").selectOption({ index: 1 });
+  await p.waitForTimeout(900);
+  if (!(await p.locator(".stock-table tbody tr").count())) problemas.push("filtrar por grupo não achou nada");
+  await p.locator(".stock-toolbar .outline-button", { hasText: /Limpar/ }).click();
+  await p.waitForTimeout(700);
+  if (problemas.length) throw new Error("lista de peças:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("cadastro novo entra em maiúsculo, sem depender de quem digita", async () => {
@@ -1106,16 +1137,13 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   await listas.nth(0).selectOption("Honda"); await p.waitForTimeout(600);
   await listas.nth(1).selectOption("CG 150"); await p.waitForTimeout(600);
   await listas.nth(2).selectOption("Fan"); await p.waitForTimeout(500);
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
   await p.getByPlaceholder("Ex.: 38.420 km").fill("50.000 km");
   await p.locator(".dialog textarea").first().fill("Chegou de guincho");
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão");
   await p.locator(".dialog input[type=number]").first().fill("120");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(1400);
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4000);
 
   const aberta = (await banco("serviceOrders")).find((ordem) => ordem.plate === "GUI-4D44");

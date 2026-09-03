@@ -901,6 +901,44 @@ causa era a mesma da OS encerrada errada: `selectedCustomer` caía num
 primeiro cliente da agenda. Escolher ninguém não pode significar "o primeiro da
 lista" — o fallback saiu.
 
+## A nova OS numa tela só
+
+O passo a passo pedia **quatro telas** para abrir uma OS que o balcão preenche
+em trinta segundos: cliente e moto, avançar, recepção, avançar, itens, avançar,
+conferir, confirmar. **Três dos quatro cliques eram só para chegar no campo
+seguinte**, e a etapa de revisão repetia o que já estava preenchido logo acima.
+
+Agora é uma tela só, em duas colunas:
+
+| Coluna | O que tem |
+| --- | --- |
+| Esquerda | Quem responde (cliente ou parceira), a motocicleta, e a recepção — km, combustível, problema, prioridade, previsão e mecânicos |
+| Direita | As peças do estoque, a mão de obra e os itens já incluídos |
+
+O **total fica fixo no rodapé** — peças, mão de obra, desconto do parceiro e o
+valor final —, à vista o tempo todo enquanto se monta a OS. Era a única coisa
+que a etapa de revisão dava e que a tela única não daria sozinha.
+
+## A lista de peças
+
+Era um cartão por peça, com o nome e pouco mais: para conferir o código, a
+localização na prateleira ou o código de barras era preciso **abrir o cadastro
+de cada uma**.
+
+Agora é uma linha por peça, com **código, referência de fábrica, código de
+barras, descrição, grupo, localização, preço, saldo e unidade** — e a busca acha
+por qualquer um deles, porque é por qualquer um deles que a peça é pedida no
+balcão. O preço, que é o que mais se olha, fica em destaque; o saldo carrega a
+bolinha de normal, crítico ou zerado.
+
+A linha é baixa de propósito: `td { height: 58px }` cabia oito peças na tela, e
+esta lista é para varrer com o olho. Com 34px cabem vinte.
+
+Também entraram o **filtro por grupo** ("todos os óleos"), o botão **Limpar** —
+sem ele o filtro fica preso e a peça seguinte "some" do sistema para quem não
+percebeu que havia busca ativa — e a **contagem de registros**, que acompanha o
+filtro.
+
 ## Histórico do cliente e da moto
 
 Com a moto no portão a pergunta é sempre a mesma: **o que já foi feito nela, e
