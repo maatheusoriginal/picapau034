@@ -435,6 +435,67 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .dialog-layer { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: rgba(10,10,12,.62); backdrop-filter: blur(4px); animation: fade-in .16s ease; }
 .dialog { width: min(520px, 100%); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,.25); border-radius: 17px; background: #fff; box-shadow: 0 28px 80px rgba(0,0,0,.28); animation: dialog-in .2s ease; }
 .dialog.dialog-wide { width: min(760px, 100%); }
+
+/* A nova OS numa tela só: duas colunas, campos compactos e o total no rodapé.
+   O passo a passo pedia quatro telas para o que o balcão preenche em trinta
+   segundos, e três dos quatro cliques eram só para chegar no campo seguinte. */
+.dialog.dialog-os { width: min(1180px, 100%); }
+.os-single { padding: 15px 17px; }
+.os-single-columns {
+  display: grid; grid-template-columns: minmax(0, 1.02fr) minmax(0, .98fr); gap: 14px; align-items: start;
+}
+.os-single-column { display: grid; gap: 12px; min-width: 0; }
+.os-single .form-section { display: grid; gap: 11px; }
+.os-single .form-intro { margin: 0; }
+.os-single .os-step-blocks { gap: 10px; }
+.os-single .os-block { padding: 11px 13px; }
+.os-single .form-grid { gap: 9px; }
+.os-single textarea { min-height: 64px; }
+.os-single .os-items-builder { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.os-single .os-piece-list { max-height: 208px; }
+.os-single .mechanic-picker { max-height: 168px; overflow-y: auto; }
+.os-single .selected-os-items { margin-top: 0; }
+
+/* O valor que está sendo formado fica à vista o tempo todo — era a única coisa
+   que a etapa de revisão dava e que a tela única não daria sozinha. */
+.os-single-total { flex: 1; display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
+.os-single-total span { color: #77787c; font-size: 10px; }
+.os-single-total span b { margin-left: 5px; color: #4d4e51; font-size: 11px; font-weight: 800; }
+.os-single-total .discount b { color: var(--green, #178554); }
+.os-single-total strong { margin-left: auto; color: #343538; font-size: 11px; font-weight: 700; }
+.os-single-total strong b { margin-left: 7px; font-size: 16px; font-weight: 850; }
+
+@media (max-width: 1080px) {
+  .os-single-columns { grid-template-columns: minmax(0, 1fr); }
+  .os-single-total { order: 3; width: 100%; }
+}
+
+/* A lista de peças no formato de quem trabalha com ela: uma linha por produto,
+   tudo à vista, sem abrir o cadastro para conferir código ou localização.
+   O preço, que é o que mais se olha no balcão, fica em destaque. */
+.stock-toolbar { flex-wrap: wrap; gap: 9px; }
+.stock-group-filter { display: inline-flex; align-items: center; gap: 7px; }
+.stock-group-filter > span { color: #929296; font-size: 10px; font-weight: 700; }
+.stock-group-filter select {
+  height: 36px; padding: 0 10px; border: 1px solid #e2e0dc; border-radius: 8px;
+  background: #fff; color: #4d4e51; font-size: 11px; font-family: inherit;
+}
+.stock-table { font-size: 11px; }
+.stock-table th { padding: 8px 11px; }
+/* Linha baixa de propósito: a lista de peças é para varrer com o olho, não
+   para ler um cadastro de cada vez. `td { height: 58px }` cabia oito peças na
+   tela; assim cabem vinte. */
+.stock-table td { height: 34px; padding: 5px 11px; white-space: nowrap; }
+.stock-table td strong, .stock-table td span { display: inline; margin: 0; }
+.stock-table td .stock-dot { display: inline-block; margin-right: 6px; }
+.stock-table td strong { font-size: 11px; }
+.stock-table th.num, .stock-table td.num { text-align: right; }
+.stock-price { font-size: 12.5px; font-weight: 850; font-variant-numeric: tabular-nums; }
+.stock-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; vertical-align: middle; }
+.stock-dot.ok { background: var(--green, #178554); }
+.stock-dot.baixo { background: #d99a1f; }
+.stock-dot.zero { background: #c0392b; }
+.stock-count { padding: 9px 16px; border-top: 1px solid #efedea; color: #929296; font-size: 10px; text-align: right; }
 /* Os modais das Configurações põem um <form> entre o .dialog e o
    .dialog-body/.dialog-footer. Sem estas três linhas o <form> é um bloco
    comum: o corpo cresce com o conteúdo, estoura o max-height do .dialog, e o

@@ -1570,6 +1570,8 @@ export function ModuleWorkspace({
   // Qual cliente está com o histórico aberto na lista. Um de cada vez: abrir
   // todos empurraria a lista para longe e ninguém acha mais ninguém.
   const [historicoDe, setHistoricoDe] = useState("");
+  // Filtro por grupo na lista de peças: a oficina procura "todos os óleos".
+  const [productGroup, setProductGroup] = useState("");
 
   // Todo hook desta função precisa ficar acima dos returns antecipados abaixo.
   // Estes dois useMemo estavam depois deles: ao trocar de uma aba que retorna
@@ -1735,11 +1737,16 @@ export function ModuleWorkspace({
   }
 
   if (active === "Produtos e estoque") {
+    // A lista do balcão: procurar por código, referência de fábrica, código de
+    // barras, descrição ou grupo — é por qualquer um deles que a peça é pedida.
+    const buscaProduto = query.trim().toLowerCase();
     const filteredProducts = products.filter((product) => {
-      const byText = `${product.name} ${product.code} ${product.category}`.toLowerCase().includes(query.toLowerCase());
+      const byText = !buscaProduto || `${product.code} ${product.partNumber ?? ""} ${product.barcode ?? ""} ${product.name} ${product.category} ${product.location ?? ""}`.toLowerCase().includes(buscaProduto);
+      const byGroup = !productGroup || product.category === productGroup;
       const byStatus = listFilter === "Todos" || product.status === listFilter;
-      return byText && byStatus;
+      return byText && byGroup && byStatus;
     });
+    const gruposComProduto = Array.from(new Set(products.map((product) => product.category).filter(Boolean))).sort((um, outro) => um.localeCompare(outro, "pt-BR"));
     const criticalCount = products.filter((p) => p.stock > 0 && p.stock <= p.minimum).length;
     const zeroStockCount = products.filter((p) => p.stock === 0).length;
 
@@ -1759,31 +1766,58 @@ export function ModuleWorkspace({
           <article><span>Categorias ativas</span><strong>{categories.filter((c) => c.active).length}</strong><small>{suppliers.filter((s) => s.active).length} fornecedor(es) cadastrado(s)</small></article>
         </div>
         <section className="panel module-panel">
-          <div className="list-toolbar">
-            <label className="mini-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nome, código ou código de barras"/></label>
+          {/*
+            A lista de peças no formato de quem trabalha com ela: uma linha por
+            produto, com código, referência, código de barras, descrição, grupo,
+            localização, preço, saldo e unidade — tudo à vista, sem abrir o
+            cadastro para conferir. O preço, que é o que mais se olha, fica em
+            destaque; o saldo carrega a bolinha de crítico/zerado.
+          */}
+          <div className="list-toolbar stock-toolbar">
+            <label className="mini-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Código, referência, código de barras ou descrição"/></label>
+            <label className="stock-group-filter">
+              <span>Grupo</span>
+              <select value={productGroup} onChange={(event) => setProductGroup(event.target.value)}>
+                <option value="">Todos os grupos</option>
+                {gruposComProduto.map((grupo) => <option value={grupo} key={grupo}>{grupo}</option>)}
+              </select>
+            </label>
+            <button className="outline-button" onClick={() => { setQuery(""); setProductGroup(""); setListFilter("Todos"); }}>Limpar</button>
             <div className="filter-pills">{["Todos", "Crítico", "Sem estoque"].map((filter) => <button className={listFilter === filter ? "selected" : ""} key={filter} onClick={() => setListFilter(filter)}>{filter}</button>)}</div>
           </div>
           <div className="table-scroll">
-            <table>
-              <thead><tr><th>Produto</th><th className="col-secondary">Categoria</th><th>Saldo</th><th className="col-secondary">Custo</th><th>Venda</th><th className="col-secondary">Situação</th><th></th></tr></thead>
+            <table className="stock-table">
+              <thead><tr>
+                <th>Código</th><th className="col-secondary">Referência</th><th className="col-secondary">Cód. barras</th>
+                <th>Descrição</th><th className="col-secondary">Grupo</th><th className="col-secondary">Local</th>
+                <th className="num">Preço</th><th className="num">Estoque</th><th className="col-secondary">Un.</th><th></th>
+              </tr></thead>
               <tbody>{filteredProducts.length > 0 ? filteredProducts.map((product) => (
-                <tr key={product.code}>
-                  <td><strong>{product.name}</strong><span className="mono">{product.code}</span></td>
+                <tr key={product.code} onDoubleClick={() => canOperate ? openDialog("product", product.id) : undefined}>
+                  <td className="mono">{product.code}</td>
+                  <td className="col-secondary mono">{product.partNumber || "—"}</td>
+                  <td className="col-secondary mono">{product.barcode || "SEM GTIN"}</td>
+                  <td><strong>{product.name}</strong></td>
                   <td className="col-secondary">{product.category}</td>
-                  <td><strong className={product.stock <= product.minimum ? "danger-text" : ""}>{product.stock} un.</strong><span>Mín. {product.minimum}</span></td>
-                  <td className="col-secondary mono">{product.cost}</td><td><strong className="mono">{product.price}</strong></td>
-                  <td className="col-secondary"><span className={`status ${product.status === "Normal" ? "green" : product.status === "Crítico" ? "amber" : "red"}`}><i/>{product.status}</span></td>
+                  <td className="col-secondary">{product.location || "—"}</td>
+                  <td className="num"><strong className="stock-price">{product.price}</strong></td>
+                  <td className="num">
+                    <span className={`stock-dot ${product.stock === 0 ? "zero" : product.stock <= product.minimum ? "baixo" : "ok"}`}/>
+                    <strong className={product.stock <= product.minimum ? "danger-text" : ""}>{product.stock}</strong>
+                  </td>
+                  <td className="col-secondary">{product.unit || "UN"}</td>
                   <td><button className="row-button" aria-label={`Abrir ${product.name}`} onClick={() => canOperate ? openDialog("product", product.id) : notify("Seu perfil pode consultar o estoque, mas não alterar produtos.")}><Icon name="arrow" size={17}/></button></td>
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>
-                    Nenhum produto cadastrado no estoque.
+                  <td colSpan={10} style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>
+                    {products.length ? "Nenhum produto encontrado com esses filtros." : "Nenhum produto cadastrado no estoque."}
                   </td>
                 </tr>
               )}</tbody>
             </table>
           </div>
+          <div className="stock-count">{filteredProducts.length === products.length ? `${products.length} registro${products.length === 1 ? "" : "s"}` : `${filteredProducts.length} de ${products.length} registro${products.length === 1 ? "" : "s"}`}</div>
         </section>
       </>
     );
@@ -2946,7 +2980,6 @@ export function AppDialog({
   const submit = async () => {
     if (saving) return;
     setDialogError("");
-    if (dialog === "os" && step < 4) return setStep(step + 1);
 
     // O relatório não grava nada; dizer "registro atualizado com sucesso" era
     // avisar de uma gravação que nunca aconteceu.
@@ -3491,9 +3524,9 @@ export function AppDialog({
 
   return (
     <div className="dialog-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <section className={`dialog ${["os", "order", "orderCheckout", "payment", "catalog", "settings", "expense"].includes(dialog) ? "dialog-wide" : ""} ${dialog === "orderCheckout" ? "dialog-checkout" : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+      <section className={`dialog ${["os", "order", "orderCheckout", "payment", "catalog", "settings", "expense"].includes(dialog) ? "dialog-wide" : ""} ${dialog === "os" ? "dialog-os" : ""} ${dialog === "orderCheckout" ? "dialog-checkout" : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
         <header className="dialog-header">
-          <div><span>{dialog === "os" ? `Etapa ${step} de 4` : dialog === "osChoice" ? "Novo atendimento" : ["order", "orderCheckout", "payment", "cash", "expense", "settleReceivable", "settlePayable", "record"].includes(dialog) ? "Operação" : "Cadastro e configuração"}</span><h2 id="dialog-title">{titles[dialog]}</h2><p>{subtitles[dialog]}</p></div>
+          <div><span>{dialog === "os" ? "Nova ordem de serviço" : dialog === "osChoice" ? "Novo atendimento" : ["order", "orderCheckout", "payment", "cash", "expense", "settleReceivable", "settlePayable", "record"].includes(dialog) ? "Operação" : "Cadastro e configuração"}</span><h2 id="dialog-title">{titles[dialog]}</h2><p>{subtitles[dialog]}</p></div>
           <button aria-label="Fechar" onClick={close}>×</button>
         </header>
 
@@ -3506,13 +3539,21 @@ export function AppDialog({
 
         {dialog === "os" ? (
           <>
-            <div className="stepper" aria-label="Etapas da nova ordem de serviço">
-              {["Cliente e moto", "Recepção", "Itens", "Revisão"].map((label, index) => (
-                <div className={index + 1 <= step ? "step active" : "step"} key={label}><b>{index + 1 < step ? "✓" : index + 1}</b><span>{label}</span></div>
-              ))}
-            </div>
-            <div className="dialog-body">
-              {step === 1 ? (
+            {/*
+              Uma tela só.
+              O passo a passo pedia quatro telas para abrir uma OS que o balcão
+              preenche em trinta segundos: cliente e moto, avançar, recepção,
+              avançar, itens, avançar, conferir, confirmar. Três dos quatro
+              cliques eram só para chegar no campo seguinte, e a etapa de
+              revisão repetia o que já estava preenchido logo acima.
+
+              Agora é uma tela dividida em duas colunas: à esquerda quem e qual
+              moto, e a recepção; à direita as peças e a mão de obra. O total
+              fica fixo no rodapé, sempre visível enquanto se monta a OS.
+            */}
+            <div className="dialog-body os-single">
+              <div className="os-single-columns">
+                <div className="os-single-column">
                 <div className="form-section">
                   {/*
                     Esta etapa tinha três caminhos sobrepostos na mesma tela:
@@ -3738,8 +3779,6 @@ export function AppDialog({
                     </section>
                   </div>
                 </div>
-              ) : null}
-              {step === 2 ? (
                 <div className="form-section">
                   <div className="form-intro"><span className="form-icon"><Icon name="wrench"/></span><div><h3>Dados da recepção</h3><p>Registre a reclamação e escolha um ou mais mecânicos responsáveis.</p></div></div>
                   <div className="form-grid">
@@ -3770,8 +3809,8 @@ export function AppDialog({
                     )}
                   </div>
                 </div>
-              ) : null}
-              {step === 3 ? (
+                </div>
+                <div className="os-single-column">
                 <div className="form-section">
                   <div className="form-intro"><span className="form-icon"><Icon name="box"/></span><div><h3>Peças e mão de obra</h3><p>Peças usam o preço fixo do cadastro. A mão de obra é informada manualmente.</p></div></div>
                   <div className="os-items-builder">
@@ -3780,20 +3819,8 @@ export function AppDialog({
                   </div>
                   <div className="selected-os-items"><div className="os-builder-title"><div><strong>Itens incluídos</strong><small>{osItems.length ? `${osItems.length} item${osItems.length === 1 ? "" : "s"} nesta OS` : "Nenhum item adicionado ainda"}</small></div></div>{osItems.length ? osItems.map((item) => <div className="selected-os-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do cadastro" : "Valor manual desta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setOsItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>×</button></div>) : <div className="empty-os-items"><Icon name="box"/><span>Adicione as peças e a mão de obra que já souber. Você poderá completar depois.</span></div>}<div className="os-items-total"><span>Peças <b>{formatBRL(partsTotal)}</b></span><span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>{partnerDiscount > 0 ? <span className="discount">Desconto parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}<strong>Total inicial {formatBRL(osTotal)}</strong></div></div>
                 </div>
-              ) : null}
-              {step === 4 ? (
-                <div className="review-card">
-                  <div className="review-success"><Icon name="check"/><div><strong>Tudo pronto para abrir a OS</strong><span>Confira os dados, responsáveis e valores antes de confirmar.</span></div></div>
-                  <div className="review-grid">
-                    <div><span>Cliente</span><strong>{osCustomer?.name ?? "Novo cliente"}</strong><small>{osCustomer?.phone ?? customerLookup}</small></div>
-                    <div><span>Motocicleta</span><strong>{selectedMotorcycle && !newVehicleMode ? selectedMotorcycle.model : "Nova motocicleta"}</strong><small>{osPlate || "Placa a informar"}{selectedMotorcycle && !newVehicleMode ? ` · ${selectedMotorcycle.year}` : ""}</small></div>
-                    <div><span>Origem / Pagador</span><strong>{osOrigin === "partner" ? selectedPartner?.name : "Cliente direto"}</strong><small>{osOrigin === "partner" ? `${selectedPartner?.billingCycle} · ${selectedPartner?.laborDiscount}% na mão de obra` : "Proprietário da moto"}</small></div>
-                    <div><span>Mecânicos responsáveis</span><strong>{selectedMechanics.length ? selectedMechanics.map((mechanic) => mechanic.name).join(" + ") : "Não definido"}</strong><small>{selectedMechanics.length === 1 ? "1 mecânico poderá atualizar a OS" : `${selectedMechanics.length} mecânicos poderão atualizar a OS`}</small></div>
-                  </div>
-                  <div className="review-problem"><span>Problema relatado</span><p>{osCustomer ? "Conforme informado na recepção da motocicleta." : "Aguardando preenchimento na recepção."}</p></div>
-                  <div className="review-items-summary"><div><span>Peças com preço fixo</span><strong>{formatBRL(partsTotal)}</strong></div><div><span>Mão de obra manual</span><strong>{formatBRL(laborTotal)}</strong></div>{partnerDiscount > 0 ? <div><span>Desconto do parceiro</span><strong>− {formatBRL(partnerDiscount)}</strong></div> : null}<div className="review-grand-total"><span>Total inicial</span><strong>{formatBRL(osTotal)}</strong></div></div>
                 </div>
-              ) : null}
+              </div>
             </div>
           </>
         ) : null}
@@ -4292,9 +4319,21 @@ export function AppDialog({
 
         {dialog !== "osChoice" ? <footer className="dialog-footer">
           <button className="ghost-button" onClick={close} disabled={saving}>Cancelar</button>
+          {/*
+            O total no rodapé, fixo: montando a OS numa tela só, o valor que
+            está sendo formado precisa estar à vista o tempo todo — era a única
+            coisa que a etapa de revisão dava e que a tela única não daria.
+          */}
+          {dialog === "os" ? (
+            <div className="os-single-total">
+              <span>Peças <b>{formatBRL(partsTotal)}</b></span>
+              <span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>
+              {partnerDiscount > 0 ? <span className="discount">Parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}
+              <strong>Total <b>{formatBRL(osTotal)}</b></strong>
+            </div>
+          ) : null}
           <div>
-            {dialog === "os" && step > 1 ? <button className="outline-button large" onClick={() => setStep(step - 1)} disabled={saving}>Voltar</button> : null}
-            <button className="primary-button" disabled={saving} onClick={() => void submit()}>{saving ? "Salvando..." : dialog === "os" ? (step < 4 ? "Continuar" : "Abrir Ordem de Serviço") : dialog === "order" && !canOperate ? "Salvar situação" : dialog === "order" && orderStatus === "Entrega" ? "Finalizar OS e receber" : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button>
+            <button className="primary-button" disabled={saving} onClick={() => void submit()}>{saving ? "Salvando..." : dialog === "os" ? "Abrir Ordem de Serviço" : dialog === "order" && !canOperate ? "Salvar situação" : dialog === "order" && orderStatus === "Entrega" ? "Finalizar OS e receber" : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button>
           </div>
         </footer> : <footer className="dialog-footer choice-footer"><button className="ghost-button" onClick={close}>Cancelar</button></footer>}
       </section>
