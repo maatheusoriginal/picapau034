@@ -119,12 +119,22 @@ export type FirebasePermission =
   | "customers.manage"
   | "finance.view"
   | "finance.manage"
-  | "team.view";
+  | "team.view"
+  | "team.manage"
+  // Configurações da oficina. Antes não existia permissão nenhuma para esta
+  // tela: ela era liberada só para Super Admin, no código, e não havia como
+  // dar acesso a quem toca o balcão — a pessoa que cadastra categoria, forma
+  // de pagamento e serviço rápido o dia inteiro. Quem precisava mexer numa
+  // categoria tinha de virar Super Admin, o que dá junto o poder de criar
+  // usuário e mudar permissão dos outros.
+  | "settings.view"
+  | "settings.manage";
 
 export const allFirebasePermissions: FirebasePermission[] = [
   "orders.view", "orders.create", "orders.update", "budgets.view",
   "pos.use", "quickService.use", "inventory.view", "inventory.manage",
-  "customers.view", "customers.manage", "finance.view", "finance.manage", "team.view",
+  "customers.view", "customers.manage", "finance.view", "finance.manage",
+  "team.view", "team.manage", "settings.view", "settings.manage",
 ];
 
 /**
@@ -147,6 +157,10 @@ export function defaultPermissionsForRole(role: UserRole): FirebasePermission[] 
     "orders.view", "orders.create", "orders.update", "budgets.view",
     "pos.use", "quickService.use", "inventory.view", "inventory.manage",
     "customers.view", "customers.manage", "finance.view", "finance.manage",
+    // Ver as Configurações vem por padrão; MUDAR não. Quem atende precisa
+    // consultar categoria, forma de pagamento e serviço rápido o tempo todo;
+    // alterar é decisão do dono, marcada na tela.
+    "settings.view",
   ];
   return ["orders.view", "orders.update", "budgets.view", "inventory.view", "customers.view"];
 }

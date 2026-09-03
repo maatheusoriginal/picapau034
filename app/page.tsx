@@ -8,6 +8,8 @@ import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
 import { formatPlate, motorcycleIdFor, normalizePlate, platePattern } from "../src/plate";
 import { emMaiusculo } from "../src/text-case";
 import { clientHistory, motorcycleHistory } from "../src/history";
+import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
+import { nextSequentialId, withoutUndefined } from "../src/firestore-data";
 import { HistoryPanel } from "../src/components/HistoryPanel";
 import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
@@ -933,6 +935,15 @@ const accessPermissionGroups: Array<{
       { key: "customers.view", label: "Consultar clientes e motos", help: "Visualiza dados e histórico de atendimento." },
       { key: "customers.manage", label: "Cadastrar clientes e motos", help: "Cria e edita os cadastros." },
       { key: "team.view", label: "Ver equipe da oficina", help: "Consulta mecânicos ao distribuir uma OS." },
+      { key: "team.manage", label: "Cadastrar e editar funcionários", help: "Inclui mecânicos, cargos e comissões." },
+    ],
+  },
+  {
+    title: "Configurações da oficina",
+    detail: "Categorias, formas de pagamento, serviços rápidos, parceiras e impressão.",
+    permissions: [
+      { key: "settings.view", label: "Abrir as Configurações", help: "Consulta categorias, formas de pagamento e serviços rápidos." },
+      { key: "settings.manage", label: "Alterar as Configurações", help: "Cria e edita categorias, marcas, parceiras e formas de pagamento." },
     ],
   },
   {
@@ -963,12 +974,14 @@ function UserAccessWorkspace({
   currentUser,
   firebaseConnected,
   employees,
+  setEmployees,
   notify,
   openFirebaseAccess,
 }: {
   currentUser: FirebaseUserSummary | null;
   firebaseConnected: boolean;
   employees: UserConfig[];
+  setEmployees: React.Dispatch<React.SetStateAction<UserConfig[]>>;
   notify: (message: string) => void;
   openFirebaseAccess: () => void;
 }) {
@@ -1054,10 +1067,14 @@ function UserAccessWorkspace({
       if (!removing && permission === "inventory.manage") next = Array.from(new Set([...next, "inventory.view"]));
       if (!removing && permission === "customers.manage") next = Array.from(new Set([...next, "customers.view"]));
       if (!removing && permission === "finance.manage") next = Array.from(new Set([...next, "finance.view"]));
+      if (!removing && permission === "team.manage") next = Array.from(new Set([...next, "team.view"]));
+      if (!removing && permission === "settings.manage") next = Array.from(new Set([...next, "settings.view"]));
       if (removing && permission === "orders.view") next = next.filter((item) => item !== "orders.create" && item !== "orders.update");
       if (removing && permission === "inventory.view") next = next.filter((item) => item !== "inventory.manage" && item !== "orders.create");
       if (removing && permission === "customers.view") next = next.filter((item) => item !== "customers.manage" && item !== "orders.create");
       if (removing && permission === "finance.view") next = next.filter((item) => item !== "finance.manage");
+      if (removing && permission === "team.view") next = next.filter((item) => item !== "team.manage");
+      if (removing && permission === "settings.view") next = next.filter((item) => item !== "settings.manage");
       return { ...current, permissions: next };
     });
   };
@@ -1071,6 +1088,13 @@ function UserAccessWorkspace({
       if (dialogMode === "create") {
         const result = await createManagedUser({ ...form, phone: formatPhone(form.phone) });
         setCredentials({ name: form.name.trim(), email: form.email.trim().toLowerCase(), password: form.password });
+        // Mecânico novo já nasce com cadastro de funcionário: sem isso ele
+        // entra no sistema e não existe para a oficina — não aparece no
+        // seletor da OS, não recebe serviço e não entra em comissão.
+        const contaNova: AccessAccount = { uid: result.user?.uid ?? "", name: form.name, phone: formatPhone(form.phone), role: form.role, employeeId: form.employeeId, active: form.active, permissions: form.permissions };
+        if (!form.employeeId && mechanicsWithoutEmployee([contaNova], employees).length) {
+          await criarFuncionarioDaConta(contaNova, employees);
+        }
         notify(result.mode === "cloud" ? "Usuário criado no Authentication e liberado no sistema." : "Usuário criado e liberado no sistema.");
       } else if (dialogMode === "edit" && selectedUser) {
         const result = await updateManagedUser(selectedUser.uid, { ...form, phone: formatPhone(form.phone) });
@@ -1165,6 +1189,63 @@ function UserAccessWorkspace({
   const authenticationUsers = managedUsers.filter((user) => user.hasAuthAccount);
   const waitingProfile = managedUsers.filter((user) => user.hasAuthAccount && !user.hasAccessProfile);
 
+  /*
+    Mecânico que existe como LOGIN mas não como FUNCIONÁRIO.
+
+    São duas coleções: `users` guarda a conta e a permissão, `employees` guarda
+    quem trabalha na oficina. A OS lê `employees`. Cadastrar alguém como
+    Mecânico só aqui criava uma pessoa que entra no sistema e não existe para a
+    oficina: não aparecia no seletor de mecânicos da OS, não recebia serviço e
+    não entrava em comissão — e nada avisava, o seletor simplesmente não tinha
+    aquele nome.
+
+    Agora a tela aponta quem está assim e resolve com um clique.
+  */
+  const contasDeAcesso: AccessAccount[] = managedUsers
+    .filter((user) => user.hasAccessProfile)
+    .map((user) => ({ uid: user.uid, name: user.name, email: user.email, phone: user.phone, role: user.role, employeeId: user.employeeId, active: user.active, permissions: user.permissions }));
+  const semCadastro = mechanicsWithoutEmployee(contasDeAcesso, employees);
+
+  const criarFuncionarioDaConta = async (conta: AccessAccount, jaCadastrados: UserConfig[]) => {
+    const id = nextSequentialId(jaCadastrados, "USR");
+    const funcionario = employeeFromAccount(conta, id);
+    await saveFirestoreDoc("employees", id, withoutUndefined(funcionario as unknown as Record<string, unknown>));
+    setEmployees((atual) => [...atual, funcionario]);
+    // O vínculo volta para a conta: sem ele, o próximo carregamento casaria
+    // pelo nome outra vez e criaria um segundo cadastro da mesma pessoa.
+    //
+    // Gravado direto no perfil, e não pela rota administrativa: o vínculo
+    // precisa valer mesmo quando o backend administrativo está fora do ar —
+    // que é justamente quando esta tela mais é usada para arrumar as coisas.
+    if (conta.uid) await saveFirestoreDoc("userAccess", conta.uid, { employeeId: id });
+    return funcionario;
+  };
+
+  const criarCadastrosPendentes = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      // Um de cada vez, e somando à lista local: dois cadastros criados no
+      // mesmo instante pegariam o mesmo número sequencial e um sobrescreveria
+      // o outro.
+      let acumulado = employees;
+      const criados: string[] = [];
+      for (const conta of semCadastro) {
+        const funcionario = await criarFuncionarioDaConta(conta, acumulado);
+        acumulado = [...acumulado, funcionario];
+        criados.push(funcionario.name);
+      }
+      notify(criados.length === 1
+        ? `${criados[0]} agora aparece como mecânico na abertura de OS.`
+        : `${criados.length} mecânicos agora aparecem na abertura de OS.`);
+      await refreshUsers();
+    } catch (erro) {
+      setError(erro instanceof Error ? erro.message : "Não foi possível criar o cadastro de funcionário.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <div className="module-heading">
@@ -1178,6 +1259,18 @@ function UserAccessWorkspace({
         <article className={waitingProfile.length ? "summary-danger" : ""}><span>Aguardando configuração</span><strong>{waitingProfile.length}</strong><small>{waitingProfile.length ? "Contas existentes ainda sem perfil de acesso" : "Todas as contas estão configuradas"}</small></article>
       </div>
 
+      {semCadastro.length ? (
+        <section className="access-fix-banner">
+          <span><Icon name="alert" size={19}/></span>
+          <div>
+            <strong>{semCadastro.length === 1 ? "1 mecânico não aparece na abertura de OS" : `${semCadastro.length} mecânicos não aparecem na abertura de OS`}</strong>
+            <p>{semCadastro.map((conta) => conta.name).join(", ")} {semCadastro.length === 1 ? "tem login" : "têm login"} no sistema, mas ainda não {semCadastro.length === 1 ? "tem" : "têm"} cadastro de funcionário — e é o cadastro de funcionário que a OS usa para distribuir o serviço.</p>
+          </div>
+          <button disabled={busy} onClick={() => void criarCadastrosPendentes()}>
+            {busy ? "Criando..." : semCadastro.length === 1 ? "Criar cadastro" : "Criar os cadastros"}
+          </button>
+        </section>
+      ) : null}
       {credentials ? <section className="access-credentials-banner"><span><Icon name="check" size={19}/></span><div><small>Credenciais temporárias prontas</small><strong>{credentials.name} · {credentials.email}</strong><p>Senha: <b>{credentials.password}</b> · entregue ao funcionário por um canal seguro.</p></div><button onClick={() => void copyText(`E-mail: ${credentials.email}\nSenha temporária: ${credentials.password}`, "Credenciais copiadas.")}>Copiar credenciais</button><button className="credentials-close" aria-label="Fechar aviso" onClick={() => setCredentials(null)}>×</button></section> : null}
       {sourceMode === "checking" ? <div className="auth-sync-state checking"><Icon name="clock" size={17}/><span>Consultando as contas do Firebase Authentication...</span></div> : sourceMode === "fallback" ? <div className="access-mode-note"><Icon name="alert" size={17}/><span>O backend administrativo ainda não está configurado neste ambiente. Por segurança, o sistema carregou apenas os perfis já liberados no Firestore. Configure a variável FIREBASE_ADMIN_SERVICE_ACCOUNT_JSON para trazer também as contas sem perfil.</span></div> : sourceMode === "cloud" ? <div className="auth-sync-state"><Icon name="check" size={17}/><span>Authentication sincronizado: contas novas ou antigas aparecem automaticamente nesta lista.</span></div> : null}
       {error ? <div className="firebase-error access-error"><Icon name="alert" size={17}/><span>{error}</span></div> : null}
@@ -1590,7 +1683,7 @@ export function ModuleWorkspace({
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} />;
-  if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
+  if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} setEmployees={setUsers} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
   if (active === "Configurações") return (
     <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
       <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify} initialTab={settingsTab}/>
@@ -2340,7 +2433,10 @@ export function AppDialog({
       </Suspense></ErrorBoundary>
     );
   }
-  const activeMechanics = users.filter((user) => user.active !== false && isMechanicUser(user));
+  // A lista de mecânicos da OS sai de src/team-link.ts: as três telas que
+  // perguntam "quem pode pegar esta OS" — nova OS, serviço rápido e o detalhe
+  // da ordem — precisam responder igual, e em ordem fixa.
+  const activeMechanics = mechanicsForOrders(users) as UserConfig[];
   const activeSuppliers = suppliers.filter((supplier) => supplier.active);
   const enabledQuickServices = quickServices.filter((service) => service.active);
   // Sem o padrão, uma oficina recém-instalada monta a venda e não encontra
@@ -4578,11 +4674,16 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const canSeeFinance = hasPermission("finance.view");
   const canManageFinance = hasPermission("finance.manage");
   const canViewTeam = hasPermission("team.view");
-  const canManageSettings = firebaseAdmin;
+  // Configurações deixou de ser "só Super Admin": quem toca o balcão cadastra
+  // categoria, forma de pagamento e serviço rápido o dia inteiro, e antes
+  // precisava virar Super Admin para isso — o que dá junto o poder de criar
+  // usuário e mudar a permissão dos outros. Ver e alterar são separados.
+  const canSeeSettings = firebaseAdmin || hasPermission("settings.view");
+  const canManageSettings = firebaseAdmin || hasPermission("settings.manage");
   const [mobileMenu, setMobileMenu] = useState(false);
   // A tela inicial sai da URL de forma síncrona, no primeiro render: decidir
   // isso em um efeito faria o endereço piscar /admin -> / -> /admin.
-  const [active, setActive] = useState(() => (canManageSettings && isAdminPath() ? "Administração" : "Visão geral"));
+  const [active, setActive] = useState(() => (firebaseAdmin && isAdminPath() ? "Administração" : "Visão geral"));
   const [dialog, setDialog] = useState<DialogKind>(null);
   // Qual registro o diálogo deve abrir: OS, conta ou cadastro.
   // Vazio = nenhum selecionado, e o diálogo abre em branco.
@@ -4627,12 +4728,12 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [motorcycles] = useFirebaseSyncedCollection("motorcycles", initialMotorcycles, firebaseEnabled && canViewCustomers, canManageCustomers, firebaseSession.reportSyncError);
   const [expenses, setExpenses] = useFirebaseSyncedCollection("expenses", initialExpenses, firebaseEnabled && canSeeFinance, canManageFinance, firebaseSession.reportSyncError);
   const [users, setUsers] = useFirebaseSyncedEmployees(initialUsers, firebaseEnabled && (canViewTeam || canCreateOrders || canUpdateOrders), firebaseAdmin, firebaseSession.reportSyncError);
-  const [partners, setPartners] = useFirebaseSyncedCollection("partners", initialPartners, firebaseEnabled && (canViewCustomers || canCreateOrders), firebaseAdmin, firebaseSession.reportSyncError);
-  const [quickServices, setQuickServices] = useFirebaseSyncedCollection("quickServices", initialQuickServices, firebaseEnabled && (canUseQuickService || canCreateOrders), firebaseAdmin, firebaseSession.reportSyncError);
-  const [categories, setCategories] = useFirebaseSyncedCollection("categories", initialCategories, firebaseEnabled && canViewInventory, firebaseAdmin, firebaseSession.reportSyncError);
+  const [partners, setPartners] = useFirebaseSyncedCollection("partners", initialPartners, firebaseEnabled && (canViewCustomers || canCreateOrders), canManageSettings, firebaseSession.reportSyncError);
+  const [quickServices, setQuickServices] = useFirebaseSyncedCollection("quickServices", initialQuickServices, firebaseEnabled && (canUseQuickService || canCreateOrders), canManageSettings, firebaseSession.reportSyncError);
+  const [categories, setCategories] = useFirebaseSyncedCollection("categories", initialCategories, firebaseEnabled && canViewInventory, canManageSettings || canManageInventory, firebaseSession.reportSyncError);
   const [suppliers, setSuppliers] = useFirebaseSyncedCollection("suppliers", initialSuppliers, firebaseEnabled && canManageInventory, firebaseAdmin, firebaseSession.reportSyncError);
-  const [paymentMachines, setPaymentMachines] = useFirebaseSyncedCollection("paymentMachines", initialPaymentMachines, firebaseEnabled && canSeeFinance, firebaseAdmin, firebaseSession.reportSyncError);
-  const [paymentMethods, setPaymentMethods] = useFirebaseSyncedCollection("paymentMethods", initialPaymentMethods, firebaseEnabled && (canSeeFinance || canUsePdv), firebaseAdmin, firebaseSession.reportSyncError);
+  const [paymentMachines, setPaymentMachines] = useFirebaseSyncedCollection("paymentMachines", initialPaymentMachines, firebaseEnabled && canSeeFinance, canManageSettings, firebaseSession.reportSyncError);
+  const [paymentMethods, setPaymentMethods] = useFirebaseSyncedCollection("paymentMethods", initialPaymentMethods, firebaseEnabled && (canSeeFinance || canUsePdv), canManageSettings, firebaseSession.reportSyncError);
   const [sales] = useFirebaseSyncedCollection<SaleRecord>("sales", initialSales, firebaseEnabled && (canSeeFinance || canUsePdv || canUseQuickService), false, firebaseSession.reportSyncError);
   const [stockEntries] = useFirebaseSyncedCollection<StockEntryRecord>("stockEntries", initialStockEntries, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
   const [accounts] = useFirebaseSyncedCollection<AccountRecord>("accounts", initialAccounts, firebaseEnabled && canSeeFinance, false, firebaseSession.reportSyncError);
@@ -4705,7 +4806,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   // / no resto. Quem abre /admin sem ser Super Admin volta para a raiz, em vez
   // de ficar com a URL prometendo uma tela que não vai abrir.
   useEffect(() => {
-    const path = active === "Administração" && canManageSettings ? "/admin" : "/";
+    const path = active === "Administração" && firebaseAdmin ? "/admin" : "/";
     if (currentPath() !== path) window.history.replaceState(null, "", path + window.location.search);
   }, [active, canManageSettings]);
 
@@ -4788,17 +4889,27 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
               </div>
             );
           })}
-          {canManageSettings ? <><div className="nav-divider"/>
+          {/*
+            Configurações agora depende de `settings.view`, e não mais de ser
+            Super Admin. Criar usuário e mexer na permissão dos outros continua
+            só no Admin: são poderes diferentes, e antes vinham no mesmo pacote.
+          */}
+          {canSeeSettings || firebaseAdmin ? <div className="nav-divider"/> : null}
+          {firebaseAdmin ? (
             <button className={`nav-item ${active === "Usuários e acessos" ? "active" : ""}`} onClick={() => { setActive("Usuários e acessos"); setMobileMenu(false); }}>
               <Icon name="users"/><span>Usuários e acessos</span>
             </button>
+          ) : null}
+          {canSeeSettings ? (
             <button className={`nav-item ${active === "Configurações" ? "active" : ""}`} onClick={() => { setActive("Configurações"); setMobileMenu(false); }}>
               <Icon name="settings"/><span>Configurações</span>
             </button>
+          ) : null}
+          {firebaseAdmin ? (
             <button className={`nav-item admin-link ${active === "Administração" ? "active" : ""}`} onClick={() => { setActive("Administração"); setMobileMenu(false); }}>
               <Icon name="shield"/><span>Administração</span><b>Admin</b>
             </button>
-          </> : null}
+          ) : null}
         </nav>
 
         <div className="sidebar-footer">
@@ -4812,7 +4923,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
             <div><strong>{currentUserName}</strong><span>{firebaseSession.profile?.role}</span></div>
             <button aria-label="Opções do perfil" onClick={() => setShowProfile(!showProfile)}>•••</button>
           </div>
-          {showProfile ? <div className="profile-menu"><div><strong>{currentUserName}</strong><span>{firebaseSession.profile?.role}</span></div>{canManageSettings ? <button onClick={() => { setActive("Configurações"); setShowProfile(false); }}>Configurações da oficina</button> : null}<button onClick={() => { setShowProfile(false); void firebaseSession.logout(); }}>Sair do sistema</button></div> : null}
+          {showProfile ? <div className="profile-menu"><div><strong>{currentUserName}</strong><span>{firebaseSession.profile?.role}</span></div>{canSeeSettings ? <button onClick={() => { setActive("Configurações"); setShowProfile(false); }}>Configurações da oficina</button> : null}<button onClick={() => { setShowProfile(false); void firebaseSession.logout(); }}>Sair do sistema</button></div> : null}
         </div>
       </aside>
 

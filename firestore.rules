@@ -153,7 +153,11 @@ service cloud.firestore {
 
     match /employees/{documentId} {
       allow read: if signedIn();
-      allow create, update, delete: if isSuperAdmin();
+      // Cadastrar funcionário deixou de exigir Super Admin: era o que impedia
+      // o dono de simplesmente incluir um mecânico sem também entregar o poder
+      // de criar login e mudar a permissão dos outros. Salário e comissão
+      // continuam em employeeCompensation, que segue só de Super Admin.
+      allow create, update, delete: if can('team.manage');
     }
 
     match /employeeCompensation/{documentId} {
@@ -162,17 +166,19 @@ service cloud.firestore {
 
     match /partners/{documentId} {
       allow read: if can('customers.view') || can('orders.create');
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if can('settings.manage');
     }
 
     match /quickServices/{documentId} {
       allow read: if can('quickService.use') || can('orders.create');
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if can('settings.manage');
     }
 
     match /categories/{documentId} {
       allow read: if can('inventory.view');
-      allow create, update, delete: if isSuperAdmin();
+      // Categoria é cadastro de rotina do balcão, não poder de administrador:
+      // quem tem 'settings.manage' cria a categoria na hora, do lado do campo.
+      allow create, update, delete: if can('settings.manage') || can('inventory.manage');
     }
 
     match /suppliers/{documentId} {
@@ -182,17 +188,17 @@ service cloud.firestore {
 
     match /paymentMachines/{documentId} {
       allow read: if can('finance.view') || can('pos.use');
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if can('settings.manage');
     }
 
     match /paymentMethods/{documentId} {
       allow read: if can('finance.view') || can('pos.use');
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if can('settings.manage');
     }
 
     match /settings/{documentId} {
       allow read: if signedIn();
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update, delete: if can('settings.manage');
     }
 
     match /auditLogs/{documentId} {

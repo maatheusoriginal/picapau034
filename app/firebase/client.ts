@@ -1062,10 +1062,25 @@ async function callAdmin<TOutput>(input?: object): Promise<TOutput> {
     error.code = "admin/unavailable";
     throw error;
   }
-  const payload = await response.json().catch(() => ({})) as { data?: TOutput; error?: { code?: string; message?: string } };
-  if (!response.ok || !payload.data) {
-    const error = new Error(payload.error?.message || "Não foi possível concluir a operação administrativa.") as Error & { code?: string };
-    error.code = `admin/${payload.error?.code || (response.status === 404 ? "not-found" : "internal")}`;
+  // Resposta que NÃO é o JSON da API administrativa significa que quem
+  // respondeu não foi ela: a função não subiu, um proxy devolveu uma página de
+  // erro, ou o ambiente serve o index.html em qualquer rota. Isso é
+  // indisponibilidade, não erro da operação — e precisa cair no plano B, que é
+  // ler os perfis direto do Firestore.
+  //
+  // Antes, o código do erro virava "admin/internal" e o plano B não era usado:
+  // a tela de Usuários ficava VAZIA, como se as contas tivessem sumido.
+  let payload: { data?: TOutput; error?: { code?: string; message?: string } } | null = null;
+  try {
+    payload = await response.json() as { data?: TOutput; error?: { code?: string; message?: string } };
+  } catch {
+    const error = new Error("O backend administrativo não respondeu no formato esperado.") as Error & { code?: string };
+    error.code = "admin/unavailable";
+    throw error;
+  }
+  if (!response.ok || !payload?.data) {
+    const error = new Error(payload?.error?.message || "Não foi possível concluir a operação administrativa.") as Error & { code?: string };
+    error.code = `admin/${payload?.error?.code || (response.status === 404 ? "not-found" : response.status >= 500 ? "unavailable" : "internal")}`;
     throw error;
   }
   return payload.data;
