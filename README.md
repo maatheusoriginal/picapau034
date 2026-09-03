@@ -50,6 +50,9 @@ npm run dev             # http://localhost:3000
 | `npm run check:history` | Confere o histórico de atendimento (ordenação, total e o que entra) |
 | `npm run check:text-case` | Confere o cadastro em maiúsculo, e varre os formulários atrás de campo que escapou |
 | `npm run check:team-link` | Confere a ponte entre conta de acesso e cadastro de funcionário |
+| `npm run check:pricing` | Confere as contas de preço e a criação rápida de categoria e marca |
+| `npm run check:help` | Confere a central de ajuda: assuntos completos e apontando para abas que existem |
+| `npm run check:nfe` | Confere a leitura da nota do fornecedor: fator de conversão, custo e casamento com o cadastro |
 | `npm run check:barcode` | Confere o gerador de código de barras interno (EAN-13) |
 | `npm run check:motorcycle-catalog` | Confere o catálogo de marca, modelo e versão de moto |
 | `npm run check:plate` | Confere as regras de placa (padrão antigo, Mercosul e comparação) |
@@ -1093,6 +1096,132 @@ Moto cadastrada antes disto abre com as listas já na escolha certa
 `npm run check:motorcycle-catalog` confere as 26 regras, incluindo uma que já
 pegou um defeito: **toda marca do catálogo precisa estar na lista de marcas do
 cadastro**, senão a pessoa escolhe a marca e não aparece modelo nenhum.
+
+## A nota do fornecedor entra por XML
+
+Cadastrar peça a peça depois de cada compra é o que ninguém faz: a nota chega
+com trinta itens e o estoque do sistema fica meses atrás do estoque da
+prateleira.
+
+O **XML da NF-e** já traz tudo — código, código de barras, descrição, unidade,
+quantidade e o **custo real pago** — e vem junto com a compra, **de graça**, sem
+depender de banco de dados de terceiro (que, para peça de moto, acerta pouco e
+cobra caro).
+
+Sobe o arquivo e o sistema mostra, item por item, **antes de gravar qualquer
+coisa**:
+
+| Coluna | O que responde |
+| --- | --- |
+| Situação | "Já cadastrada" — e **como** foi achada — ou "Cadastrar esta peça" |
+| Nota | O que está escrito na nota: `2 CX` |
+| Un. por volume | O fator, **editável** |
+| Entra no estoque | `2 × 12 = 24` |
+| Custo antes / agora | R$ 25,00 → R$ 30,00 |
+| Variação | **+20%**, em vermelho quando sobe e verde quando cai |
+
+### O fator de conversão é o coração disso
+
+A nota diz **"1 CX"** e na prateleira entram **6**. Sem tratar isso:
+
+- o estoque entra com 1, e a peça "acaba" no sistema com cinco ainda na caixa;
+- o **custo unitário fica seis vezes maior**, e o preço de venda sai pela lua.
+
+O sistema **chuta** o número lendo a descrição — "CX C/ 12", "CAIXA COM 6",
+"EMB. 24", "20X1L" — mas é palpite, e a tela deixa corrigir. Fator zero ou
+negativo é **recusado com aviso**, em vez de virar 1 em silêncio: entrar com a
+quantidade da nota escondendo que o número está errado é pior do que não entrar
+com nada.
+
+### Os cuidados que evitam estoque errado
+
+- **"SEM GTIN"** — o que a Receita manda escrever quando a peça não tem código
+  de barras — **não** vira código: tratá-lo como código casaria peças
+  diferentes entre si.
+- O casamento vai na ordem em que dá para confiar: **código de barras**
+  (exato), **referência de fábrica** (quase), e **descrição** só quando é
+  idêntica. Casar "ÓLEO 20W50" com "ÓLEO 20W50 SEMISSINTÉTICO" somaria a
+  entrada no produto errado, e ninguém perceberia até o estoque não fechar.
+- Peça nova **não nasce com saldo**: o saldo entra pela baixa, senão conta duas
+  vezes.
+- O leitor de XML é escrito à mão, **sem depender do navegador**: o mesmo
+  código lê a nota na tela, no `npm run check:nfe` e, se um dia a leitura for
+  para o servidor, lá também — e o que o teste cobre é o que roda para o dono
+  da oficina.
+
+`npm run check:nfe` confere as 45 regras.
+
+## Criar categoria e marca do lado do campo
+
+Cadastrar uma peça e descobrir que a categoria dela não existe obrigava a
+**fechar o cadastro, ir em Configurações, criar a categoria, voltar e digitar
+tudo de novo**. Na prática ninguém faz isso: joga em "Peças" e segue — e aí o
+filtro do estoque para de significar alguma coisa.
+
+O botão **+** ao lado do campo abre um espaço na mesma linha; ao confirmar, o
+item é criado, já fica selecionado, e o cadastro continua de onde estava. Vale
+para a **categoria** e a **marca da peça**, e para a **marca da moto** (no
+cadastro de moto e no bloco de moto do cadastro de cliente).
+
+Nome repetido **não vira item novo**: a busca é sem depender de maiúscula, e o
+que já existe é selecionado. Sem isso a lista encheria de "MOTUL", "Motul" e
+"motul " — o problema que a própria lista veio resolver. Enter confirma e
+**não envia o formulário**: sem esse cuidado, apertar Enter aqui gravava o
+produto pela metade.
+
+## O preço mostra a conta que decide a venda
+
+A tela mostrava custo, margem e preço. Faltava o que decide se a venda vale a
+pena:
+
+| O que entrou | Por quê |
+| --- | --- |
+| **Margem sobre a venda** | O campo "+60%" é margem sobre o **custo**: custo 25 vira preço 40. Sobre a venda isso é **37,5%** — e é essa a porcentagem que se compara com a do cartão e a do concorrente. Ver só o número maior faz a oficina achar que ganha mais do que ganha |
+| **Desconto máximo sem prejuízo** | O PDV deixa descontar. Sem saber o piso, o desconto "de bom moço" vende abaixo do que se pagou ao fornecedor |
+| **Aviso de preço** | Abaixo do custo, igual ao custo, ou margem abaixo de 10% sobre a venda |
+
+`npm run check:pricing` confere as 29 regras das duas coisas.
+
+### A primeira categoria apagava as outras nove
+
+Encontrado ao testar a criação rápida. A oficina que ainda não cadastrou
+categoria nenhuma vê as **nove padrão** — elas não são documentos, são o texto
+que aparece enquanto a coleção está vazia. Gravar só a categoria nova fazia a
+coleção deixar de estar vazia, e as outras nove **sumirem da tela de uma vez**:
+a oficina passava a ter uma categoria só.
+
+Agora a primeira criação **materializa as padrão junto**: elas viram cadastro de
+verdade, editável em Configurações, e nada desaparece.
+
+### O roteiro passou a rodar contra o build
+
+Quatro rodadas seguidas falharam do passo 27 em diante sem nada de errado no
+código. A causa era o **servidor de desenvolvimento**: ele disparava HMR sozinho
+a cada ~15 minutos, e uma rodada leva ~15 minutos — então toda rodada levava um
+recarregamento no meio, que zerava o estado da tela em que o teste estava.
+
+O `npm run e2e:emulador` agora roda contra `npm run preview:emulador`, que serve
+o **build**. Sem HMR, e exercitando o artefato que vai para produção em vez do
+servidor de desenvolvimento.
+
+## O botão de ajuda que não ajudava
+
+"Precisa de ajuda?" abria um aviso e mais nada. Ajuda que não responde é pior
+do que não ter: a pessoa clica, não acha, e não clica de novo.
+
+Agora ele abre uma central com **sete assuntos**, escritos para quem toca a
+oficina e não para quem programa: abrir e fechar uma OS, como o preço é
+formado, estoque e entrada de peças, caixa, empresa parceira, quem pode fazer o
+quê, e backup.
+
+Cada assunto tem os passos na ordem em que a coisa acontece e um botão que
+**leva para a tela que resolve**, em vez de só explicar. A busca é por
+intenção — digitar "sangria" acha o caixa, "desconto" acha o preço.
+
+O conteúdo fica em `src/help-topics.ts`, e `npm run check:help` cobra que todo
+assunto tenha título, resumo, pelo menos três passos com explicação de verdade,
+e que **aponte para uma aba que existe**: ajuda que manda para lugar nenhum é
+exatamente o que ela deveria evitar.
 
 ## Código de barras de peça sem código
 

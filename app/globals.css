@@ -1244,6 +1244,102 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 }
 .access-fix-banner button:hover { background: #fdf6e8; }
 .access-fix-banner button:disabled { opacity: .6; cursor: default; }
+
+/* Criar categoria e marca do lado do campo. Descobrir no meio do cadastro que
+   a categoria não existe obrigava a fechar tudo, ir em Configurações e digitar
+   de novo — na prática ninguém faz: joga em "Peças" e o filtro perde o
+   sentido. */
+.quick-add { display: block; }
+.quick-add-row { display: flex; align-items: stretch; gap: 7px; }
+.quick-add-row > select, .quick-add-row > input { flex: 1; min-width: 0; }
+.quick-add-open {
+  flex: 0 0 auto; width: 38px; display: grid; place-items: center;
+  border: 1px solid #e2e0dc; border-radius: 8px; background: #fff;
+  color: #5f6064; font-size: 18px; font-weight: 700; line-height: 1; cursor: pointer;
+}
+.quick-add-open:hover { border-color: #cbc9c4; background: #faf9f7; color: var(--red, #c0392b); }
+.quick-add-open:disabled { opacity: .5; cursor: default; }
+.quick-add-confirm, .quick-add-cancel {
+  flex: 0 0 auto; padding: 0 13px; border-radius: 8px; font-size: 11px; font-weight: 750; cursor: pointer;
+}
+.quick-add-confirm { border: 1px solid #b8dcc7; background: #eef9f3; color: #2f6b4a; }
+.quick-add-confirm:hover { background: #e3f4ea; }
+.quick-add-confirm:disabled { opacity: .6; cursor: default; }
+.quick-add-cancel { border: 1px solid #e2e0dc; background: #fff; color: #77787c; }
+.quick-add-cancel:hover { background: #faf9f7; }
+.quick-add-error { display: block; margin-top: 5px; color: var(--red, #c0392b); font-size: 10px; }
+
+/* O aviso de preço: abaixo do custo, igual ao custo, ou margem apertada. */
+.price-warning {
+  display: flex; align-items: center; gap: 9px; margin-top: 11px;
+  padding: 10px 12px; border: 1px solid #f0caca; border-radius: 10px; background: #fff6f5;
+  color: #a4403a; font-size: 11px; line-height: 1.45;
+}
+.price-warning > b {
+  flex: 0 0 auto; display: grid; place-items: center; width: 19px; height: 19px;
+  border-radius: 50%; background: #f3cfcc; color: #8f342e; font-size: 11px;
+}
+
+/* A central de ajuda. O botão abria um aviso e mais nada — ajuda que não
+   responde é pior do que não ter: a pessoa clica, não acha, e não volta. */
+.help-dialog { width: min(720px, 100%); }
+.help-body { display: grid; gap: 12px; }
+.help-search { width: 100%; }
+.help-list { display: grid; gap: 7px; }
+.help-list > button {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 12px 14px; border: 1px solid #e6e4e0; border-radius: 11px; background: #fff;
+  color: inherit; cursor: pointer;
+}
+.help-list > button:hover { border-color: #cde7d8; background: #f7fbf9; }
+.help-list > button > div { flex: 1; min-width: 0; }
+.help-list strong { display: block; color: #343538; font-size: 12.5px; }
+.help-list small { display: block; margin-top: 3px; color: #8b8c90; font-size: 10px; }
+.help-steps-count {
+  flex: 0 0 auto; padding: 3px 8px; border-radius: 999px;
+  background: #f2f1ef; color: #77787c; font-size: 9px; font-weight: 700;
+}
+.help-detail { display: grid; gap: 11px; justify-items: start; }
+.help-back {
+  padding: 0; border: 0; background: none; color: #77787c; font-size: 10px; font-weight: 700; cursor: pointer;
+}
+.help-back:hover { color: var(--red, #c0392b); }
+.help-detail h3 { margin: 0; color: #2b2c2f; font-size: 16px; }
+.help-summary { margin: 0; color: #8b8c90; font-size: 11px; }
+.help-steps { display: grid; gap: 8px; width: 100%; margin: 0; padding-left: 19px; }
+.help-steps li { color: #55565a; font-size: 11px; line-height: 1.5; }
+.help-steps strong { display: block; color: #343538; font-size: 11.5px; }
+.help-steps span { display: block; margin-top: 3px; }
+.help-detail .primary-button { display: inline-flex; align-items: center; gap: 7px; }
+.help-empty {
+  display: flex; align-items: center; gap: 10px; padding: 16px;
+  border: 1px dashed #dcdad6; border-radius: 11px; color: #929296; font-size: 11px; line-height: 1.5;
+}
+
+/* A conferência da nota do fornecedor: o que já existe, o que é novo, quanto
+   entra e quanto o custo mudou — tudo antes de gravar qualquer coisa. */
+.nfe-head {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;
+  padding: 12px 14px; border: 1px solid #e6e4e0; border-radius: 11px; background: #faf9f7;
+}
+.nfe-head span { display: block; color: #929296; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
+.nfe-head strong { display: block; margin-top: 4px; color: #343538; font-size: 12px; }
+.nfe-table { font-size: 11px; }
+.nfe-table th, .nfe-table td { padding: 7px 9px; }
+.nfe-table td { height: auto; vertical-align: middle; }
+.nfe-table td strong { font-size: 11px; }
+.nfe-table td span.mono { display: block; margin-top: 3px; color: #8e8f92; font-size: 9px; }
+.nfe-table th.num, .nfe-table td.num { text-align: right; }
+.nfe-table tr.nfe-fora { opacity: .45; }
+.nfe-fator {
+  width: 62px; height: 30px; padding: 0 8px; text-align: right;
+  border: 1px solid #e2e0dc; border-radius: 7px; background: #fff; font-family: inherit; font-size: 11px;
+}
+.nfe-erro { display: block; margin-top: 4px; color: var(--red, #c0392b); font-size: 9px; text-align: right; }
+.nfe-cadastrar { display: inline-flex; align-items: center; gap: 6px; color: #77787c; font-size: 10px; cursor: pointer; }
+.nfe-variacao { font-size: 10px; font-weight: 750; color: #8e8f92; }
+.nfe-variacao.subiu { color: var(--red, #c0392b); }
+.nfe-variacao.caiu { color: var(--green, #178554); }
 .access-credentials-banner > span { width: 35px; height: 35px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 10px; background: #d8f0e3; color: var(--green); }
 .access-credentials-banner > div { flex: 1; min-width: 0; }
 .access-credentials-banner small, .access-credentials-banner strong, .access-credentials-banner p { display: block; }

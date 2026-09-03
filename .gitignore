@@ -3,6 +3,8 @@ node_modules/
 
 # Build de produção
 dist/
+# Build usado pelo roteiro ponta a ponta: servido por vite preview, sem HMR.
+dist-emulador/
 
 # Variáveis de ambiente — o JSON da conta de serviço do Firebase Admin
 # NUNCA pode ir para o repositório.

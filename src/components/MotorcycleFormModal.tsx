@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { ClientRecord, MotorcycleRecord, PartnerConfig } from "../types";
 import { emMaiusculo } from "../text-case";
+import { QuickAddSelect } from "./QuickAddSelect";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { defaultSystemLists } from "../types";
 import { fullModelName, modelsOf, splitModelName, versionsOf } from "../motorcycle-catalog";
@@ -17,6 +18,8 @@ interface MotorcycleFormModalProps {
   preselectedClientId?: string;
   /** Marcas configuradas em Configurações → Listas do sistema. */
   brands?: string[];
+  /** Criar marca de moto sem sair do cadastro. */
+  onCreateBrand?: (nome: string) => Promise<void> | void;
   /** Empresas parceiras, para marcar a responsável por uma moto de frota. */
   partners?: PartnerConfig[];
   preselectedPartnerId?: string;
@@ -32,6 +35,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   allMotorcycles,
   preselectedClientId,
   brands = [],
+  onCreateBrand,
   partners = [],
   preselectedPartnerId,
 }) => {
@@ -306,26 +310,32 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
 
             {/* Linha 2: Marca, Modelo e Versão */}
             <div className="form-grid-3">
-              <label className="field-group">
+              {/* <div>, não <label>: botão dentro de label aciona o select junto. */}
+              <div className="field-group">
                 <span className="field-label">Marca / Fabricante <b className="req">*</b></span>
-                <select
-                  value={brand}
-                  onChange={(e) => {
-                    // Trocar de marca limpa o modelo: "CG 160" não existe na
-                    // Yamaha, e deixar o anterior gravaria uma moto que não
-                    // existe.
-                    setBrand(e.target.value);
-                    setCatalogModel("");
-                    setCatalogVersion("");
-                    setModel("");
-                  }}
-                  className="dialog-select"
-                >
-                  {brandOptions.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                </select>
-              </label>
+                {/*
+                  Trocar de marca limpa o modelo: "CG 160" não existe na
+                  Yamaha, e deixar o anterior gravaria uma moto que não existe.
+                */}
+                {onCreateBrand ? (
+                  <QuickAddSelect
+                    value={brand}
+                    onChange={(valor) => { setBrand(valor); setCatalogModel(""); setCatalogVersion(""); setModel(""); }}
+                    options={brandOptions}
+                    onCreate={onCreateBrand}
+                    placeholder="Ex: BULL"
+                    createTitle="Criar uma marca sem sair do cadastro"
+                  />
+                ) : (
+                  <select
+                    value={brand}
+                    onChange={(e) => { setBrand(e.target.value); setCatalogModel(""); setCatalogVersion(""); setModel(""); }}
+                    className="dialog-select"
+                  >
+                    {brandOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                )}
+              </div>
 
               {/*
                 Marca → modelo → versão. O modelo era texto livre, e a mesma

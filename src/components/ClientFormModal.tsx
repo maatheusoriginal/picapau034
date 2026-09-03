@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import type { ClientRecord, MotorcycleRecord } from "../types";
 import { emMaiusculo } from "../text-case";
+import { QuickAddSelect } from "./QuickAddSelect";
 import { defaultSystemLists } from "../types";
 import { fullModelName, modelsOf, versionsOf } from "../motorcycle-catalog";
 import { formatPlate, isValidPlate, motorcycleIdFor, platePattern, samePlate } from "../plate";
@@ -19,6 +20,8 @@ interface ClientFormModalProps {
   allMotorcycles?: MotorcycleRecord[];
   /** Marcas configuradas em Configurações → Listas do sistema. */
   brands?: string[];
+  /** Criar marca de moto sem sair do cadastro. */
+  onCreateBrand?: (nome: string) => Promise<void> | void;
   /**
    * Dados da moto já digitados na tela que abriu este cadastro.
    *
@@ -37,6 +40,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
   allClients,
   allMotorcycles = [],
   brands = [],
+  onCreateBrand,
   defaultMotorcycle,
 }) => {
   const [activeTab, setActiveTab] = useState<"ident" | "contact" | "address" | "financial" | "notes">("ident");
@@ -310,12 +314,24 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                     />
                     <span className="settings-hint">{motoPlate ? platePattern(motoPlate) : "Padrão antigo ou Mercosul."}</span>
                   </label>
-                  <label className="field-group">
+                  {/* <div>, não <label>: botão dentro de label aciona o select junto. */}
+                  <div className="field-group">
                     <span className="field-label">Marca</span>
+                    {onCreateBrand ? (
+                      <QuickAddSelect
+                        value={motoBrand}
+                        onChange={(valor) => { setMotoBrand(valor); setMotoModel(""); setMotoVersion(""); }}
+                        options={brandOptions}
+                        onCreate={onCreateBrand}
+                        placeholder="Ex: BULL"
+                        createTitle="Criar uma marca sem sair do cadastro"
+                      />
+                    ) : (
                     <select value={motoBrand} onChange={(e) => { setMotoBrand(e.target.value); setMotoModel(""); setMotoVersion(""); }} className="dialog-select">
                       {brandOptions.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
                     </select>
-                  </label>
+                    )}
+                  </div>
                   <label className="field-group">
                     <span className="field-label">Modelo</span>
                     {modelsOf(motoBrand).length ? (
