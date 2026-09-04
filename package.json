@@ -35,6 +35,7 @@
     "check:pricing": "tsx scripts/check-pricing.ts",
     "check:help": "tsx scripts/check-help.ts",
     "check:nfe": "tsx scripts/check-nfe.ts",
+    "check:settings-map": "tsx scripts/check-settings-map.ts",
     "e2e:emulador": "node scripts/emulador/e2e.mjs"
   },
   "dependencies": {

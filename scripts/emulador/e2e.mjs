@@ -391,19 +391,20 @@ await passo("Configurações: avisar em português e gravar o que foi mudado", a
   await p.waitForTimeout(2500);
   const problemas = [];
 
-  // Nenhuma aba pode ficar cortada: a barra rolava e sobrava um botão com só
-  // o contador ("0") aparecendo, sem nome nenhum.
-  const rotulos = await p.locator(".settings-tab-button").allInnerTexts();
-  if (rotulos.length !== 8) problemas.push(`${rotulos.length} abas, esperado 8`);
-  if (!rotulos.every((t) => /[A-Za-zÀ-ú]/.test(t))) problemas.push("aba sem nome visível: " + JSON.stringify(rotulos));
-  const foraDaTela = await p.locator(".settings-tab-button").evaluateAll((els) =>
+  // Nenhuma seção pode ficar cortada: a barra de abas rolava e sobrava um
+  // botão com só o contador ("0") aparecendo, sem nome nenhum. Virou menu
+  // lateral, mas a exigência é a mesma.
+  const rotulos = await p.locator(".settings-nav-item").allInnerTexts();
+  if (rotulos.length !== 8) problemas.push(`${rotulos.length} seções, esperado 8`);
+  if (!rotulos.every((t) => /[A-Za-zÀ-ú]/.test(t))) problemas.push("seção sem nome visível: " + JSON.stringify(rotulos));
+  const foraDaTela = await p.locator(".settings-nav-item").evaluateAll((els) =>
     els.filter((e) => { const b = e.getBoundingClientRect(); return b.right > window.innerWidth + 1 || b.x < -1; }).map((e) => e.innerText.replace(/\n/g, " ")));
-  if (foraDaTela.length) problemas.push("aba fora da tela: " + foraDaTela.join(", "));
+  if (foraDaTela.length) problemas.push("seção fora da tela: " + foraDaTela.join(", "));
 
   // Salvar sem o obrigatório precisa dizer o que falta, em português, e ficar
   // na tela. Era o aviso do navegador, em inglês, que sumia sozinho — e por
   // isso parecia que a aba simplesmente não salvava.
-  await p.locator(".settings-tab-button", { hasText: "Serviços" }).first().click();
+  await p.locator(".settings-nav-item", { hasText: "Serviços" }).first().click();
   await p.waitForTimeout(1400);
   await p.locator("button").filter({ hasText: /Novo Serviço Rápido/ }).first().click();
   await p.waitForTimeout(1800);
@@ -426,7 +427,7 @@ await passo("Configurações: avisar em português e gravar o que foi mudado", a
 
   // Formas de pagamento não tinham tela nenhuma; e gravar a primeira precisa
   // levar junto as seis padrão, senão elas somem da hora de receber.
-  await p.locator(".settings-tab-button", { hasText: "Pagamentos" }).first().click();
+  await p.locator(".settings-nav-item", { hasText: "Pagamentos" }).first().click();
   await p.waitForTimeout(1400);
   const formas = await p.locator(".settings-card").first().locator("tbody tr").count();
   if (formas < 6) problemas.push(`${formas} forma(s) de pagamento listada(s), esperado 6`);
@@ -440,7 +441,7 @@ await passo("Configurações: avisar em português e gravar o que foi mudado", a
   if (gravadas !== 7) problemas.push(`${gravadas} forma(s) no banco, esperado 7 (as 6 padrão + a nova)`);
 
   // O modelo da impressora era texto livre.
-  await p.locator(".settings-tab-button", { hasText: "Impressão" }).first().click();
+  await p.locator(".settings-nav-item", { hasText: "Impressão" }).first().click();
   await p.waitForTimeout(1400);
   const impressoras = await p.locator(".settings-card select").first().locator("option").count();
   if (impressoras < 8) problemas.push(`lista de impressoras com ${impressoras} opção(ões)`);
@@ -455,7 +456,7 @@ await passo("campo de número deixa apagar o valor", async () => {
   const problemas = [];
   await p.locator(".nav-item", { hasText: "Configurações" }).first().click();
   await p.waitForTimeout(2200);
-  await p.locator(".settings-tab-button", { hasText: "Serviços" }).first().click();
+  await p.locator(".settings-nav-item", { hasText: "Serviços" }).first().click();
   await p.waitForTimeout(1300);
   await p.locator("button").filter({ hasText: /Novo Serviço Rápido/ }).first().click();
   await p.waitForTimeout(1800);
@@ -605,7 +606,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
   // 1. a empresa parceira, com desconto combinado na mão de obra
   await p.locator(".nav-item", { hasText: "Configurações" }).first().click();
   await p.waitForTimeout(2200);
-  await p.locator(".settings-tab-button", { hasText: "Parceiros" }).first().click();
+  await p.locator(".settings-nav-item", { hasText: "Parceiros" }).first().click();
   await p.waitForTimeout(1400);
   await p.locator("button").filter({ hasText: /Novo Parceiro/ }).first().click();
   await p.waitForTimeout(1800);
@@ -1201,7 +1202,7 @@ await passo("criar categoria e marca sem sair do cadastro, e o preço mostrar a 
 
   // --- o preço mostra a conta que decide a venda ---
   await p.locator(".dialog-window .dialog-input").first().fill("FILTRO DE AR TESTE");
-  await p.locator(".dialog-window .dialog-tabs button, .dialog-window .settings-tab-button", { hasText: /Preço|Preços/i }).first().click();
+  await p.locator(".dialog-window .dialog-tabs button", { hasText: /Preço|Preços/i }).first().click();
   await p.waitForTimeout(900);
   const camposDePreco = p.locator(".pricing-box input");
   await camposDePreco.nth(0).fill("25");
@@ -1326,6 +1327,63 @@ await passo("nota do fornecedor: confere, compara o custo e dá entrada com o fa
   if (!daNota) problemas.push("a entrada de estoque da nota não foi gravada");
   else if (Number(daNota.total) !== 990) problemas.push(`a entrada gravou ${daNota.total}, esperado 990 (24×30 + 3×90)`);
   if (problemas.length) throw new Error("nota do fornecedor:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("Configurações: menu com o que cada seção resolve, e busca pelas palavras da oficina", async () => {
+  // Eram oito abas em pílulas que quebravam a linha: para achar onde se muda a
+  // margem padrão era preciso abrir uma por uma, e quem não sabia o nome da
+  // aba não achava nunca.
+  const problemas = [];
+  await p.locator(".nav-item", { hasText: "Configurações" }).first().click();
+  await p.waitForTimeout(2500);
+
+  const secoes = await p.locator(".settings-nav-item").allInnerTexts();
+  if (secoes.length !== 8) problemas.push(`o menu tem ${secoes.length} seção(ões), esperado 8`);
+  // Cada item diz o que resolve, e não só o nome da aba.
+  if (!secoes.every((texto) => texto.split("\n").length >= 2)) problemas.push("alguma seção está sem a explicação do que resolve");
+  // Seção com item cadastrado mostra quantos: seção vazia é o que a oficina
+  // precisa ver de longe (sem forma de pagamento, o PDV não recebe).
+  const pagamentos = secoes.find((texto) => /Pagamentos/i.test(texto)) ?? "";
+  if (!/\d/.test(pagamentos)) problemas.push(`a seção de pagamentos não mostra a contagem: ${JSON.stringify(pagamentos)}`);
+
+  // A busca é pelas palavras da oficina. Ninguém adivinha que a margem mora em
+  // "Estoque e reposição".
+  await p.locator(".settings-nav-search input").fill("margem");
+  await p.waitForTimeout(900);
+  const porMargem = await p.locator(".settings-nav-item").allInnerTexts();
+  if (porMargem.length !== 1 || !/Estoque e reposição/i.test(porMargem[0] || "")) {
+    problemas.push(`buscar "margem" devia levar ao estoque: ${JSON.stringify(porMargem)}`);
+  }
+  // E a seção aberta acompanha a busca, senão o conteúdo à direita fica órfão.
+  const aberto = await p.locator(".settings-content h2").first().innerText().catch(() => "");
+  if (!/margem|estoque/i.test(aberto)) problemas.push(`a busca não abriu a seção achada: ${JSON.stringify(aberto)}`);
+
+  // "de", "do" e "da" são o jeito de falar, não o que se procura.
+  await p.locator(".settings-nav-search input").fill("taxa do cartão");
+  await p.waitForTimeout(900);
+  const porTaxa = await p.locator(".settings-nav-item").allInnerTexts();
+  if (!porTaxa.some((texto) => /Pagamentos/i.test(texto))) problemas.push(`buscar "taxa do cartão" devia levar aos pagamentos: ${JSON.stringify(porTaxa)}`);
+
+  // Sem acento também, que é como se digita no meio do atendimento.
+  await p.locator(".settings-nav-search input").fill("combustivel");
+  await p.waitForTimeout(900);
+  const porCombustivel = await p.locator(".settings-nav-item").allInnerTexts();
+  if (!porCombustivel.some((texto) => /Listas do sistema/i.test(texto))) problemas.push(`a busca devia ignorar o acento: ${JSON.stringify(porCombustivel)}`);
+
+  await p.locator(".settings-nav-search input").fill("carburador de trator");
+  await p.waitForTimeout(900);
+  if (!(await p.locator(".settings-nav-empty").count())) problemas.push("busca sem resultado não avisa nada");
+
+  // Limpar volta as oito, e a seção continua aberta.
+  await p.locator(".settings-nav-search input").fill("");
+  await p.waitForTimeout(900);
+  if ((await p.locator(".settings-nav-item").count()) !== 8) problemas.push("limpar a busca não devolveu as seções");
+  await p.locator(".settings-nav-item", { hasText: "Impressão" }).click();
+  await p.waitForTimeout(1200);
+  if (!/impress/i.test(await p.locator(".settings-content h2").first().innerText().catch(() => ""))) {
+    problemas.push("clicar na seção não abriu o conteúdo dela");
+  }
+  if (problemas.length) throw new Error("Configurações:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("o botão de ajuda responde de verdade", async () => {
@@ -1545,7 +1603,7 @@ await passo("em tela baixa, o botão de salvar continua alcançável", async () 
       ["Parceiros", /Novo Parceiro/, /Salvar Parceiro/],
     ];
     for (const [nomeAba, abrir, salvar] of modais) {
-      await baixa.locator(".settings-tab-button", { hasText: nomeAba }).first().click();
+      await baixa.locator(".settings-nav-item", { hasText: nomeAba }).first().click();
       await baixa.waitForTimeout(1200);
       await baixa.locator("button").filter({ hasText: abrir }).first().click();
       await baixa.waitForTimeout(1600);
