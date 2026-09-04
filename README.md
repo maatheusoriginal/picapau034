@@ -972,6 +972,32 @@ O **total fica fixo no rodapé** — peças, mão de obra, desconto do parceiro 
 valor final —, à vista o tempo todo enquanto se monta a OS. Era a única coisa
 que a etapa de revisão dava e que a tela única não daria sozinha.
 
+### Uma tela só, mas ainda com moldura demais
+
+Ser uma tela só não bastou: a tela era grande demais para caber nela mesma. Mais
+da metade do espaço era moldura — não conteúdo:
+
+| O que ocupava | Antes | Agora |
+| --- | --- | --- |
+| Cabeçalho do diálogo | 150px em três linhas (chapéu, título, explicação) | 47px, chapéu e título na mesma linha |
+| Ícone decorativo por seção | 42px | nenhum — o título dá conta |
+| Campo (input, select) | 40px | 32px no computador, 40px no celular |
+| Linha de peça do estoque | 51px | 38px |
+| Bloco de cliente/moto | círculo de 28px e padding de 11px | círculo de 20px e padding de 8px |
+
+O resultado prático: **960px de conteúdo numa área de 688px** viraram 755px numa
+área de 755px. Antes era preciso rolar para chegar no problema relatado, na
+prioridade, na previsão e nos mecânicos — os campos que o balcão mais preenche.
+Agora tudo cabe de uma vez numa tela de 1360×950.
+
+A compactação vale **só dentro da nova OS** (`.dialog-os` no CSS); o resto do
+sistema não muda. E no celular os campos voltam a 40px no `@media` de 560px:
+32px é medida de mouse, o dedo não acerta. O passo 38 do roteiro ponta a ponta
+mede as quatro coisas — que o conteúdo cabe sem rolar, que o cabeçalho não
+passa de 60px, que o campo não passa de 34px e que a linha de peça não passa de
+42px — e confere que "Problema relatado", "Mecânicos responsáveis", "Adicionar
+peças" e "Adicionar mão de obra" continuam todos na tela.
+
 ## A lista de peças
 
 Era um cartão por peça, com o nome e pouco mais: para conferir o código, a
@@ -1358,6 +1384,43 @@ inventar um cliente para cada moto — e é conferido no roteiro ponta a ponta, 
 verifica no Firestore que a moto ficou sem dono e que **nenhum cliente foi
 criado** ao abrir a OS da frota.
 
+### A busca acha a moto pela placa, e acha a que já está no sistema
+
+Dois defeitos que a oficina encontrou usando o sistema, os dois reproduzidos
+antes de mexer em qualquer linha:
+
+**A placa é gravada com hífen ("FLA-2C34"), e a busca comparava o texto cru.**
+Quem digita "FLA2" — que é como se digita placa com pressa — não achava a moto
+que estava ali, na frota, na lista logo abaixo. Agora a placa é comparada
+normalizada dos dois lados, então "FLA2", "fla-2c34" e "FLA 2C34" acham a mesma
+moto.
+
+**Uma moto que já existe no sistema em nome de um cliente não aparecia.** A
+busca só olhava as motos com `partnerId` da parceira escolhida, e é o caso comum
+— a oficina já atendeu aquela moto como cliente direto antes de ela passar a
+rodar para a parceira. Sem achá-la, o caminho que sobrava era cadastrar a mesma
+placa outra vez, o que parte o histórico da moto em dois.
+
+A busca agora devolve **dois grupos separados**, nunca uma lista só:
+
+| Grupo | O que traz |
+| --- | --- |
+| **Frota da _parceira_** | As motos que têm essa empresa como responsável |
+| **Já no sistema, fora desta frota** | Qualquer outra moto que bateu com a busca, com o nome do dono ao lado |
+
+Os grupos ficam separados de propósito: puxar a moto de um cliente para uma OS
+da parceira é legítimo — a moto está lá, quem paga é a parceira —, mas quem
+atende precisa ver de onde ela veio antes de salvar. Escolher uma moto de fora
+mostra um aviso dizendo de quem ela é, e **incluir a moto na frota é um botão à
+parte, nunca automático**: mover a moto de um cliente para a frota é uma decisão
+do atendente, não um efeito colateral de escolher a moto. O dono continua sendo
+o dono depois disso — a moto passou a rodar para a parceira, não mudou de
+pessoa.
+
+A conta é de `src/fleet.ts` (`npm run check:fleet`, 35 casos) e o passo 37 do
+roteiro ponta a ponta refaz o caminho inteiro no navegador, incluindo a
+conferência no Firestore de que o botão gravou a parceira e não mexeu no dono.
+
 ### A etapa "Origem" saiu
 
 A OS tinha uma etapa só para perguntar de onde veio a moto e quem a trouxe. Com
@@ -1441,6 +1504,88 @@ O que foi conferido, renderizando cada tela em 360, 768 e 1440px: **18 telas e
   somem abaixo de 560px. Fica o que identifica a linha, o dinheiro, a situação
   e a ação; sai o contexto (categoria, responsável, data de entrada, descrição).
   Nada se perde — abrir o registro mostra tudo.
+
+## Excluir cadastro sem apagar a história
+
+Os cadastros principais — **produto, cliente, moto, fornecedor e funcionário** —
+não tinham exclusão nenhuma: dava para editar e nunca remover. Quem digitou o
+nome errado, cadastrou a mesma peça duas vezes ou criou um cliente de teste
+ficava com o lixo na lista para sempre. (Usuário de acesso e os itens das
+Configurações — serviço rápido, categoria, forma de pagamento, maquininha e
+parceiro — já tinham.)
+
+Mas **apagar de verdade só é seguro quando o cadastro nunca foi usado**. Um
+produto que já foi vendido, um cliente que já tem OS, uma moto que já passou
+pela bancada: apagar esses não limpa nada, quebra. A OS antiga passa a apontar
+para um produto que não existe, o relatório do mês muda sozinho, e o custo médio
+da peça perde a origem. Nada disso dá erro na hora — só aparece semanas depois,
+quando ninguém mais liga uma coisa à outra.
+
+Então são **dois caminhos**, e a tela diz qual dos dois vai acontecer **antes**
+de confirmar:
+
+| Situação | O que acontece | O botão diz |
+| --- | --- | --- |
+| Nenhum vínculo | O documento sai do banco | **Apagar de vez** |
+| Tem vínculo | Fica gravado como inativo | **Desativar cadastro** |
+
+A confirmação não é um "Tem certeza?" genérico: ela lista **onde** o cadastro
+aparece — "1 venda no balcão, 2 entradas de estoque" — porque a diferença entre
+sumir do banco e ficar inativo é a diferença entre perder e não perder o
+histórico da oficina.
+
+### O que segura cada cadastro
+
+| Cadastro | Vínculos que impedem apagar |
+| --- | --- |
+| **Produto** | Item de OS, venda no balcão, entrada de estoque |
+| **Cliente** | OS, venda, conta a receber, e as motos no nome dele |
+| **Moto** | OS pelo id **ou pela placa** — a OS aberta sem cadastro de moto prende do mesmo jeito, e é a que ninguém lembra |
+| **Fornecedor** | Peça cadastrada, entrada de estoque, gasto lançado, conta a pagar |
+| **Funcionário** | OS, venda, lançamento no financeiro, e a conta de acesso |
+
+A moto do cliente conta como vínculo do cliente mesmo não sendo histórico:
+apagar o dono deixaria a moto órfã, sem ninguém a quem cobrar na entrada
+seguinte. E a conta de acesso é a trava mais dura do funcionário — apagar quem
+ainda entra no sistema deixaria um login sem cadastro nenhum na oficina, que é
+exatamente o defeito de "mecânico que não aparecia na OS".
+
+### Desativar precisa significar alguma coisa
+
+`active` já existia nos formulários de produto, cliente, fornecedor e
+funcionário, mas **ninguém lia**: o cadastro marcado como inativo continuava
+aparecendo em todo lugar. Oferecer "desativar" como alternativa segura ao apagar
+seria mentira nesse estado.
+
+Agora `active: false` some **de onde se escolhe** e continua **onde já foi
+usado**:
+
+| Some | Continua |
+| --- | --- |
+| Lista de peças da nova OS e do faturamento | A própria lista de cadastros, marcada **Inativo** |
+| Busca do PDV e catálogo de peças | Toda OS, venda e entrada antiga |
+| Busca de cliente da OS | O histórico do cliente e da moto |
+| Motos do cliente e da frota da parceira | O relatório e o fechamento do caixa |
+
+O cadastro inativo fica na sua própria lista de propósito: é de lá que se
+reativa, abrindo o cadastro e marcando o campo "ativo" de novo.
+
+### A venda do balcão não gravava de qual peça era
+
+Achado ao montar essa conta: o item de venda do PDV gravava o id do produto no
+campo `id`, sem `productId` — o item de OS usa `id` para o código da peça e
+`productId` para o documento, e a venda seguia outra convenção. O efeito: uma
+peça vendida no balcão parecia nunca ter sido usada, e seria apagada de vez com
+a venda apontando para ela.
+
+A venda passa a gravar `productId` como a OS, e a conta olha os **dois** campos,
+senão as vendas feitas antes desta correção continuariam invisíveis.
+
+A decisão inteira é de `src/removal.ts` (`npm run check:removal`, 30 casos), e o
+passo 39 do roteiro ponta a ponta faz os dois caminhos no navegador: apaga uma
+peça sem uso e confere que ela saiu do Firestore; desativa a peça vendida e
+confere que ela continua no banco com `active: false`, aparece marcada na lista
+de cadastros e sumiu da lista de peças da OS.
 
 ## Cópia de segurança
 

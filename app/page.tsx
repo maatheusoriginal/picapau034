@@ -6,6 +6,8 @@ import { NumberField } from "../src/components/NumberField";
 import { billingDescription, isPartnerBilled, motorcycleLabel, nextBillingDate, partnerTotals, PARTNER_PAYMENT_METHOD } from "../src/partner";
 import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
 import { formatPlate, motorcycleIdFor, normalizePlate, platePattern } from "../src/plate";
+import { avisoDeMotoDeFora, buscarMotos, estaNaFrota } from "../src/fleet";
+import { somenteAtivos, type BaseDaOficina } from "../src/removal";
 import { emMaiusculo } from "../src/text-case";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
@@ -595,7 +597,9 @@ function PdvWorkspace({
     });
     setPdvSearch("");
   }, [notify, setCart, blockZeroStockSale]);
-  const pdvCatalog = useMemo(() => products.map((p) => ({
+  // Peça desativada não é oferecida na venda: quem digita o nome dela não pode
+  // continuar somando ao carrinho uma peça que a oficina tirou de linha.
+  const pdvCatalog = useMemo(() => somenteAtivos(products).map((p) => ({
     id: p.id,
     code: p.code,
     barcode: p.code,
@@ -808,7 +812,7 @@ function AccountsWorkspace({
   );
 }
 
-function TeamWorkspace({ users, setUsers, openDialog, notify }: { users: UserConfig[]; setUsers: React.Dispatch<React.SetStateAction<UserConfig[]>>; openDialog: OpenDialog; notify: (message: string) => void }) {
+function TeamWorkspace({ users, setUsers, openDialog, notify, orders, sales, expenses, canManageTeam }: { users: UserConfig[]; setUsers: React.Dispatch<React.SetStateAction<UserConfig[]>>; openDialog: OpenDialog; notify: (message: string) => void; orders: OrderRecord[]; sales: SaleRecord[]; expenses: ExpenseRecord[]; canManageTeam: boolean }) {
   const [teamFilter, setTeamFilter] = useState("Todos");
   const [teamSearch, setTeamSearch] = useState("");
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
@@ -900,6 +904,15 @@ function TeamWorkspace({ users, setUsers, openDialog, notify }: { users: UserCon
           editingEmployee={selectedEmployeeForEdit}
           notify={notify}
           allEmployees={users}
+          removal={{
+            // As contas de acesso saem do próprio cadastro: funcionário com
+            // login gravado tem `userId`. Apagar quem ainda entra no sistema
+            // deixaria uma conta sem cadastro nenhum na oficina.
+            base: { orders, sales, expenses, access: users.filter((item) => item.userId).map((item) => ({ employeeId: item.id })) },
+            podeExcluir: canManageTeam,
+            notify,
+            onRemoved: () => { setIsEmployeeModalOpen(false); setSelectedEmployeeForEdit(null); },
+          }}
         />
       </Suspense></ErrorBoundary>
     </>
@@ -1685,7 +1698,7 @@ export function ModuleWorkspace({
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
-  if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} />;
+  if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} orders={orders} sales={sales} expenses={expenses} canManageTeam={canOperate}/>;
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} setEmployees={setUsers} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
   if (active === "Configurações") return (
     <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
@@ -1897,7 +1910,7 @@ export function ModuleWorkspace({
                   <td className="mono">{product.code}</td>
                   <td className="col-secondary mono">{product.partNumber || "—"}</td>
                   <td className="col-secondary mono">{product.barcode || "SEM GTIN"}</td>
-                  <td><strong>{product.name}</strong></td>
+                  <td><strong>{product.name}</strong>{product.active === false ? <span className="inactive-tag">Inativo</span> : null}</td>
                   <td className="col-secondary">{product.category}</td>
                   <td className="col-secondary">{product.location || "—"}</td>
                   <td className="num"><strong className="stock-price">{product.price}</strong></td>
@@ -1944,6 +1957,7 @@ export function ModuleWorkspace({
       sub: [client.phone || "Sem telefone", ...placas.slice(0, 3)].join(" · "),
       meta: client.detail || "Cliente cadastrado",
       initials: (client.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "CL").toUpperCase(),
+      inativo: client.active === false,
       busca: `${client.name} ${client.phone} ${client.detail ?? ""} ${placas.join(" ")} ${placas.map(normalizePlate).join(" ")}`,
     };
   });
@@ -1955,9 +1969,10 @@ export function ModuleWorkspace({
       sub: `${owner ? owner.name : "Proprietário não vinculado"} · ${moto.plate}`,
       meta: `${moto.year} · ${moto.color}`,
       initials: (moto.model.slice(0, 2) || "MT").toUpperCase(),
+      inativo: moto.active === false,
     };
   });
-  const supplierRecords = suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name, sub: `${supplier.phone || "Sem telefone"} · ${supplier.deliveryDays === 0 ? "Entrega no dia" : `Entrega em ${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}`, meta: supplier.categories, initials: (supplier.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "FN").toUpperCase() }));
+  const supplierRecords = suppliers.map((supplier) => ({ id: supplier.id, name: supplier.name, sub: `${supplier.phone || "Sem telefone"} · ${supplier.deliveryDays === 0 ? "Entrega no dia" : `Entrega em ${supplier.deliveryDays} dia${supplier.deliveryDays === 1 ? "" : "s"}`}`, meta: supplier.categories, initials: (supplier.name.split(" ").slice(0, 2).map((word) => word[0]).join("") || "FN").toUpperCase(), inativo: supplier.active === false }));
   
   const records = active === "Fornecedores" ? supplierRecords : active === "Motocicletas" ? motorcycleRecords : active === "Clientes" ? defaultRecords : [];
   
@@ -2007,9 +2022,9 @@ export function ModuleWorkspace({
             // guardam "o que já foi feito nessa moto".
             const temHistorico = active === "Clientes" || active === "Motocicletas";
             if (!temHistorico) return (
-              <button className="registry-row" key={record.id} onClick={abrirCadastro}>
+              <button className={record.inativo ? "registry-row inativo" : "registry-row"} key={record.id} onClick={abrirCadastro}>
                 <span className="registry-avatar">{record.initials}</span>
-                <span><strong>{record.name}</strong><small>{record.sub}</small></span>
+                <span><strong>{record.name}{record.inativo ? <span className="inactive-tag">Inativo</span> : null}</strong><small>{record.sub}</small></span>
                 <span className="registry-meta">{record.meta}</span><Icon name="arrow" size={17}/>
               </button>
             );
@@ -2020,9 +2035,9 @@ export function ModuleWorkspace({
             return (
               <div className={`registry-item ${aberto ? "aberto" : ""}`} key={record.id}>
                 <div className="registry-row-wrap">
-                  <button className="registry-row" onClick={abrirCadastro}>
+                  <button className={record.inativo ? "registry-row inativo" : "registry-row"} onClick={abrirCadastro}>
                     <span className="registry-avatar">{record.initials}</span>
-                    <span><strong>{record.name}</strong><small>{record.sub}</small></span>
+                    <span><strong>{record.name}{record.inativo ? <span className="inactive-tag">Inativo</span> : null}</strong><small>{record.sub}</small></span>
                     <span className="registry-meta">{record.meta}</span><Icon name="arrow" size={17}/>
                   </button>
                   <button className="registry-history-button" onClick={() => setHistoricoDe(aberto ? "" : record.id)}>
@@ -2408,6 +2423,25 @@ export function AppDialog({
   // produto, fornecedor, moto, cliente ou funcionário fazia o React renderizar
   // zero hook depois de ter renderizado 86 — erro de contagem de hooks e tela
   // branca. Agora todo hook roda antes de qualquer return.
+  /**
+   * O que a exclusão precisa ler para decidir entre apagar e desativar.
+   *
+   * Uma base só, montada aqui, porque os cinco formulários fazem a mesma
+   * pergunta: "este cadastro já foi usado em alguma coisa?". A conta em si é de
+   * src/removal.ts. As contas de acesso saem do próprio cadastro de
+   * funcionário: quem tem login gravado tem `userId`.
+   */
+  const baseParaExcluir: BaseDaOficina = {
+    orders, sales, entries: stockEntries, expenses, accounts, motorcycles, products,
+    access: users.filter((user) => user.userId).map((user) => ({ employeeId: user.id })),
+  };
+  const exclusao = (permitido: boolean) => ({
+    base: baseParaExcluir,
+    podeExcluir: permitido,
+    notify: notify || finish,
+    onRemoved: close,
+  });
+
   if (dialog === "product") {
     return (
       <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
@@ -2426,6 +2460,7 @@ export function AppDialog({
           onCreatePartBrand={(nome) => criarItemDeLista("partBrands", nome)}
           settings={settings}
           movementSources={{ stockEntries, sales, orders }}
+          removal={exclusao(canOperate)}
         />
       </Suspense></ErrorBoundary>
     );
@@ -2441,6 +2476,7 @@ export function AppDialog({
           onSaved={(sup) => finish(`Fornecedor "${sup.name}" salvo com sucesso no Firestore!`)}
           notify={notify || finish}
           allSuppliers={suppliers}
+          removal={exclusao(canOperate)}
         />
       </Suspense></ErrorBoundary>
     );
@@ -2460,6 +2496,7 @@ export function AppDialog({
           brands={systemList(lists, "motorcycleBrands")}
           onCreateBrand={(nome) => criarItemDeLista("motorcycleBrands", nome)}
           partners={activePartners}
+          removal={exclusao(canManageCustomers)}
         />
       </Suspense></ErrorBoundary>
     );
@@ -2478,6 +2515,7 @@ export function AppDialog({
           allMotorcycles={motorcycles}
           brands={systemList(lists, "motorcycleBrands")}
           onCreateBrand={(nome) => criarItemDeLista("motorcycleBrands", nome)}
+          removal={exclusao(canManageCustomers)}
         />
       </Suspense></ErrorBoundary>
     );
@@ -2531,10 +2569,16 @@ export function AppDialog({
    * Agora a busca lista quem bateu e a escolha é um clique.
    */
   const lookupPlaca = normalizePlate(customerLookup);
+  // Cadastro desativado some de onde se ESCOLHE — abrir OS, vender, escolher a
+  // moto —, e continua inteiro na lista de cadastros e em tudo que já foi
+  // feito. Ver src/removal.ts.
+  const clientesAtivos = somenteAtivos(clients);
+  const motosAtivas = somenteAtivos(motorcycles);
+  const produtosAtivos = somenteAtivos(products);
   const clientesEncontrados = (lookupDigits.length >= 3 || lookupTexto.length >= 2)
-    ? clients
+    ? clientesAtivos
         .map((client) => {
-          const motosDele = motorcycles.filter((motorcycle) => motorcycle.ownerId === client.id);
+          const motosDele = motosAtivas.filter((motorcycle) => motorcycle.ownerId === client.id);
           // A moto chega no portão e o balcão lê a placa, não pergunta o nome:
           // procurar pela placa precisa cair no dono dela, com a moto certa
           // já escolhida. Um cliente com quatro motos, sem isso, obriga a achar
@@ -2565,7 +2609,7 @@ export function AppDialog({
     : Boolean(osCustomer) || osNewCustomer || osSkipCustomer;
 
   const customerMotorcycles = !osNewCustomer && !osSkipCustomer && selectedCustomer
-    ? motorcycles.filter((motorcycle) => motorcycle.ownerId === selectedCustomer.id)
+    ? motosAtivas.filter((motorcycle) => motorcycle.ownerId === selectedCustomer.id)
     : [];
   const selectedMotorcycle = motorcycles.find((motorcycle) => motorcycle.id === selectedMotorcycleId);
   /**
@@ -2576,13 +2620,21 @@ export function AppDialog({
    * do aplicativo sem saber quem é o motoboy da vez. A busca existe porque
    * frota tem dezenas de motos.
    */
-  const motosDaParceiraEscolhida = motorcycles.filter((moto) => moto.partnerId && moto.partnerId === selectedPartner?.id);
-  const buscaDaFrota = partnerBikeSearch.trim().toLowerCase();
+  // A busca compara a placa normalizada e varre o sistema inteiro, não só a
+  // frota: a moto que a oficina já atendeu como cliente direto continua sendo a
+  // mesma moto quando ela passa a rodar para a parceira. Ver src/fleet.ts.
+  const buscaDaFrota = buscarMotos(motosAtivas, selectedPartner?.id ?? "", partnerBikeSearch);
+  // O número ao lado do campo é o tamanho da frota, não o do resultado: "entre
+  // as motos da Flash (0)" enquanto se digita faria parecer que a parceira não
+  // tem moto nenhuma cadastrada.
+  const totalDaFrota = motosAtivas.filter((moto) => estaNaFrota(moto, selectedPartner?.id ?? "")).length;
   const motosParaEscolher = osOrigin === "partner"
-    ? (buscaDaFrota
-        ? motosDaParceiraEscolhida.filter((moto) => `${moto.plate} ${moto.brand ?? ""} ${moto.model}`.toLowerCase().includes(buscaDaFrota))
-        : motosDaParceiraEscolhida)
+    ? [...buscaDaFrota.daFrota, ...buscaDaFrota.foraDaFrota]
     : customerMotorcycles;
+  const motoEscolhidaEDeFora = osOrigin === "partner" && selectedMotorcycle
+    ? !estaNaFrota(selectedMotorcycle, selectedPartner?.id ?? "") : false;
+  const avisoDaMotoDeFora = osOrigin === "partner"
+    ? avisoDeMotoDeFora(selectedMotorcycle, selectedPartner?.id ?? "", selectedPartner?.name ?? "parceira") : "";
   const selectedEmployee = users.find((user) => user.id === expenseEmployeeId) ?? users[0];
   const selectedMachine = activePaymentMachines.find((machine) => machine.id === selectedMachineId) ?? activePaymentMachines.find((machine) => machine.primary) ?? activePaymentMachines[0];
   const partsTotal = osItems.filter((item) => item.type === "Peça").reduce((sum, item) => sum + item.price, 0);
@@ -2748,6 +2800,27 @@ export function AppDialog({
     setSelectedMotorcycleId(id);
     setOsPlate(motorcycle.plate);
     setNewVehicleMode(false);
+  };
+  /**
+   * Passa a moto escolhida para a frota da parceira.
+   *
+   * Botão à parte, nunca automático ao escolher: a moto de um cliente pode
+   * entrar numa OS da parceira sem deixar de ser dele — é o caso de quem levou
+   * a própria moto e a parceira pagou o conserto. Mover para a frota é outra
+   * coisa, e é o atendente quem sabe qual das duas está acontecendo.
+   */
+  const incluirNaFrota = async () => {
+    if (!selectedMotorcycle || !selectedPartner) return;
+    if (!canManageCustomers) return notify("Seu perfil não pode alterar o cadastro de motos.");
+    try {
+      await saveFirestoreDoc("motorcycles", selectedMotorcycle.id, {
+        partnerId: selectedPartner.id,
+        partnerName: selectedPartner.name,
+      });
+      notify(`${formatPlate(selectedMotorcycle.plate)} entrou na frota da ${selectedPartner.name}.`);
+    } catch {
+      notify("Não foi possível incluir a moto na frota.");
+    }
   };
   const toggleMechanic = (id: string, target: "new" | "existing") => {
     const selected = target === "new" ? selectedMechanicIds : orderMechanicIds;
@@ -3673,6 +3746,11 @@ export function AppDialog({
           total: cartTotal,
           items: cart.map((item) => ({
             id: item.id,
+            // A peça vendida no balcão passa a gravar `productId`, igual ao item
+            // de OS. Sem ele, a venda existia mas ninguém conseguia responder
+            // "esta peça já foi vendida?" — e a exclusão de cadastro apagaria
+            // uma peça que já tinha saído pela porta.
+            productId: item.id,
             type: "Peça" as const,
             name: item.name,
             price: item.unit * item.quantity,
@@ -3976,7 +4054,7 @@ export function AppDialog({
                               <button className="primary-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); setNewCustomerName(onlyDigits(customerLookup) ? "" : customerLookup.trim()); if (onlyDigits(customerLookup)) setCustomerLookup(formatPhone(customerLookup)); else setCustomerLookup(""); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
                             </div>
                           ) : (
-                            <div className="os-search-hint"><Icon name="users" size={17}/><span>Digite a <b>placa</b>, o telefone ou o nome. Pela placa, a moto já vem escolhida. Cliente novo? Digite o nome e o botão de cadastrar aparece.</span></div>
+                            <div className="os-search-hint"><Icon name="users" size={17}/><span>Busque pela <b>placa</b>, telefone ou nome — pela placa a moto já vem escolhida.</span></div>
                           )}
                           <div className="os-search-actions">
                             <button className="outline-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
@@ -4000,12 +4078,71 @@ export function AppDialog({
                           {/* Frota tem dezenas de motos: sem busca, escolher vira procurar. */}
                           {osOrigin === "partner" && !newVehicleMode ? (
                             <label className="field field-full os-partner-bike-search">
-                              <span>Procurar entre as motos {selectedPartner ? `da ${selectedPartner.name}` : "da parceira"} ({motosParaEscolher.length})</span>
+                              <span>Procurar entre as motos {selectedPartner ? `da ${selectedPartner.name}` : "da parceira"} ({totalDaFrota})</span>
                               <input value={partnerBikeSearch} onChange={(event) => setPartnerBikeSearch(event.target.value)} placeholder="Placa, marca ou modelo"/>
+                              <small className="field-help">A busca também acha moto que já está no sistema em nome de um cliente. Pode digitar a placa sem o hífen.</small>
                             </label>
                           ) : null}
 
-                          {motosParaEscolher.length > 0 && !newVehicleMode ? (
+                          {osOrigin === "partner" && !newVehicleMode ? (
+                            <>
+                              {/* Os dois grupos ficam separados de propósito: escolher a moto de
+                                  um cliente numa OS da parceira é legítimo, mas quem atende
+                                  precisa ver que ela não é da frota antes de salvar. */}
+                              {buscaDaFrota.daFrota.length ? (
+                                <>
+                                  <div className="os-list-label"><b>Frota {selectedPartner ? `da ${selectedPartner.name}` : "da parceira"}</b><span>{buscaDaFrota.daFrota.length}</span></div>
+                                  <div className="vehicle-choice-list">
+                                    {buscaDaFrota.daFrota.slice(0, 24).map((motorcycle) => (
+                                      <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
+                                        <span className="catalog-code">{(motorcycle.model || "MT").slice(0, 2).toUpperCase()}</span>
+                                        <div><strong>{[motorcycle.brand, motorcycle.model].filter(Boolean).join(" ")}</strong><small>{formatPlate(motorcycle.plate)} · {motorcycle.year || "ano não informado"}</small></div>
+                                        {selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : null}
+
+                              {buscaDaFrota.foraDaFrota.length ? (
+                                <>
+                                  <div className="os-list-label fora"><b>Já no sistema, fora desta frota</b><span>{buscaDaFrota.foraDaFrota.length}</span></div>
+                                  <div className="vehicle-choice-list">
+                                    {buscaDaFrota.foraDaFrota.slice(0, 12).map((motorcycle) => (
+                                      <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
+                                        <span className="catalog-code">{(motorcycle.model || "MT").slice(0, 2).toUpperCase()}</span>
+                                        <div><strong>{[motorcycle.brand, motorcycle.model].filter(Boolean).join(" ")}</strong><small>{formatPlate(motorcycle.plate)} · {motorcycle.ownerName || motorcycle.partnerName || "sem dono cadastrado"}</small></div>
+                                        {selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : null}
+
+                              {avisoDaMotoDeFora ? (
+                                <div className="os-outside-fleet">
+                                  <Icon name="alert" size={17}/>
+                                  <span>{avisoDaMotoDeFora} A OS abre normalmente com a {selectedPartner?.name ?? "parceira"} pagando.</span>
+                                  {canManageCustomers && motoEscolhidaEDeFora ? <button className="outline-button" onClick={() => void incluirNaFrota()}>Incluir na frota</button> : null}
+                                </div>
+                              ) : null}
+
+                              <div className="vehicle-choice-list">
+                                <button className="new-vehicle-choice" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}>
+                                  <span className="catalog-code">+</span>
+                                  <div><strong>Outra moto</strong><small>Cadastrar uma moto nova</small></div>
+                                </button>
+                              </div>
+
+                              {motosParaEscolher.length === 0 ? (
+                                <div className="os-search-empty">
+                                  <span>{partnerBikeSearch.trim() ? `Nenhuma moto com "${partnerBikeSearch.trim()}", nem na frota nem no resto do sistema.` : `${selectedPartner?.name ?? "Esta parceira"} ainda não tem moto na frota. Procure pela placa: se a moto já estiver no sistema, ela aparece aqui.`}</span>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : null}
+
+                          {osOrigin !== "partner" && motosParaEscolher.length > 0 && !newVehicleMode ? (
                             <div className="vehicle-choice-list">
                               {motosParaEscolher.slice(0, 24).map((motorcycle) => (
                                 <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
@@ -4018,13 +4155,6 @@ export function AppDialog({
                                 <span className="catalog-code">+</span>
                                 <div><strong>Outra moto</strong><small>Cadastrar uma moto nova</small></div>
                               </button>
-                            </div>
-                          ) : null}
-
-                          {osOrigin === "partner" && !newVehicleMode && motosParaEscolher.length === 0 ? (
-                            <div className="os-search-empty">
-                              <span>{partnerBikeSearch.trim() ? `Nenhuma moto com "${partnerBikeSearch.trim()}".` : `${selectedPartner?.name ?? "Esta parceira"} ainda não tem moto cadastrada.`}</span>
-                              <button className="primary-button" onClick={() => { setNewVehicleMode(true); setSelectedMotorcycleId(""); setOsPlate(""); }}><Icon name="plus" size={15}/>Cadastrar moto</button>
                             </div>
                           ) : null}
 
@@ -4105,7 +4235,7 @@ export function AppDialog({
                 <div className="form-section">
                   <div className="form-intro"><span className="form-icon"><Icon name="box"/></span><div><h3>Peças e mão de obra</h3><p>Peças usam o preço fixo do cadastro. A mão de obra é informada manualmente.</p></div></div>
                   <div className="os-items-builder">
-                    <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{products.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{products.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
+                    <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{produtosAtivos.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{produtosAtivos.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
                     <section className="os-labor-panel"><div className="os-builder-title"><div><strong>Adicionar mão de obra</strong><small>Descrição e valor digitados para esta OS</small></div></div><div className="form-grid"><label className="field field-full"><span>Descrição</span><input value={laborDescription} onChange={(event) => setLaborDescription(emMaiusculo(event.target.value))} placeholder="Ex.: Troca do kit relação"/></label><label className="field"><span>Valor da mão de obra</span><input type="number" value={laborValue} onChange={(event) => setLaborValue(event.target.value)}/></label><button className="primary-button labor-add-button" onClick={() => { if (!laborDescription.trim()) return setDialogError("Descreva a mão de obra antes de adicionar."); if (!(Number(laborValue) > 0)) return setDialogError("Informe o valor da mão de obra."); setDialogError(""); setOsItems((current) => [...current, { id: `LAB-${Date.now()}`, type: "Mão de obra", name: laborDescription.trim(), price: Number(laborValue) }]); setLaborDescription(""); setLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar mão de obra</button></div><div className="labor-rule"><Icon name="check" size={17}/><span>O valor vale somente para esta OS e não altera o cadastro de serviços.</span></div></section>
                   </div>
                   <div className="selected-os-items"><div className="os-builder-title"><div><strong>Itens incluídos</strong><small>{osItems.length ? `${osItems.length} item${osItems.length === 1 ? "" : "s"} nesta OS` : "Nenhum item adicionado ainda"}</small></div></div>{osItems.length ? osItems.map((item) => <div className="selected-os-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do cadastro" : "Valor manual desta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setOsItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>×</button></div>) : <div className="empty-os-items"><Icon name="box"/><span>Adicione as peças e a mão de obra que já souber. Você poderá completar depois.</span></div>}<div className="os-items-total"><span>Peças <b>{formatBRL(partsTotal)}</b></span><span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>{partnerDiscount > 0 ? <span className="discount">Desconto parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}<strong>Total inicial {formatBRL(osTotal)}</strong></div></div>
@@ -4285,7 +4415,7 @@ export function AppDialog({
           <div className="dialog-body">
             <label className="pdv-search modal-search"><Icon name="search"/><input autoFocus value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder="Buscar produto, código de barras ou SKU"/><kbd>F2</kbd></label>
             <div className="catalog-filters">{["Todos", ...productCategoryNames].map((category) => <button className={catalogCategory === category ? "selected" : ""} key={category} onClick={() => setCatalogCategory(category)}>{category}</button>)}</div>
-            <div className="catalog-list">{products.filter((product) => (catalogCategory === "Todos" || product.category === catalogCategory) && `${product.name} ${product.code} ${product.barcode ?? ""}`.toLowerCase().includes(catalogSearch.toLowerCase())).map((product) => (
+            <div className="catalog-list">{produtosAtivos.filter((product) => (catalogCategory === "Todos" || product.category === catalogCategory) && `${product.name} ${product.code} ${product.barcode ?? ""}`.toLowerCase().includes(catalogSearch.toLowerCase())).map((product) => (
               <button className={catalogSelection === product.code ? "catalog-row selected" : "catalog-row"} key={product.code} onClick={() => setCatalogSelection(product.code)} disabled={product.stock === 0}>
                 <span className="catalog-code">{product.code.slice(-2)}</span>
                 <span><strong>{product.name}</strong><small>{product.code} · {product.category}</small></span>
@@ -4598,7 +4728,7 @@ export function AppDialog({
                 <div className="checkout-item-list">{checkoutItems.length ? checkoutItems.map((item, index) => <div className="checkout-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do produto" : "Valor informado nesta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setCheckoutItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>) : <div className="empty-panel"><Icon name="box" size={20}/><span>Nenhum item adicionado ao fechamento.</span></div>}</div>
                 <div className="checkout-totals"><span>Peças <b>{formatBRL(checkoutPartsTotal)}</b></span><span>Mão de obra <b>{formatBRL(checkoutLaborTotal)}</b></span><strong>Total da OS <b>{formatBRL(checkoutTotal)}</b></strong></div>
 
-                <div className="checkout-add-block"><div className="checkout-add-title"><Icon name="box" size={17}/><div><strong>Adicionar outra peça</strong><small>O valor de venda vem bloqueado do cadastro.</small></div></div><label className="mini-search"><Icon name="search" size={16}/><input value={checkoutPieceSearch} onChange={(event) => setCheckoutPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="checkout-product-results">{products.filter((product) => product.stock > 0 && `${product.name} ${product.code}`.toLowerCase().includes(checkoutPieceSearch.toLowerCase())).slice(0, 3).map((product) => { const added = checkoutItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={added} onClick={() => setCheckoutItems((current) => [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.stock} em estoque · preço fixo</small></div><b>{product.price}</b><i>{added ? "✓" : "+"}</i></button>; })}</div></div>
+                <div className="checkout-add-block"><div className="checkout-add-title"><Icon name="box" size={17}/><div><strong>Adicionar outra peça</strong><small>O valor de venda vem bloqueado do cadastro.</small></div></div><label className="mini-search"><Icon name="search" size={16}/><input value={checkoutPieceSearch} onChange={(event) => setCheckoutPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="checkout-product-results">{produtosAtivos.filter((product) => product.stock > 0 && `${product.name} ${product.code}`.toLowerCase().includes(checkoutPieceSearch.toLowerCase())).slice(0, 3).map((product) => { const added = checkoutItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={added} onClick={() => setCheckoutItems((current) => [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.stock} em estoque · preço fixo</small></div><b>{product.price}</b><i>{added ? "✓" : "+"}</i></button>; })}</div></div>
 
                 <div className="checkout-add-block labor"><div className="checkout-add-title"><Icon name="wrench" size={17}/><div><strong>Adicionar mão de obra</strong><small>Descrição e valor são manuais para esta OS.</small></div></div><div className="checkout-labor-row"><label className="field"><span>Descrição</span><input value={checkoutLaborDescription} onChange={(event) => setCheckoutLaborDescription(event.target.value)} placeholder="Ex.: Regulagem final"/></label><label className="field compact-field"><span>Valor</span><input type="number" min="0" value={checkoutLaborValue} onChange={(event) => setCheckoutLaborValue(event.target.value)}/></label><button className="outline-button large" onClick={() => { if (!checkoutLaborDescription.trim() || Number(checkoutLaborValue) <= 0) return; setCheckoutItems((current) => [...current, { id: `LAB-CHECKOUT-${Date.now()}`, type: "Mão de obra", name: checkoutLaborDescription.trim(), price: Number(checkoutLaborValue) }]); setCheckoutLaborDescription(""); setCheckoutLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar</button></div></div>
                 <div className="approval-note"><Icon name="alert" size={17}/><span>Qualquer item adicional deve estar aprovado pelo cliente antes do fechamento. Itens não executados ou não usados não devem ser cobrados.</span></div>

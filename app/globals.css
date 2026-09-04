@@ -432,6 +432,26 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .settings-grid b { align-self: start; color: var(--red); font-size: 7px; font-weight: 700; }
 .settings-grid > button > svg { grid-column: 3; grid-row: 2; color: #aaa; }
 
+/* Excluir cadastro. O gatilho fica discreto no rodapé do formulário — apagar é
+   raro e nunca deve competir com "Salvar" —, e a confirmação sobe por cima do
+   próprio formulário (z-index acima do .dialog-layer), porque é dali que ela
+   foi aberta. */
+/* Cadastro desativado continua na lista de propósito: é dali que se reativa.
+   A marca precisa ser lida de relance, sem esconder o nome. */
+.inactive-tag { display: inline-block; margin-left: 7px; padding: 2px 6px; border-radius: 5px; background: #f4e6e6; color: #9a4a4a; font-size: 7px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; vertical-align: middle; }
+.registry-row.inativo { background: #fbfaf9; }
+.registry-row.inativo strong, .registry-row.inativo small { color: #96969a; }
+
+.removal-trigger { height: 36px; padding: 0 12px; border: 1px solid #f0caca; border-radius: 8px; background: #fff; color: var(--red); font-size: 9px; font-weight: 800; }
+.removal-trigger:hover { background: #fff7f6; }
+.removal-layer { position: fixed; inset: 0; z-index: 95; display: grid; place-items: center; padding: 18px; background: rgba(10,10,12,.55); backdrop-filter: blur(3px); animation: fade-in .16s ease; }
+.removal-box { width: min(440px, 100%); padding: 22px 23px; border-radius: 15px; background: #fff; box-shadow: 0 28px 80px rgba(0,0,0,.3); animation: dialog-in .2s ease; }
+.removal-box h3 { margin: 0 0 9px; font-size: 15px; letter-spacing: -.02em; }
+.removal-box p { margin: 0; color: #6f7075; font-size: 11px; line-height: 1.55; }
+.removal-links { margin: 12px 0 0; padding: 11px 13px 11px 28px; border-radius: 10px; background: #faf9f7; color: #5f6064; font-size: 10px; line-height: 1.9; }
+.removal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+.removal-actions button { height: 38px; padding: 0 15px; }
+
 .dialog-layer { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 18px; background: rgba(10,10,12,.62); backdrop-filter: blur(4px); animation: fade-in .16s ease; }
 .dialog { width: min(520px, 100%); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,.25); border-radius: 17px; background: #fff; box-shadow: 0 28px 80px rgba(0,0,0,.28); animation: dialog-in .2s ease; }
 .dialog.dialog-wide { width: min(760px, 100%); }
@@ -458,6 +478,84 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 
 /* O valor que está sendo formado fica à vista o tempo todo — era a única coisa
    que a etapa de revisão dava e que a tela única não daria sozinha. */
+/* ===== A nova OS em densidade de sistema de balcão =====
+
+   O formato anterior gastava mais da metade da tela com moldura: um cabeçalho
+   de três linhas (chapéu, título e explicação), um círculo numerado e um ícone
+   decorativo por bloco, campos de 40px e linhas de peça de 51px. O conteúdo
+   dava 960px numa área de 688px, então quem abre a OS rolava para chegar no
+   problema relatado e nos mecânicos — os campos que ele mais preenche.
+
+   Aqui tudo que é moldura encolhe e o que é conteúdo fica: uma linha de título,
+   blocos sem ícone, campo de 32px e linha de peça de 34px. Vale só dentro da
+   nova OS (.dialog-os); o resto do sistema não muda. No celular os campos
+   voltam a 40px no @media de 560px — dedo não acerta 32px. */
+
+/* Cabeçalho: chapéu e título na mesma linha, sem a frase de apoio. */
+.dialog-os .dialog-header { align-items: center; padding: 10px 15px; }
+.dialog-os .dialog-header > div { display: flex; align-items: baseline; gap: 9px; }
+.dialog-os .dialog-header span { font-size: 8px; }
+.dialog-os .dialog-header h2 { margin: 0; font-size: 14px; }
+.dialog-os .dialog-header p { display: none; }
+.dialog-os .dialog-header > button { width: 26px; height: 26px; font-size: 18px; }
+
+.dialog-os .os-single { padding: 10px 13px; }
+.dialog-os .os-single-columns { gap: 11px; }
+.dialog-os .os-single-column { gap: 9px; }
+.dialog-os .os-single .form-section { gap: 8px; }
+
+/* O ícone de cada seção era decoração de 42px; o título dá conta sozinho. */
+.dialog-os .form-icon { display: none; }
+.dialog-os .form-intro { gap: 0; margin-bottom: 0; }
+.dialog-os .form-intro h3 { font-size: 11px; }
+.dialog-os .form-intro p { margin-top: 2px; font-size: 8px; }
+
+.dialog-os .os-block { padding: 8px 10px; }
+.dialog-os .os-step-blocks { gap: 8px; }
+.dialog-os .os-block-head { gap: 8px; margin-bottom: 8px; }
+.dialog-os .os-block-number { width: 20px; height: 20px; font-size: 8px; }
+.dialog-os .os-block-head strong { font-size: 11px; }
+.dialog-os .os-block-head small { margin-top: 1px; font-size: 8px; }
+.dialog-os .os-block-badge { padding: 2px 7px; font-size: 7px; }
+
+/* Campo de 32px: o mesmo de um sistema de balcão, e ainda clicável no mouse. */
+.dialog-os .field { gap: 3px; }
+.dialog-os .field > span { font-size: 8px; }
+.dialog-os .field input, .dialog-os .field select, .dialog-os .field textarea { min-height: 32px; padding: 0 9px; font-size: 9px; }
+.dialog-os .field textarea { min-height: 46px; padding-top: 7px; }
+.dialog-os .os-single textarea { min-height: 46px; }
+.dialog-os .field-help { font-size: 7px; }
+.dialog-os .form-grid { gap: 8px; }
+.dialog-os .os-inline-form { gap: 8px; }
+
+.dialog-os .os-party-switch { gap: 7px; margin-bottom: 8px; }
+.dialog-os .os-party-switch > button { height: 36px; font-size: 10px; }
+.dialog-os .mini-search { height: 32px; }
+.dialog-os .os-catalog-panel .mini-search { height: 30px; margin-bottom: 6px; }
+
+/* As faixas de dica eram do tamanho de um campo. Continuam legíveis, menores. */
+.dialog-os .os-search-hint, .dialog-os .os-search-empty { padding: 7px 9px; font-size: 9px; }
+.dialog-os .os-inline-hint, .dialog-os .settings-hint { font-size: 8px; line-height: 1.4; }
+.dialog-os .os-outside-fleet { padding: 8px 10px; font-size: 9px; }
+.dialog-os .os-list-label { margin-top: 8px; }
+
+.dialog-os .os-catalog-panel, .dialog-os .os-labor-panel { padding: 8px; }
+.dialog-os .os-builder-title { min-height: 0; }
+.dialog-os .os-piece-list { max-height: 190px; }
+.dialog-os .os-piece-list > button { min-height: 34px; padding: 4px 7px; gap: 7px; }
+.dialog-os .os-piece-list small { margin-top: 1px; }
+.dialog-os .os-items-builder { gap: 8px; }
+.dialog-os .selected-os-items { margin-top: 8px; }
+.dialog-os .os-items-total { min-height: 36px; padding: 6px 10px; }
+.dialog-os .vehicle-choice-list { gap: 6px; margin-top: 7px; }
+.dialog-os .vehicle-choice-list > button { min-height: 40px; padding: 6px 7px; }
+.dialog-os .mechanic-picker { max-height: 132px; }
+.dialog-os .os-search-results { max-height: 176px; }
+.dialog-os .os-search-actions { margin-top: 7px; }
+.dialog-os .primary-button, .dialog-os .outline-button, .dialog-os .ghost-button { height: 32px; font-size: 9px; }
+.dialog-os .dialog-footer { padding: 9px 15px; }
+.dialog-os .dialog-footer .primary-button { height: 36px; font-size: 10px; }
+
 .os-single-total { flex: 1; display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
 .os-single-total span { color: #77787c; font-size: 10px; }
 .os-single-total span b { margin-left: 5px; color: #4d4e51; font-size: 11px; font-weight: 800; }
@@ -1641,6 +1739,11 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
      cartões do resumo empilhados somavam ~300px, e "Nenhuma OS com você"
      ocupava outros 260px bem em cima da lista de onde ele ia pegar a
      próxima — que é exatamente o que ele abriu a tela para ver. */
+  /* A nova OS fica compacta no computador (ver .dialog-os), mas 32px de campo
+     é medida de mouse: no celular o dedo precisa dos 40px de volta. */
+  .dialog-os .field input, .dialog-os .field select { min-height: 40px; font-size: 10px; }
+  .dialog-os .os-party-switch > button { height: 44px; }
+  .dialog-os .primary-button, .dialog-os .outline-button, .dialog-os .ghost-button { height: 40px; }
   .mechanic-board .module-summary { grid-template-columns: repeat(3, 1fr); gap: 7px; }
   .mechanic-board .module-summary article { min-height: 0; padding: 9px 7px; text-align: center; }
   .mechanic-board .module-summary article span { font-size: 8px; }
@@ -2017,6 +2120,33 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   padding: 11px 13px; border: 1px dashed #dcdad6; border-radius: 10px;
   color: #929296; font-size: 11px; line-height: 1.45;
 }
+
+/* O rótulo de cada grupo da lista de motos da OS de parceira. Os dois grupos —
+   a frota e o que existe no sistema em nome de outro — ficam separados de
+   propósito: puxar a moto de um cliente para uma OS da parceira é legítimo,
+   mas quem atende precisa ver de onde ela veio antes de salvar. */
+.os-list-label {
+  display: flex; align-items: center; gap: 8px; margin-top: 13px;
+  color: #77787c; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em;
+}
+.os-list-label span {
+  padding: 2px 7px; border-radius: 20px; background: #f0efed; color: #6f7075;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; letter-spacing: 0;
+}
+.os-list-label.fora { color: #8a6420; }
+.os-list-label.fora span { background: #fdf7ec; color: #8a6420; }
+
+/* O aviso de que a moto escolhida não é da frota, com o botão de passá-la para
+   lá. Nunca automático: mover a moto de um cliente para a frota é uma decisão
+   de quem atende, não um efeito colateral de escolher a moto. */
+.os-outside-fleet {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px;
+  padding: 11px 13px; border: 1px solid #efdcb4; border-radius: 10px; background: #fdf7ec;
+  color: #8a6420; font-size: 11px; line-height: 1.45;
+}
+.os-outside-fleet > svg { flex: 0 0 auto; }
+.os-outside-fleet > span { flex: 1 1 220px; }
+.os-outside-fleet .outline-button { flex: 0 0 auto; height: 34px; }
 
 /* A lista de clientes que bateram com a busca: escolher é um clique, e não o
    primeiro que o sistema achar. Rola quando a oficina tem muitos homônimos. */

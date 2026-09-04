@@ -1811,6 +1811,207 @@ await passo("no celular, o mecânico vê a OS inteira sem rolar e acerta os bot�
   if (problemas.length) throw new Error("celular do mecânico:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("OS de parceira: acha a moto pela placa sem hífen, e a que já está no sistema", async () => {
+  // Os dois defeitos que a oficina encontrou usando o sistema:
+  //   1. a placa é gravada com hífen ("FLA-2C34"), e digitar "FLA2" — que é
+  //      como se digita placa com pressa — não achava a moto que estava ali,
+  //      na frota, na lista logo abaixo;
+  //   2. uma moto que já existe no sistema em nome de um cliente não aparecia
+  //      de jeito nenhum, e o caminho que sobrava era cadastrar a mesma placa
+  //      outra vez, partindo o histórico da moto em dois.
+  const problemas = [];
+  const motos = await banco("motorcycles");
+  const daFrota = motos.find((moto) => moto.plate === "FLA-2C34");
+  const deCliente = motos.find((moto) => moto.ownerId && !moto.partnerId);
+  if (!daFrota) throw new Error("a moto da frota FLA-2C34 não existe; o passo 20 deveria tê-la criado");
+  if (!deCliente) throw new Error("nenhuma moto de cliente no banco para o teste");
+  const semHifen = String(deCliente.plate).replace(/[^A-Za-z0-9]/g, "");
+
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+  await p.locator(".os-party-switch button", { hasText: /parceira/i }).click();
+  await p.waitForTimeout(1200);
+
+  const busca = p.locator(".os-partner-bike-search input").first();
+  const listar = async () => (await p.locator(".vehicle-choice-list > button:not(.new-vehicle-choice)").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
+  const grupos = async () => (await p.locator(".os-list-label").allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim());
+
+  // 1. a placa da frota sem o hífen
+  await busca.fill("FLA2");
+  await p.waitForTimeout(1000);
+  const porPlacaCurta = await listar();
+  if (!porPlacaCurta.some((texto) => /FLA-2C34/.test(texto))) problemas.push(`"FLA2" não achou a moto da própria frota: ${JSON.stringify(porPlacaCurta)}`);
+  if (!(await grupos()).some((texto) => /FROTA/i.test(texto))) problemas.push("a lista não diz que essas motos são da frota da parceira");
+
+  // 2. a moto de um cliente, que já existe no sistema
+  await busca.fill(semHifen.slice(0, 4));
+  await p.waitForTimeout(1000);
+  const achadas = await listar();
+  if (!achadas.some((texto) => texto.includes(String(deCliente.plate)))) problemas.push(`a moto ${deCliente.plate}, que já está no sistema, não apareceu com "${semHifen.slice(0, 4)}": ${JSON.stringify(achadas)}`);
+  if (!(await grupos()).some((texto) => /FORA DESTA FROTA/i.test(texto))) problemas.push(`a moto de fora não veio com o rótulo do grupo: ${JSON.stringify(await grupos())}`);
+
+  // 3. escolher a moto de fora avisa de quem ela é, e a OS continua possível
+  await p.locator(".vehicle-choice-list > button", { hasText: String(deCliente.plate) }).first().click();
+  await p.waitForTimeout(1200);
+  const aviso = await p.locator(".os-outside-fleet").first().innerText().catch(() => "");
+  if (!/não da frota|não está na frota|outra empresa parceira/i.test(aviso)) problemas.push(`escolher moto de fora não avisou nada: ${JSON.stringify(aviso)}`);
+  if (deCliente.ownerName && !aviso.includes(String(deCliente.ownerName))) problemas.push(`o aviso não diz de quem é a moto: ${JSON.stringify(aviso)}`);
+
+  // 4. incluir na frota é um botão à parte, e a prova é no banco
+  const antes = (await banco("motorcycles")).find((moto) => moto._id === deCliente._id);
+  if (antes?.partnerId) problemas.push("a moto entrou na frota só de ser escolhida");
+  await p.locator(".os-outside-fleet button", { hasText: /Incluir na frota/i }).first().click();
+  await p.waitForTimeout(3500);
+  const depois = (await banco("motorcycles")).find((moto) => moto._id === deCliente._id);
+  if (!depois?.partnerId) problemas.push("o botão não gravou a parceira na moto");
+  // O dono continua sendo o dono: a moto passou a rodar para a parceira, não
+  // mudou de pessoa. Apagar o dono aqui perderia o histórico dele.
+  if (depois?.ownerId !== deCliente.ownerId) problemas.push(`incluir na frota mexeu no dono: ${JSON.stringify(depois?.ownerId)}, era ${JSON.stringify(deCliente.ownerId)}`);
+  if (await p.locator(".os-outside-fleet").count()) problemas.push("o aviso continuou depois de a moto entrar na frota");
+
+  await p.locator(".dialog-footer .ghost-button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+  if (problemas.length) throw new Error("moto na OS de parceira:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("a nova OS cabe numa tela só, sem rolar atrás do problema e dos mecânicos", async () => {
+  // O formato anterior gastava mais da metade da tela com moldura: cabeçalho de
+  // três linhas, um ícone decorativo de 42px por seção, círculo numerado por
+  // bloco, campo de 40px e linha de peça de 51px. Dava 960px de conteúdo numa
+  // área de 688px — quem abre a OS rolava para chegar no problema relatado e
+  // nos mecânicos, que são os campos que ele mais preenche.
+  const problemas = [];
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+  const medida = await p.evaluate(() => {
+    const corpo = document.querySelector(".dialog-body.os-single");
+    const cabecalho = document.querySelector(".dialog-os .dialog-header");
+    const campo = document.querySelector(".dialog-os .field input");
+    const peca = document.querySelector(".dialog-os .os-piece-list > button");
+    if (!corpo) return null;
+    return {
+      corpo: Math.round(corpo.getBoundingClientRect().height),
+      conteudo: corpo.scrollHeight,
+      cabecalho: cabecalho ? Math.round(cabecalho.getBoundingClientRect().height) : 0,
+      campo: campo ? Math.round(campo.getBoundingClientRect().height) : 0,
+      peca: peca ? Math.round(peca.getBoundingClientRect().height) : 0,
+      // Os campos que ficavam abaixo da dobra.
+      textoTodo: corpo.innerText,
+    };
+  });
+  if (!medida) throw new Error("a OS não abriu na tela única");
+  // Numa tela de 950px o conteúdo tem de caber; sobra é o que o navegador
+  // devolve como scrollHeight igual à altura visível.
+  if (medida.conteudo > medida.corpo + 12) problemas.push(`a OS ainda rola: ${medida.conteudo}px de conteúdo numa área de ${medida.corpo}px`);
+  if (medida.cabecalho > 60) problemas.push(`o cabeçalho da OS voltou a ${medida.cabecalho}px (era 150px em três linhas)`);
+  if (medida.campo > 34) problemas.push(`o campo da OS está com ${medida.campo}px, esperado no máximo 34`);
+  if (medida.peca && medida.peca > 42) problemas.push(`a linha de peça está com ${medida.peca}px, esperado no máximo 42`);
+  for (const pedaco of ["Problema relatado", "Mecânicos responsáveis", "Adicionar peças", "Adicionar mão de obra"]) {
+    if (!medida.textoTodo.includes(pedaco)) problemas.push(`"${pedaco}" sumiu da tela única`);
+  }
+  await p.locator(".dialog-footer .ghost-button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+  if (problemas.length) throw new Error("densidade da nova OS:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("excluir cadastro: some quem nunca foi usado, e desativa quem tem histórico", async () => {
+  // Os cadastros principais não tinham exclusão nenhuma: dava para editar e
+  // nunca remover. Mas apagar de verdade só é seguro quando o cadastro nunca
+  // foi usado — apagar uma peça já vendida faz a venda antiga apontar para um
+  // produto que não existe, e isso não dá erro na hora, aparece semanas depois.
+  const problemas = [];
+  const texto = (valor) => ({ stringValue: valor });
+  const FS = "http://127.0.0.1:8080/v1/projects/picapau-teste/databases/(default)/documents";
+
+  // Uma peça que nunca entrou em OS, venda nem entrada: é a que pode sumir.
+  await fetch(`${FS}/products/PRD-900`, {
+    method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" },
+    body: JSON.stringify({ fields: {
+      code: texto("PRD-900"), name: texto("PECA DE TESTE PARA APAGAR"), category: texto("Óleos e lubrificantes"),
+      cost: texto("R$ 10,00"), price: texto("R$ 16,00"), status: texto("Em estoque"),
+      stock: { integerValue: "0" }, minimum: { integerValue: "0" }, active: { booleanValue: true },
+    } }),
+  });
+  await p.reload();
+  await p.waitForTimeout(4000);
+  await ir("Produtos e estoque");
+
+  const abrirPeca = async (nome) => {
+    await p.locator(".mini-search input").first().fill(nome);
+    await p.waitForTimeout(1200);
+    const linha = p.locator("tbody tr").filter({ hasText: nome }).first();
+    if (!(await linha.count())) throw new Error(`a peça "${nome}" não apareceu na lista`);
+    await linha.locator("button").last().click();
+    await p.waitForTimeout(2500);
+  };
+  const fecharPeca = async () => {
+    await p.locator(".dialog-actions-row .outline-button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+    await p.waitForTimeout(1200);
+    await p.locator(".mini-search input").first().fill("");
+    await p.waitForTimeout(900);
+  };
+
+  // 1. nunca usada: apaga de vez
+  await abrirPeca("PECA DE TESTE PARA APAGAR");
+  if (!(await p.locator(".removal-trigger").count())) problemas.push("o formulário de peça não tem botão de excluir");
+  await p.locator(".removal-trigger").first().click();
+  await p.waitForTimeout(1000);
+  const aviso = await p.locator(".removal-box").innerText().catch(() => "");
+  if (!/nunca foi usado/i.test(aviso)) problemas.push(`a confirmação não disse que a peça nunca foi usada: ${JSON.stringify(aviso.slice(0, 160))}`);
+  if (!/Apagar de vez/i.test(aviso)) problemas.push("o botão não oferece apagar de vez");
+  await p.locator(".removal-box button").last().click();
+  await p.waitForTimeout(4000);
+  if ((await banco("products")).some((item) => item._id === "PRD-900")) problemas.push("a peça sem uso continuou no banco");
+
+  // 2. já usada: vira inativa, e o histórico fica
+  const usada = (await banco("products")).find((item) => /20W50/i.test(item.name || ""));
+  if (!usada) throw new Error("a peça do passo 2 sumiu do banco");
+  await p.locator(".mini-search input").first().fill("");
+  await p.waitForTimeout(900);
+  await abrirPeca("20W50");
+  await p.locator(".removal-trigger").first().click();
+  await p.waitForTimeout(1000);
+  const aviso2 = await p.locator(".removal-box").innerText().catch(() => "");
+  if (!/não pode ser apagado/i.test(aviso2)) problemas.push(`a peça usada foi oferecida para apagar: ${JSON.stringify(aviso2.slice(0, 160))}`);
+  if (!/venda no balcão|entrada[s]? de estoque/i.test(aviso2)) problemas.push(`a confirmação não lista onde a peça aparece: ${JSON.stringify(aviso2.slice(0, 200))}`);
+  if (!/Desativar cadastro/i.test(aviso2)) problemas.push("o botão não oferece desativar");
+  await p.locator(".removal-box button").last().click();
+  await p.waitForTimeout(4000);
+  const depois = (await banco("products")).find((item) => item._id === usada._id);
+  if (!depois) problemas.push("desativar apagou a peça do banco");
+  else if (depois.active !== false) problemas.push(`a peça não ficou inativa: active = ${JSON.stringify(depois.active)}`);
+
+  // 3. inativa some de onde se ESCOLHE, e continua na lista de cadastros
+  await p.locator(".mini-search input").first().fill("");
+  await p.waitForTimeout(1500);
+  const naLista = await p.locator("tbody").innerText();
+  if (!/20W50/i.test(naLista)) problemas.push("a peça inativa sumiu da própria lista de cadastros; não haveria como reativar");
+  if (!/Inativo/i.test(naLista)) problemas.push("a lista não marca a peça como inativa");
+
+  await ir("Ordens de serviço");
+  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.waitForTimeout(1500);
+  if (await p.getByText(/tipo de atendimento/i).count()) {
+    await p.getByText(/Abrir OS completa/i).first().click();
+    await p.waitForTimeout(1800);
+  }
+  const oferecidas = (await p.locator(".os-piece-list > button").allInnerTexts()).join(" ");
+  if (/20W50/i.test(oferecidas)) problemas.push("a peça inativa continua sendo oferecida na OS");
+  await p.locator(".dialog-footer .ghost-button", { hasText: /^Cancelar$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1200);
+  if (problemas.length) throw new Error("exclusão de cadastro:\n      - " + problemas.join("\n      - "));
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();

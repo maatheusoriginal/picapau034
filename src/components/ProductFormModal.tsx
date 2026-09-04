@@ -9,8 +9,11 @@ import { nextSequentialId } from "../firestore-data";
 import { isInternalEan13, isValidEan13, uniqueInternalEan13 } from "../barcode";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
+import { RemovalButton, type RemovalConfig } from "./RemovalButton";
 
 interface ProductFormModalProps {
+  /** Excluir a peça pelo próprio formulário. Ausente = só criar e editar. */
+  removal?: RemovalConfig;
   isOpen: boolean;
   onClose: () => void;
   onSaved: (product: ProductRecord) => void;
@@ -43,6 +46,7 @@ interface ProductFormModalProps {
 }
 
 export const ProductFormModal: React.FC<ProductFormModalProps> = ({
+  removal,
   isOpen,
   onClose,
   onSaved,
@@ -769,14 +773,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
           {/* Dialog Footer Actions */}
           <div className="dialog-actions-row">
-            <button
-              type="button"
-              className="outline-button"
-              onClick={onClose}
-              disabled={isSaving}
-            >
-              Cancelar
-            </button>
+            <div>
+              <button
+                type="button"
+                className="outline-button"
+                onClick={onClose}
+                disabled={isSaving}
+              >
+                Cancelar
+              </button>
+              {editingProduct && removal ? <RemovalButton tipo="produto" colecao="products" id={editingProduct.id} nome={editingProduct.name} {...removal}/> : null}
+            </div>
             <div style={{ display: "flex", gap: "8px" }}>
               {activeTab !== "ident" && activeTab !== "history" && (
                 <button

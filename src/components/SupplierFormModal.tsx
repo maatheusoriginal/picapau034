@@ -4,8 +4,11 @@ import { emMaiusculo } from "../text-case";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
 import { nextSequentialId } from "../firestore-data";
+import { RemovalButton, type RemovalConfig } from "./RemovalButton";
 
 interface SupplierFormModalProps {
+  /** Excluir o cadastro pelo próprio formulário. Ausente = só criar e editar. */
+  removal?: RemovalConfig;
   isOpen: boolean;
   onClose: () => void;
   onSaved: (supplier: SupplierConfig) => void;
@@ -15,6 +18,7 @@ interface SupplierFormModalProps {
 }
 
 export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
+  removal,
   isOpen,
   onClose,
   onSaved,
@@ -413,9 +417,12 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
           )}
 
           <div className="dialog-actions-row">
-            <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
-              Cancelar
-            </button>
+            <div>
+              <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
+                Cancelar
+              </button>
+              {editingSupplier && removal ? <RemovalButton tipo="fornecedor" colecao="suppliers" id={editingSupplier.id} nome={editingSupplier.name} {...removal}/> : null}
+            </div>
             <div style={{ display: "flex", gap: "8px" }}>
               {activeTab !== "ident" && (
                 <button

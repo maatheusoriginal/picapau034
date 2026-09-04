@@ -21,6 +21,8 @@
     "check:permissions": "tsx scripts/check-permissions.ts",
     "check:api-imports": "tsx scripts/check-api-imports.ts",
     "check:mechanic": "tsx scripts/check-mechanic.ts",
+    "check:fleet": "tsx scripts/check-fleet.ts",
+    "check:removal": "tsx scripts/check-removal.ts",
     "check:backup": "tsx scripts/check-backup.ts",
     "check:hooks": "tsx scripts/check-hooks.ts",
     "check:firestore-data": "tsx scripts/check-firestore-data.ts",

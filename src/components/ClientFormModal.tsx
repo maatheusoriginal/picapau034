@@ -8,8 +8,11 @@ import { formatPlate, isValidPlate, motorcycleIdFor, platePattern, samePlate } f
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
 import { nextSequentialId } from "../firestore-data";
+import { RemovalButton, type RemovalConfig } from "./RemovalButton";
 
 interface ClientFormModalProps {
+  /** Excluir o cadastro pelo próprio formulário. Ausente = só criar e editar. */
+  removal?: RemovalConfig;
   isOpen: boolean;
   onClose: () => void;
   onSaved: (client: ClientRecord) => void;
@@ -32,6 +35,7 @@ interface ClientFormModalProps {
 }
 
 export const ClientFormModal: React.FC<ClientFormModalProps> = ({
+  removal,
   isOpen,
   onClose,
   onSaved,
@@ -508,9 +512,12 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
           )}
 
           <div className="dialog-actions-row">
-            <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
-              Cancelar
-            </button>
+            <div>
+              <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
+                Cancelar
+              </button>
+              {editingClient && removal ? <RemovalButton tipo="cliente" colecao="clients" id={editingClient.id} nome={editingClient.name} {...removal}/> : null}
+            </div>
             <div style={{ display: "flex", gap: "8px" }}>
               {activeTab !== "ident" && (
                 <button

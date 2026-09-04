@@ -6,8 +6,11 @@ import { saveFirestoreDoc } from "../../app/firebase/client";
 import { defaultSystemLists } from "../types";
 import { fullModelName, modelsOf, splitModelName, versionsOf } from "../motorcycle-catalog";
 import { motorcycleIdFor } from "../plate";
+import { RemovalButton, type RemovalConfig } from "./RemovalButton";
 
 interface MotorcycleFormModalProps {
+  /** Excluir o cadastro pelo próprio formulário. Ausente = só criar e editar. */
+  removal?: RemovalConfig;
   isOpen: boolean;
   onClose: () => void;
   onSaved: (motorcycle: MotorcycleRecord) => void;
@@ -26,6 +29,7 @@ interface MotorcycleFormModalProps {
 }
 
 export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
+  removal,
   isOpen,
   onClose,
   onSaved,
@@ -490,9 +494,12 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
           </div>
 
           <div className="dialog-actions-row">
-            <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
-              Cancelar
-            </button>
+            <div>
+              <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
+                Cancelar
+              </button>
+              {editingMotorcycle && removal ? <RemovalButton tipo="moto" colecao="motorcycles" id={editingMotorcycle.id} nome={editingMotorcycle.plate} {...removal}/> : null}
+            </div>
             <button type="submit" className="primary-button save-action-btn" disabled={isSaving}>
               {isSaving ? "Salvando no Firestore..." : (editingMotorcycle ? "Salvar Alterações" : "Cadastrar Motocicleta")}
             </button>
