@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { clamp, displayValue, isPartialNumber, parseTyped, settleOnBlur } from "../number-input";
+import { arredondar, clamp, displayValue, isPartialNumber, parseTyped, settleOnBlur } from "../number-input";
 
 type Props = Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "min" | "max"> & {
   value: number;
@@ -15,6 +15,16 @@ type Props = Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChan
   blankValue?: number;
   min?: number;
   max?: number;
+  /**
+   * Casas decimais fixas na exibição — 2 para dinheiro e porcentagem.
+   *
+   * Com casas o campo deixa de ser input[type=number]: aquele tipo não mostra
+   * vírgula, e "2.68" num sistema de oficina brasileira é o que faz alguém
+   * digitar o ponto e o valor entrar errado. Vira campo de texto com teclado
+   * decimal, aceitando vírgula ou ponto enquanto se digita e assentando em
+   * "0,00" ao sair.
+   */
+  casas?: number;
 };
 
 /**
@@ -28,8 +38,8 @@ type Props = Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChan
  * O valor continua subindo a cada tecla, para as telas que reagem enquanto se
  * digita — no cadastro de peça, mudar o custo recalcula o preço na hora.
  */
-export const NumberField: React.FC<Props> = ({ value, onChange, fallback = 0, blankValue, min, max, onBlur, ...rest }) => {
-  const escrever = (numero: number) => displayValue(numero, blankValue);
+export const NumberField: React.FC<Props> = ({ value, onChange, fallback = 0, blankValue, min, max, casas, onBlur, ...rest }) => {
+  const escrever = (numero: number) => displayValue(numero, blankValue, casas);
   const [text, setText] = useState(() => escrever(value));
   // O último número que este campo mandou para cima. Serve para distinguir
   // "o pai mudou o valor" de "é o eco do que acabei de digitar" — sem isso, o
@@ -43,8 +53,9 @@ export const NumberField: React.FC<Props> = ({ value, onChange, fallback = 0, bl
   }, [value]);
 
   const handleChange = (raw: string) => {
-    // Um input[type=number] entrega "" para o que ele não consegue ler; o
-    // teste de número parcial cobre o resto ("1,", "-").
+    // Um input[type=number] entrega "" para o que ele não consegue ler; num
+    // campo de texto (com casas) é este teste que barra a letra. Ele aceita o
+    // número pela metade — "1," e "-" são estados normais de quem digita.
     if (!isPartialNumber(raw)) return;
     setText(raw);
     const typed = parseTyped(raw);
@@ -57,13 +68,21 @@ export const NumberField: React.FC<Props> = ({ value, onChange, fallback = 0, bl
   return (
     <input
       {...rest}
-      type="number"
-      min={min}
-      max={max}
+      // Campo de texto quando há casas decimais: input[type=number] não exibe
+      // vírgula. O teclado do celular continua sendo o numérico.
+      type={casas === undefined ? "number" : "text"}
+      inputMode={casas === undefined ? undefined : "decimal"}
+      min={casas === undefined ? min : undefined}
+      max={casas === undefined ? max : undefined}
       value={text}
       onChange={(event) => handleChange(event.target.value)}
       onBlur={(event) => {
-        const settled = clamp(settleOnBlur(text, fallback), min, max);
+        // Com casas decimais o valor sobe ARREDONDADO, não só escrito
+        // arredondado: digitar 2,675 num campo de dinheiro mostrava "2,68" e
+        // guardava 2,675, então o preço calculado saía de um custo que não era
+        // o que estava na tela.
+        const bruto = settleOnBlur(text, fallback);
+        const settled = clamp(casas === undefined ? bruto : arredondar(bruto, casas), min, max);
         reported.current = settled;
         setText(escrever(settled));
         onChange(settled);

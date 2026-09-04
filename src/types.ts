@@ -737,6 +737,13 @@ export type MotorcycleRecord = {
   chassis?: string;
   renavam?: string;
   notes?: string;
+  /**
+   * Moto desativada some dos seletores (abrir OS, escolher a moto do cliente)
+   * e continua na lista de motocicletas e em todas as OS antigas. É o que
+   * acontece quando se tenta excluir uma moto que já passou pela oficina:
+   * apagar quebraria o histórico. Ausente conta como ativa.
+   */
+  active?: boolean;
 };
 
 export type SettingsConfig = {

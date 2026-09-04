@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { ClientRecord, MotorcycleRecord, PartnerConfig } from "../types";
 import { emMaiusculo } from "../text-case";
 import { QuickAddSelect } from "./QuickAddSelect";
@@ -6,8 +6,11 @@ import { saveFirestoreDoc } from "../../app/firebase/client";
 import { defaultSystemLists } from "../types";
 import { fullModelName, modelsOf, splitModelName, versionsOf } from "../motorcycle-catalog";
 import { motorcycleIdFor } from "../plate";
+import { RemovalButton, type RemovalConfig } from "./RemovalButton";
 
 interface MotorcycleFormModalProps {
+  /** Excluir o cadastro pelo próprio formulário. Ausente = só criar e editar. */
+  removal?: RemovalConfig;
   isOpen: boolean;
   onClose: () => void;
   onSaved: (motorcycle: MotorcycleRecord) => void;
@@ -26,6 +29,7 @@ interface MotorcycleFormModalProps {
 }
 
 export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
+  removal,
   isOpen,
   onClose,
   onSaved,
@@ -40,6 +44,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   preselectedPartnerId,
 }) => {
   const [isSaving, setIsSaving] = useState(false);
+  const formularioRef = useRef<HTMLFormElement>(null);
   // O que falta preencher, dito DENTRO do formulário.
   //
   // Era um `notify` — o aviso de canto da aplicação —, que num formulário
@@ -226,12 +231,29 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
     }
   };
 
+  /**
+   * F5 grava e Esc fecha, como no sistema que a oficina já usa e como no
+   * cadastro de peça. O atalho é ligado só enquanto este formulário está
+   * aberto: fechou, F5 volta a recarregar a página.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+    const noTeclado = (evento: KeyboardEvent) => {
+      if (evento.key === "Escape") { evento.preventDefault(); onClose(); return; }
+      if (evento.key !== "F5") return;
+      evento.preventDefault();
+      formularioRef.current?.requestSubmit();
+    };
+    window.addEventListener("keydown", noTeclado);
+    return () => window.removeEventListener("keydown", noTeclado);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div className="dialog-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="dialog-window" style={{ maxWidth: "680px" }}>
-        <div className="dialog-head">
+        <div className="dialog-head pdv-head">
           <div>
             <strong>{editingMotorcycle ? "Editar Motocicleta" : "Cadastrar Motocicleta"}</strong>
             <span>{editingMotorcycle ? `Placa: ${editingMotorcycle.plate} · ${editingMotorcycle.model}` : "Cadastro rápido para atendimento no balcão e oficina"}</span>
@@ -239,8 +261,20 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
           <button className="icon-close" onClick={onClose} aria-label="Fechar modal">✕</button>
         </div>
 
-        <form onSubmit={handleSubmit} className="dialog-body">
+        {/*
+            noValidate: a conferência é nossa, não a do navegador.
+
+            Enquanto o cadastro tinha etapas, o campo obrigatório da etapa
+            seguinte nem estava na tela, então o `required` do HTML nunca
+            barrava nada. Numa tela só ele barra — e o balão do navegador
+            entra na frente da mensagem escrita DENTRO do formulário, que é
+            justamente a que diz o que a oficina precisa ("toda pessoa
+            cadastrada precisa de pelo menos uma moto vinculada").
+          */}
+          <form noValidate ref={formularioRef} onSubmit={handleSubmit} className="dialog-body">
           {erroForm ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erroForm}</span></div> : null}
+          {/* Mesma régua do cadastro de peça: rótulo à esquerda do campo. */}
+          <div className="pdv-form">
           <div className="form-section-stack">
             {/* Linha 1: Placa e Proprietário */}
             <div className="form-grid-2">
@@ -265,7 +299,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
               </label>
 
               <label className="field-group">
-                <span className="field-label">Cliente / Proprietário</span>
+                <span className="field-label">Proprietário</span>
                 <select
                   value={ownerId}
                   onChange={(e) => setOwnerId(e.target.value)}
@@ -289,7 +323,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
             */}
             {partners.length > 0 ? (
               <label className="field-group">
-                <span className="field-label">Empresa parceira responsável</span>
+                <span className="field-label">Parceira responsável</span>
                 <select
                   value={partnerId}
                   onChange={(e) => setPartnerId(e.target.value)}
@@ -312,7 +346,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
             <div className="form-grid-3">
               {/* <div>, não <label>: botão dentro de label aciona o select junto. */}
               <div className="field-group">
-                <span className="field-label">Marca / Fabricante <b className="req">*</b></span>
+                <span className="field-label">Marca <b className="req">*</b></span>
                 {/*
                   Trocar de marca limpa o modelo: "CG 160" não existe na
                   Yamaha, e deixar o anterior gravaria uma moto que não existe.
@@ -404,7 +438,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
             {/* Linha 3: Ano, Cor, KM e Cilindrada */}
             <div className="form-grid-4">
               <label className="field-group">
-                <span className="field-label">Ano Fab./Mod.</span>
+                <span className="field-label">Ano fab./mod.</span>
                 <input
                   type="text"
                   value={year}
@@ -454,7 +488,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
             {/* Linha 4: Chassi e RENAVAM */}
             <div className="form-grid-2">
               <label className="field-group">
-                <span className="field-label">Número do Chassi</span>
+                <span className="field-label">Chassi</span>
                 <input
                   type="text"
                   value={chassis}
@@ -465,7 +499,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
               </label>
 
               <label className="field-group">
-                <span className="field-label">Código RENAVAM</span>
+                <span className="field-label">RENAVAM</span>
                 <input
                   type="text"
                   value={renavam}
@@ -478,7 +512,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
 
             {/* Linha 5: Observações */}
             <label className="field-group">
-              <span className="field-label">Observações e Avarias Prévias</span>
+              <span className="field-label">Observações</span>
               <textarea
                 rows={2}
                 value={notes}
@@ -488,12 +522,18 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
               />
             </label>
           </div>
+          </div>
 
           <div className="dialog-actions-row">
-            <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
-              Cancelar
-            </button>
-            <button type="submit" className="primary-button save-action-btn" disabled={isSaving}>
+            <div>
+              <button type="button" className="outline-button pdv-footer-button" onClick={onClose} disabled={isSaving}>
+                <kbd>Esc</kbd>
+                Cancelar
+              </button>
+              {editingMotorcycle && removal ? <RemovalButton tipo="moto" colecao="motorcycles" id={editingMotorcycle.id} nome={editingMotorcycle.plate} {...removal}/> : null}
+            </div>
+            <button type="submit" className="primary-button save-action-btn pdv-footer-button" disabled={isSaving}>
+                <kbd>F5</kbd>
               {isSaving ? "Salvando no Firestore..." : (editingMotorcycle ? "Salvar Alterações" : "Cadastrar Motocicleta")}
             </button>
           </div>

@@ -4,8 +4,11 @@ import { emMaiusculo } from "../text-case";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
 import { nextSequentialId } from "../firestore-data";
+import { RemovalButton, type RemovalConfig } from "./RemovalButton";
 
 interface EmployeeFormModalProps {
+  /** Excluir o cadastro pelo próprio formulário. Ausente = só criar e editar. */
+  removal?: RemovalConfig;
   isOpen: boolean;
   onClose: () => void;
   onSaved: (employee: UserConfig) => void;
@@ -15,6 +18,7 @@ interface EmployeeFormModalProps {
 }
 
 export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
+  removal,
   isOpen,
   onClose,
   onSaved,
@@ -293,7 +297,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
                 <label className="field-group">
                   <span className="field-label">Salário Base (R$)</span>
-                  <NumberField
+                  <NumberField casas={2}
                     step="0.01"
                     min={0}
                     fallback={0}
@@ -322,7 +326,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               <div className="form-grid-2">
                 <label className="field-group">
                   <span className="field-label">Comissão em Serviços (%)</span>
-                  <NumberField
+                  <NumberField casas={2}
                     step="0.5"
                     min={0}
                     max={100}
@@ -336,7 +340,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
                 <label className="field-group">
                   <span className="field-label">Comissão em Peças / Vendas (%)</span>
-                  <NumberField
+                  <NumberField casas={2}
                     step="0.5"
                     min={0}
                     max={100}
@@ -429,9 +433,12 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
           )}
 
           <div className="dialog-actions-row">
-            <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
-              Cancelar
-            </button>
+            <div>
+              <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
+                Cancelar
+              </button>
+              {editingEmployee && removal ? <RemovalButton tipo="funcionario" colecao="employees" id={editingEmployee.id} nome={editingEmployee.name} {...removal}/> : null}
+            </div>
             <div style={{ display: "flex", gap: "8px" }}>
               {activeTab !== "ident" && (
                 <button

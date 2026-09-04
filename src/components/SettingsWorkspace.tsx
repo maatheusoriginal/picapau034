@@ -1116,7 +1116,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
 
               <label className="settings-field">
                 <span className="settings-field-label">Margem de Lucro Sugerida (%)</span>
-                <NumberField
+                <NumberField casas={2}
                   min={0}
                   fallback={45}
                   value={generalSettings.suggestedMarkup}
@@ -1332,7 +1332,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                 <div className="settings-grid-2">
                   <label className="settings-field">
                     <span className="settings-field-label">Preço da Mão de Obra (R$) <b className="req">*</b></span>
-                    <NumberField
+                    <NumberField casas={2}
                       step="0.01"
                       min={0}
                       required
@@ -1590,7 +1590,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                 <div className="settings-grid-2">
                   <label className="settings-field">
                     <span className="settings-field-label">Taxa Débito (%)</span>
-                    <NumberField
+                    <NumberField casas={2}
                       step="0.01"
                       min={0}
                       fallback={0}
@@ -1601,7 +1601,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Taxa Crédito 1x (%)</span>
-                    <NumberField
+                    <NumberField casas={2}
                       step="0.01"
                       min={0}
                       fallback={0}
@@ -1615,7 +1615,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                 <div className="settings-grid-2">
                   <label className="settings-field">
                     <span className="settings-field-label">Crédito 2x a 6x (%)</span>
-                    <NumberField
+                    <NumberField casas={2}
                       step="0.01"
                       min={0}
                       fallback={0}
@@ -1626,7 +1626,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Crédito 7x a 12x (%)</span>
-                    <NumberField
+                    <NumberField casas={2}
                       step="0.01"
                       min={0}
                       fallback={0}
@@ -1718,7 +1718,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Desconto em Mão de Obra (%)</span>
-                    <NumberField
+                    <NumberField casas={2}
                       min={0}
                       max={100}
                       fallback={0}

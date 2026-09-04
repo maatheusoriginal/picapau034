@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsConfig, StockEntryRecord, SupplierConfig } from "../types";
 import { emMaiusculo } from "../text-case";
 import { QuickAddSelect } from "./QuickAddSelect";
@@ -9,8 +9,11 @@ import { nextSequentialId } from "../firestore-data";
 import { isInternalEan13, isValidEan13, uniqueInternalEan13 } from "../barcode";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
+import { RemovalButton, type RemovalConfig } from "./RemovalButton";
 
 interface ProductFormModalProps {
+  /** Excluir a peça pelo próprio formulário. Ausente = só criar e editar. */
+  removal?: RemovalConfig;
   isOpen: boolean;
   onClose: () => void;
   onSaved: (product: ProductRecord) => void;
@@ -43,6 +46,7 @@ interface ProductFormModalProps {
 }
 
 export const ProductFormModal: React.FC<ProductFormModalProps> = ({
+  removal,
   isOpen,
   onClose,
   onSaved,
@@ -58,8 +62,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   settings = null,
   movementSources,
 }) => {
-  const [activeTab, setActiveTab] = useState<"ident" | "prices" | "stock" | "compat" | "extra" | "history">("ident");
+  const [activeTab, setActiveTab] = useState<"dados" | "history">("dados");
   const [isSaving, setIsSaving] = useState(false);
+  const formularioRef = useRef<HTMLFormElement>(null);
   // O que falta preencher, dito dentro do formulário. Era um aviso de canto
   // que aparecia atrás do modal.
   const [erro, setErro] = useState("");
@@ -168,8 +173,34 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
       setNotes("");
       setActive(true);
     }
-    setActiveTab("ident");
+    setActiveTab("dados");
   }, [isOpen, editingProduct, allProducts.length, settings?.defaultUnit, settings?.suggestedMarkup, settings?.defaultMinStock]);
+
+  /**
+   * F5 grava e Esc fecha, como no sistema que a oficina já usa.
+   *
+   * O atalho está escrito no botão, então precisa funcionar de verdade — um
+   * rótulo "F5" que não faz nada é pior que não ter rótulo. F5 é o refresh do
+   * navegador, e por isso o atalho é ligado SÓ enquanto este formulário está
+   * aberto: fechou o cadastro, F5 volta a recarregar a página. Quem quiser
+   * recarregar com o cadastro aberto ainda tem Ctrl+R.
+   *
+   * O hook fica aqui em cima, antes de qualquer return: hook depois de return
+   * é o que já derrubou a tela duas vezes neste projeto.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+    const noTeclado = (evento: KeyboardEvent) => {
+      if (evento.key === "Escape") { evento.preventDefault(); onClose(); return; }
+      if (evento.key !== "F5") return;
+      evento.preventDefault();
+      // Dispara o mesmo submit do botão, para passar pela conferência dos
+      // campos obrigatórios em vez de gravar por fora dela.
+      formularioRef.current?.requestSubmit();
+    };
+    window.addEventListener("keydown", noTeclado);
+    return () => window.removeEventListener("keydown", noTeclado);
+  }, [isOpen, onClose]);
 
   // "markup": o preço de venda é sempre custo + margem, e o campo fica travado —
   // é a configuração que garante a margem e impede vender abaixo do custo por
@@ -200,28 +231,24 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
   const grossProfit = price - cost;
 
-  // As etapas do cadastro, na ordem. A aba de movimentação fica fora: é
-  // leitura, não etapa.
-  const etapas = ["ident", "prices", "stock", "compat", "extra"] as const;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Pressionar Enter dentro de qualquer campo dispara o submit do
-    // formulário, em qualquer etapa. Era o que fechava o cadastro no meio do
-    // caminho: a peça era gravada com o que já estava preenchido e a tela
-    // sumia, como se tivesse dado erro. Enter agora avança de etapa, que é o
-    // que a pessoa espera — gravar é só pelo botão da última.
+    // Enter dentro de um campo dispara este submit. Com o cadastro numa tela
+    // só isso é o que se espera — mas os dois campos obrigatórios são
+    // conferidos antes de qualquer gravação, senão a peça entrava pela metade
+    // e a tela sumia, como se tivesse dado erro.
 
     if (!name.trim()) {
       setErro("Informe o nome da peça antes de cadastrar.");
-      setActiveTab("ident");
+      setActiveTab("dados");
       return;
     }
 
     if (price <= 0) {
       setErro("Informe um preço de venda maior que zero.");
-      setActiveTab("prices");
+      setActiveTab("dados");
       return;
     }
     setErro("");
@@ -300,95 +327,71 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
   return (
     <div className="dialog-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="dialog-window large-dialog" style={{ maxWidth: "780px" }}>
-        <div className="dialog-head">
+      {/* Mais largo que os outros formulários: são a régua de campos, as três
+          colunas de números e o painel de parâmetros lado a lado. */}
+      <div className="dialog-window large-dialog" style={{ width: "min(1040px, 100%)", maxWidth: "1040px" }}>
+        {/* Barra de título de uma linha só, como a da referência: o nome da
+            peça já está no primeiro campo, repeti-lo aqui gastava uma linha. */}
+        <div className="dialog-head pdv-head">
           <div>
-            <strong>{editingProduct ? "Editar Produto" : "Novo Produto no Estoque"}</strong>
-            <span>{editingProduct ? `Código: ${editingProduct.code} · ${editingProduct.name}` : "Preencha os dados da peça ou produto para controle de estoque e venda"}</span>
+            <strong>{editingProduct ? "Cadastro de peça" : "Nova peça no estoque"}</strong>
+            {editingProduct ? <span>{editingProduct.code}</span> : null}
           </div>
           <button className="icon-close" onClick={onClose} aria-label="Fechar modal">✕</button>
         </div>
 
-        {/* Tab Navigation */}
+        {/*
+          Uma aba de dados, e não cinco etapas.
+
+          O cadastro pedia "Próxima etapa" quatro vezes para uma peça que se
+          cadastra em vinte segundos, e três dos quatro cliques só serviam para
+          chegar no campo seguinte. A referência que a oficina usa todo dia
+          (White PDV) põe tudo numa aba só, com o rótulo à esquerda do campo —
+          e é o que cabe aqui também. A movimentação continua em aba própria:
+          é leitura, não etapa do cadastro.
+        */}
         <div className="dialog-tabs">
-          <button type="button" className={`dialog-tab ${activeTab === "ident" ? "active" : ""}`} onClick={() => setActiveTab("ident")}>
-            1. Identificação
+          <button type="button" className={`dialog-tab ${activeTab === "dados" ? "active" : ""}`} onClick={() => setActiveTab("dados")}>
+            Dados da peça
           </button>
-          <button type="button" className={`dialog-tab ${activeTab === "prices" ? "active" : ""}`} onClick={() => setActiveTab("prices")}>
-            2. Preços & Margem
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "stock" ? "active" : ""}`} onClick={() => setActiveTab("stock")}>
-            3. Estoque & Mínimo
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "compat" ? "active" : ""}`} onClick={() => setActiveTab("compat")}>
-            4. Compatibilidade
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "extra" ? "active" : ""}`} onClick={() => setActiveTab("extra")}>
-            5. Fornecedor & Obs
-          </button>
-          {/* Só faz sentido em peça já cadastrada: produto novo não tem histórico. */}
           {editingProduct ? (
             <button type="button" className={`dialog-tab ${activeTab === "history" ? "active" : ""}`} onClick={() => setActiveTab("history")}>
-              6. Movimentação {movements.length ? <b>{movements.length}</b> : null}
+              Movimentação {movements.length ? <b>{movements.length}</b> : null}
             </button>
           ) : null}
         </div>
 
-        <form onSubmit={handleSubmit} className="dialog-body">
-          {erro ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erro}</span></div> : null}
-          {/* TAB 1: IDENTIFICAÇÃO */}
-          {activeTab === "ident" && (
-            <div className="form-section-stack">
-              <div className="form-grid-2">
-                <label className="field-group">
-                  <span className="field-label">Nome do produto / peça <b className="req">*</b></span>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(emMaiusculo(e.target.value))}
-                    placeholder="Ex: Óleo Yamalube 20W50 4T 1L"
-                    className="dialog-input"
-                    autoFocus
-                  />
-                </label>
-                {/*
-                  <div>, não <label>: um <button> dentro de <label> faz o
-                  clique no "+" acionar TAMBÉM o controle do label (o próprio
-                  select). O botão às vezes não abria o campo de criar.
-                */}
-                <div className="field-group">
-                  <span className="field-label">Categoria do Produto <b className="req">*</b></span>
-                  {onCreateCategory ? (
-                    <QuickAddSelect
-                      value={category}
-                      onChange={setCategory}
-                      options={defaultCategories}
-                      onCreate={onCreateCategory}
-                      placeholder="Ex: FILTROS"
-                      createTitle="Criar uma categoria sem sair do cadastro"
-                    />
-                  ) : (
-                    <select value={category} onChange={(e) => setCategory(e.target.value)} className="dialog-select">
-                      {defaultCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
-                    </select>
-                  )}
-                </div>
-              </div>
+        {/*
+            noValidate: a conferência é nossa, não a do navegador.
 
-              <div className="form-grid-3">
-                <label className="field-group">
-                  <span className="field-label">Código interno (SKU)</span>
-                  <input
-                    type="text"
-                    value={code}
-                    onChange={(e) => setCode(emMaiusculo(e.target.value))}
-                    placeholder="Ex: PRD-001"
-                    className="dialog-input"
-                  />
-                </label>
-                <label className="field-group">
-                  <span className="field-label">Código de barras (EAN)</span>
+            Enquanto o cadastro tinha etapas, o campo obrigatório da etapa
+            seguinte nem estava na tela, então o `required` do HTML nunca
+            barrava nada. Numa tela só ele barra — e o balão do navegador
+            entra na frente da mensagem escrita DENTRO do formulário, que é
+            justamente a que diz o que a oficina precisa ("toda pessoa
+            cadastrada precisa de pelo menos uma moto vinculada").
+          */}
+          <form noValidate ref={formularioRef} onSubmit={handleSubmit} className="dialog-body">
+          {erro ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erro}</span></div> : null}
+
+          {activeTab === "dados" && (
+            <div className="pdv-body">
+              <div className="pdv-form">
+                <div className="pdv-row">
+                  <span className="pdv-label">Descrição <b className="req">*</b></span>
+                  <input type="text" required value={name} onChange={(e) => setName(emMaiusculo(e.target.value))}
+                    placeholder="EX: OLEO YAMALUBE 20W50 4T 1L" className="dialog-input" autoFocus/>
+                </div>
+
+                <div className="pdv-row pair">
+                  <span className="pdv-label">Código</span>
+                  <input type="text" value={code} onChange={(e) => setCode(emMaiusculo(e.target.value))} placeholder="PRD-001" className="dialog-input"/>
+                  <span className="pdv-label">Referência</span>
+                  <input type="text" value={partNumber} onChange={(e) => setPartNumber(emMaiusculo(e.target.value))} placeholder="90793-AB401" className="dialog-input"/>
+                </div>
+
+                <div className="pdv-row">
+                  <span className="pdv-label">Cód. de barras</span>
                   {/*
                     Nem toda peça vem com código de fábrica — adesivo, parafuso
                     avulso, peça usada. Sem código, a leitora não serve e a
@@ -398,333 +401,194 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     conflita com produto de fabricante nenhum.
                   */}
                   <div className="input-with-action">
-                    <input
-                      type="text"
-                      value={barcode}
-                      onChange={(e) => setBarcode(emMaiusculo(e.target.value))}
-                      placeholder="789..."
-                      className="dialog-input"
-                    />
-                    <button
-                      type="button"
-                      className="input-action-button"
-                      title="Gerar um código interno para peça sem código de fábrica"
+                    <input type="text" value={barcode} onChange={(e) => setBarcode(emMaiusculo(e.target.value))} placeholder="789..." className="dialog-input"/>
+                    <button type="button" className="input-action-button" title="Gerar um código interno para peça sem código de fábrica"
                       onClick={() => {
                         const codigo = uniqueInternalEan13(allProducts.map((peca) => peca.barcode ?? ""));
                         if (!codigo) return setErro("Não foi possível gerar um código livre. Tente de novo.");
                         setErro("");
                         setBarcode(codigo);
-                      }}
-                    >
-                      Gerar
-                    </button>
+                      }}>Gerar</button>
                   </div>
-                  <span className="settings-hint">
+                  <span className="pdv-hint">
                     {barcode && isInternalEan13(barcode)
                       ? "Código interno da oficina. Imprima a etiqueta e cole na peça."
                       : barcode && !isValidEan13(barcode)
                         ? "Este código não passa na conferência do EAN-13. Confira a digitação ou gere um interno."
                         : "Peça sem código de fábrica? Use Gerar."}
                   </span>
-                </label>
-                <label className="field-group">
-                  <span className="field-label">Cód. fabricante (Part Number)</span>
-                  <input
-                    type="text"
-                    value={partNumber}
-                    onChange={(e) => setPartNumber(emMaiusculo(e.target.value))}
-                    placeholder="Ex: 90793-AB401"
-                    className="dialog-input"
-                  />
-                </label>
-              </div>
+                </div>
 
-              <div className="form-grid-3">
-                <div className="field-group">
-                  <span className="field-label">Marca / Fabricante</span>
+                {/*
+                  <div>, não <label>: um <button> dentro de <label> faz o clique
+                  no "+" acionar TAMBÉM o controle do label (o próprio select).
+                */}
+                <div className="pdv-row">
+                  <span className="pdv-label">Grupo <b className="req">*</b></span>
+                  {onCreateCategory ? (
+                    <QuickAddSelect value={category} onChange={setCategory} options={defaultCategories} onCreate={onCreateCategory}
+                      placeholder="Ex: FILTROS" createTitle="Criar uma categoria sem sair do cadastro"/>
+                  ) : (
+                    <select value={category} onChange={(e) => setCategory(e.target.value)} className="dialog-select">
+                      {defaultCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                    </select>
+                  )}
+                </div>
+
+                <div className="pdv-row">
+                  <span className="pdv-label">Marca</span>
                   {/*
                     Só dava para digitar, e cada pessoa escrevia de um jeito
                     ("Motul", "MOTUL", "motul 5100"): o filtro por marca no
-                    estoque não juntava nada. Agora sai da lista cadastrada em
-                    Configurações → Listas do sistema, com "Outra" para o que
-                    ainda não está lá.
+                    estoque não juntava nada.
                   */}
                   {onCreatePartBrand ? (
-                    <QuickAddSelect
-                      value={brand.trim()}
-                      onChange={setBrand}
-                      options={brandOptions}
-                      onCreate={onCreatePartBrand}
-                      emptyLabel="Sem marca definida"
-                      placeholder="Ex: COBREQ"
-                      createTitle="Criar uma marca sem sair do cadastro"
-                    />
+                    <QuickAddSelect value={brand.trim()} onChange={setBrand} options={brandOptions} onCreate={onCreatePartBrand}
+                      emptyLabel="Sem marca definida" placeholder="Ex: COBREQ" createTitle="Criar uma marca sem sair do cadastro"/>
                   ) : (
-                    <select
-                      value={brand === "" || brandOptions.includes(brand) ? brand : "__outra__"}
-                      onChange={(e) => setBrand(e.target.value === "__outra__" ? " " : e.target.value)}
-                      className="dialog-input"
-                    >
+                    <select value={brand === "" || brandOptions.includes(brand) ? brand : "__outra__"}
+                      onChange={(e) => setBrand(e.target.value === "__outra__" ? " " : e.target.value)} className="dialog-input">
                       <option value="">Sem marca definida</option>
                       {brandOptions.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
                     </select>
                   )}
                 </div>
-                <label className="field-group">
-                  <span className="field-label">Unidade de Medida</span>
-                  <select
-                    value={unit}
-                    onChange={(e) => setUnit(e.target.value)}
-                    className="dialog-select"
-                  >
-                    {/* Lista vinda de Configurações -> Listas do sistema. Antes era
-                        fixa aqui e diferente da lista de Configurações, então a
-                        unidade padrão escolhida pelo dono podia nem aparecer. */}
+
+                <div className="pdv-row pair">
+                  <span className="pdv-label">Unidade</span>
+                  {/* Lista vinda de Configurações → Listas do sistema. */}
+                  <select value={unit} onChange={(e) => setUnit(e.target.value)} className="dialog-select">
                     {unitOptions.map((option) => <option value={option} key={option}>{option}</option>)}
                   </select>
-                </label>
-                <label className="field-group">
-                  <span className="field-label">Localização no estoque</span>
-                  <input
-                    type="text"
-                    value={location}
-                    onChange={(e) => setLocation(emMaiusculo(e.target.value))}
-                    placeholder="Ex: Prateleira B - Gaveta 4"
-                    className="dialog-input"
-                  />
-                </label>
-              </div>
-            </div>
-          )}
+                  <span className="pdv-label">Localização</span>
+                  <input type="text" value={location} onChange={(e) => setLocation(emMaiusculo(e.target.value))} placeholder="PRATELEIRA B4" className="dialog-input"/>
+                </div>
 
-          {/* TAB 2: PREÇOS E MARGEM */}
-          {activeTab === "prices" && (
-            <div className="form-section-stack">
-              <div className="pricing-box">
-                <div className="form-grid-3">
-                  <label className="field-group">
-                    <span className="field-label">Preço de Custo (R$)</span>
-                    <NumberField
-                      step="0.01"
-                      min={0}
-                      fallback={0}
-                      blankValue={0}
-                    value={cost}
-                      onChange={(valor) => handleCostChange(valor)}
-                      placeholder="0,00"
-                      className="dialog-input bold-number"
-                    />
-                  </label>
+                <div className="pdv-row">
+                  <span className="pdv-label">Fornecedor</span>
+                  <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="dialog-select">
+                    <option value="">Sem fornecedor preferencial</option>
+                    {suppliers.map((sup) => <option key={sup.id} value={sup.id}>{sup.name}{sup.phone ? ` (${sup.phone})` : ""}</option>)}
+                  </select>
+                </div>
 
-                  <div className="field-group">
-                    <span className="field-label">Margem de Lucro (%)</span>
-                    <NumberField
-                      step="1"
-                      fallback={0}
-                      value={markup}
-                      onChange={(valor) => handleMarkupChange(valor)}
-                      placeholder="45"
-                      className="dialog-input bold-number"
-                    />
-                    <div className="quick-badges-row">
-                      {[30, 45, 60, 100].map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          className={`badge-btn ${markup === m ? "active" : ""}`}
-                          onClick={() => applyQuickMarkup(m)}
-                        >
-                          +{m}%
-                        </button>
-                      ))}
+                <div className="pdv-row tall">
+                  <span className="pdv-label">Motos compatíveis</span>
+                  <textarea rows={2} value={compatibility} onChange={(e) => setCompatibility(e.target.value)}
+                    placeholder="Ex: CG 125 (1999-2008), CG 150 TITAN, FAN 160" className="dialog-textarea"/>
+                  <span className="pdv-hint">É por aqui que o balcão acha a peça pela moto do cliente.</span>
+                </div>
+
+                <div className="pdv-row tall">
+                  <span className="pdv-label">Observações</span>
+                  <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Ex: caixa com 12 unidades, garantia de 90 dias" className="dialog-textarea"/>
+                </div>
+
+                {/* Os números, em três colunas como na referência: o que se
+                    paga, o que se tem, e o que sai da conta. */}
+                <div className="pdv-numbers">
+                  <section>
+                    <h4>Preço</h4>
+                    <label className="pdv-num">
+                      <span>Preço compra</span>
+                      <NumberField casas={2} step="0.01" min={0} fallback={0} blankValue={0} value={cost} onChange={handleCostChange} placeholder="0,00"/>
+                    </label>
+                    <label className="pdv-num">
+                      <span>Margem s/ custo (%)</span>
+                      <NumberField casas={2} step="1" fallback={0} value={markup} onChange={handleMarkupChange} placeholder="45"/>
+                    </label>
+                    <label className="pdv-num">
+                      <span>Preço venda <b className="req">*</b></span>
+                      <NumberField casas={2} step="0.01" min={0.01} required fallback={0} blankValue={0} value={price} onChange={handlePriceChange}
+                        placeholder="0,00" readOnly={priceFollowsMarkup}/>
+                    </label>
+                    {priceFollowsMarkup ? <span className="pdv-hint">Sai do custo com a margem. Para digitar à mão, mude o modo de preço em Configurações.</span> : null}
+                  </section>
+
+                  <section>
+                    <h4>Estoque</h4>
+                    <label className="pdv-num">
+                      <span>Estoque atual</span>
+                      <NumberField min={0} fallback={0} value={stock} onChange={setStock}/>
+                    </label>
+                    <label className="pdv-num">
+                      <span>Estoque mínimo</span>
+                      <NumberField min={0} fallback={0} value={minimum} onChange={setMinimum}/>
+                    </label>
+                    <label className="pdv-num">
+                      <span>Estoque máximo</span>
+                      <NumberField min={0} fallback={0} value={maximum} onChange={setMaximum}/>
+                    </label>
+                  </section>
+
+                  <section>
+                    <h4>Resultado</h4>
+                    {/*
+                      Duas margens, de propósito. O campo "+60%" é margem sobre
+                      o CUSTO: custo 25 vira preço 40. Sobre a VENDA isso é
+                      37,5% — e é a porcentagem sobre a venda que se compara com
+                      a do cartão e com a do concorrente. Ver só o número maior
+                      faz a oficina achar que ganha mais do que ganha.
+                    */}
+                    <div className="pdv-num readonly">
+                      <span>Margem s/ venda</span>
+                      <b>{marginOnPrice(cost, price).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</b>
                     </div>
-                  </div>
-
-                  <label className="field-group">
-                    <span className="field-label">Preço de Venda (R$) <b className="req">*</b></span>
-                    <NumberField
-                      step="0.01"
-                      min={0.01}
-                      required
-                      fallback={0}
-                      blankValue={0}
-                    value={price}
-                      onChange={(valor) => handlePriceChange(valor)}
-                      placeholder="0,00"
-                      readOnly={priceFollowsMarkup}
-                      className={`dialog-input bold-number highlight-price ${priceFollowsMarkup ? "is-derived" : ""}`}
-                    />
-                    {priceFollowsMarkup ? (
-                      <small className="field-help">Calculado pelo custo e pela margem. Para digitar o preço à mão, mude o modo de precificação em Configurações.</small>
-                    ) : null}
-                  </label>
+                    <div className="pdv-num readonly">
+                      <span>Lucro por un.</span>
+                      <b className={grossProfit >= 0 ? "bom" : "ruim"}>{money(grossProfit)}</b>
+                    </div>
+                    {/*
+                      O PDV deixa descontar. Sem saber o piso, o desconto "de
+                      bom moço" vende abaixo do que se pagou ao fornecedor.
+                    */}
+                    <div className="pdv-num readonly">
+                      <span>Desconto máximo</span>
+                      <b>{maxDiscountPercent(cost, price).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</b>
+                    </div>
+                    <div className="pdv-num readonly">
+                      <span>Piso sem prejuízo</span>
+                      <b>{money(cost)}</b>
+                    </div>
+                  </section>
                 </div>
 
-                {/* Live Margin Calculation Card */}
-                <div className="profit-summary-card">
-                  <div className="profit-item">
-                    <span>Custo:</span>
-                    <strong>{money(cost)}</strong>
-                  </div>
-                  {/*
-                    Duas margens, de propósito.
-
-                    O campo "+60%" é margem sobre o CUSTO: custo 25 vira preço
-                    40. Sobre a VENDA isso é 37,5% — e é a porcentagem sobre a
-                    venda que se compara com a do cartão e com a do
-                    concorrente. Ver só o número maior faz a oficina achar que
-                    ganha mais do que ganha.
-                  */}
-                  <div className="profit-item">
-                    <span>Margem sobre o custo:</span>
-                    <strong className="profit-percent">+{markup}%</strong>
-                  </div>
-                  <div className="profit-item">
-                    <span>Margem sobre a venda:</span>
-                    <strong className="profit-percent">{marginOnPrice(cost, price).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong>
-                  </div>
-                  <div className="profit-item">
-                    <span>Lucro Bruto Unitário:</span>
-                    <strong className={grossProfit >= 0 ? "profit-positive" : "profit-negative"}>
-                      {money(grossProfit)}
-                    </strong>
-                  </div>
-                  {/*
-                    O PDV deixa descontar. Sem saber o piso, o desconto "de bom
-                    moço" vende abaixo do que se pagou ao fornecedor.
-                  */}
-                  <div className="profit-item">
-                    <span>Desconto máximo sem prejuízo:</span>
-                    <strong>{maxDiscountPercent(cost, price).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% · até {money(cost)}</strong>
-                  </div>
-                  <div className="profit-item final-price">
-                    <span>Venda Balcão:</span>
-                    <strong>{money(price)}</strong>
-                  </div>
-                </div>
                 {priceWarning(cost, price) ? (
                   <div className="price-warning" role="alert"><b>!</b><span>{priceWarning(cost, price)}</span></div>
                 ) : null}
               </div>
-            </div>
-          )}
 
-          {/* TAB 3: ESTOQUE E REPOSIÇÃO */}
-          {activeTab === "stock" && (
-            <div className="form-section-stack">
-              <div className="form-grid-3">
-                <label className="field-group">
-                  <span className="field-label">Saldo Atual em Estoque</span>
-                  <NumberField
-                    min={0}
-                    fallback={0}
-                    value={stock}
-                    onChange={(valor) => setStock(valor)}
-                    className="dialog-input bold-number"
-                  />
-                </label>
-                <label className="field-group">
-                  <span className="field-label">Estoque Mínimo (Alerta)</span>
-                  <NumberField
-                    min={0}
-                    fallback={0}
-                    value={minimum}
-                    onChange={(valor) => setMinimum(valor)}
-                    className="dialog-input bold-number"
-                  />
-                </label>
-                <label className="field-group">
-                  <span className="field-label">Estoque Máximo sugerido</span>
-                  <NumberField
-                    min={0}
-                    fallback={0}
-                    value={maximum}
-                    onChange={(valor) => setMaximum(valor)}
-                    className="dialog-input"
-                  />
-                </label>
-              </div>
-
-              <div className="toggle-row-card">
-                <div>
-                  <strong>Alerta de reposição ativo</strong>
-                  <span>Avisar na visão geral e na lista quando o saldo estiver igual ou abaixo do estoque mínimo</span>
+              {/* O "Parâmetros" da referência: as marcações que valem para a
+                  peça inteira, fora da régua de campos. */}
+              <aside className="pdv-side">
+                <div className="pdv-params">
+                  <h4>Parâmetros</h4>
+                  <label>
+                    <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)}/>
+                    <span>Ativo<small>Peça inativa some da busca do PDV e da OS</small></span>
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={alertLowStock} onChange={(e) => setAlertLowStock(e.target.checked)}/>
+                    <span>Alerta de reposição<small>Avisa quando o saldo chega no mínimo</small></span>
+                  </label>
                 </div>
-                <label className="switch-toggle">
-                  <input
-                    type="checkbox"
-                    checked={alertLowStock}
-                    onChange={(e) => setAlertLowStock(e.target.checked)}
-                  />
-                  <span className="slider round"></span>
-                </label>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: COMPATIBILIDADE */}
-          {activeTab === "compat" && (
-            <div className="form-section-stack">
-              <label className="field-group">
-                <span className="field-label">Motos e Modelos Compatíveis</span>
-                <textarea
-                  rows={4}
-                  value={compatibility}
-                  onChange={(e) => setCompatibility(e.target.value)}
-                  placeholder="Ex: Honda CG 125 (1999-2008), CG 150 Titan (2004-2015), Fan 160 (2016 em diante), NXR 150 Bros"
-                  className="dialog-textarea"
-                />
-                <small className="field-hint">
-                  Digite os modelos de motos para que os atendentes possam pesquisar rapidamente pela moto do cliente no balcão.
-                </small>
-              </label>
-            </div>
-          )}
-
-          {/* TAB 5: FORNECEDOR E EXTRAS */}
-          {activeTab === "extra" && (
-            <div className="form-section-stack">
-              <label className="field-group">
-                <span className="field-label">Fornecedor Preferencial</span>
-                <select
-                  value={supplierId}
-                  onChange={(e) => setSupplierId(e.target.value)}
-                  className="dialog-select"
-                >
-                  <option value="">-- Selecione o fornecedor (opcional) --</option>
-                  {suppliers.map((sup) => (
-                    <option key={sup.id} value={sup.id}>
-                      {sup.name} {sup.phone ? `(${sup.phone})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field-group">
-                <span className="field-label">Observações internas</span>
-                <textarea
-                  rows={3}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Ex: Comprado em caixa com 12 unidades. Garantia de 90 dias com o fabricante."
-                  className="dialog-textarea"
-                />
-              </label>
-
-              <div className="toggle-row-card">
-                <div>
-                  <strong>Produto Ativo para Venda</strong>
-                  <span>Produtos inativos não aparecem na pesquisa rápida do PDV ou Ordens de Serviço</span>
+                <div className="pdv-params">
+                  <h4>Margem rápida</h4>
+                  <div className="pdv-quick-markup">
+                    {[30, 45, 60, 100].map((m) => (
+                      <button key={m} type="button" className={`badge-btn ${markup === m ? "active" : ""}`} onClick={() => applyQuickMarkup(m)}>+{m}%</button>
+                    ))}
+                  </div>
                 </div>
-                <label className="switch-toggle">
-                  <input
-                    type="checkbox"
-                    checked={active}
-                    onChange={(e) => setActive(e.target.checked)}
-                  />
-                  <span className="slider round"></span>
-                </label>
-              </div>
+                {editingProduct ? (
+                  <div className="pdv-params">
+                    <h4>Movimentação</h4>
+                    <label style={{ cursor: "default" }}><span>Entrou<small>{totals.inboundQuantity} un. · {money(totals.inboundValue)}</small></span></label>
+                    <label style={{ cursor: "default" }}><span>Saiu<small>{totals.outboundQuantity} un. · {money(totals.outboundValue)}</small></span></label>
+                  </div>
+                ) : null}
+              </aside>
             </div>
           )}
 
@@ -769,58 +633,38 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
 
           {/* Dialog Footer Actions */}
           <div className="dialog-actions-row">
-            <button
-              type="button"
-              className="outline-button"
-              onClick={onClose}
-              disabled={isSaving}
-            >
-              Cancelar
-            </button>
-            <div style={{ display: "flex", gap: "8px" }}>
-              {activeTab !== "ident" && activeTab !== "history" && (
-                <button
-                  type="button"
-                  className="outline-button"
-                  onClick={() => {
-                    const atual = etapas.indexOf(activeTab as (typeof etapas)[number]);
-                    if (atual > 0) setActiveTab(etapas[atual - 1]!);
-                  }}
-                >
-                  Anterior
-                </button>
-              )}
-              {/*
-                "Próxima etapa" e o botão de gravar ficam SEMPRE os dois na
-                tela, cada um no seu lugar.
-
-                Antes o mesmo canto trocava de botão: na etapa 4 era "Próxima
-                etapa", e assim que ela avançava virava "Cadastrar Produto", no
-                mesmo pixel. Um clique duplo — ou dois cliques seguidos, que é o
-                que se faz num botão que parece não ter respondido — avançava e
-                logo em seguida gravava: a peça era cadastrada pela metade e a
-                tela fechava sozinha. Reproduzido com dblclick e conferido no
-                banco.
-
-                Na última etapa o "Próxima etapa" fica desabilitado em vez de
-                sumir, para nada mudar de posição debaixo do cursor.
-              */}
+            <div>
               <button
                 type="button"
-                className="outline-button"
-                disabled={activeTab === "extra" || activeTab === "history"}
-                onClick={() => {
-                  const atual = etapas.indexOf(activeTab as (typeof etapas)[number]);
-                  if (atual >= 0 && atual < etapas.length - 1) setActiveTab(etapas[atual + 1]!);
-                }}
-              >
-                Próxima etapa →
-              </button>
-              <button
-                type="submit"
-                className="primary-button save-action-btn"
+                className="outline-button pdv-footer-button"
+                onClick={onClose}
                 disabled={isSaving}
               >
+                <kbd>Esc</kbd>
+                Cancelar
+              </button>
+              {editingProduct && removal ? <RemovalButton tipo="produto" colecao="products" id={editingProduct.id} nome={editingProduct.name} {...removal}/> : null}
+            </div>
+            {/*
+              Sem "Anterior" e "Próxima etapa": não há mais etapa nenhuma.
+
+              Esses dois botões existiam por causa do assistente de cinco
+              passos, e traziam junto o defeito que eles evitavam — o mesmo
+              canto trocava de botão entre "Próxima etapa" e "Cadastrar", então
+              um clique duplo avançava e gravava a peça pela metade. Com uma
+              tela só o problema deixa de existir.
+
+              O atalho no rótulo é o do sistema que a oficina já usa: F5 grava,
+              Esc fecha. Os dois são ligados de verdade, e só enquanto este
+              formulário está aberto.
+            */}
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                type="submit"
+                className="primary-button save-action-btn pdv-footer-button"
+                disabled={isSaving}
+              >
+                <kbd>F5</kbd>
                 {isSaving ? "Salvando no Firestore..." : (editingProduct ? "Salvar Alterações" : "Cadastrar Produto")}
               </button>
             </div>

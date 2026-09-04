@@ -33,10 +33,43 @@ export function parseTyped(text: string): number | null {
  *
  * Sem isto o campo mostraria "020" depois de a pessoa digitar 20 sobre o zero
  * que estava lá — que é exatamente a reclamação.
+ *
+ * Com `casas`, o número sai no formato do balcão: vírgula decimal e as casas
+ * sempre preenchidas ("2,68", "0,00", "51,27"). Dinheiro e porcentagem escritos
+ * sem as casas obrigam quem confere a adivinhar se "5" é cinco reais ou cinco
+ * centavos, e uma coluna de valores com quantidade de dígitos variável não dá
+ * para somar de cabeça.
  */
-export function formatTyped(value: number | null | undefined): string {
+export function formatTyped(value: number | null | undefined, casas?: number): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "";
-  return String(value);
+  if (casas === undefined) return String(value);
+  return arredondar(value, casas).toFixed(casas).replace(".", ",");
+}
+
+/**
+ * Arredonda de verdade, para o centavo não sumir.
+ *
+ * `(2.675).toFixed(2)` devolve "2,67". Não é bug do JavaScript: o double mais
+ * próximo de 2,675 é um pouquinho MENOR que 2,675, então arredondar para baixo
+ * está certo do ponto de vista da máquina — e errado do ponto de vista de quem
+ * põe o preço na peça. Um centavo por peça, em toda entrada de nota, vira
+ * diferença no fechamento que ninguém consegue explicar.
+ *
+ * A saída é deslocar a vírgula pelo TEXTO ("2.675" → "2.675e2" → 267.5), onde
+ * o meio-termo existe de verdade e o arredondamento acontece como no papel.
+ * Número em notação científica (muito grande ou muito pequeno) não passa por
+ * esse caminho: aí o toFixed direto já é o melhor que dá.
+ */
+export function arredondar(value: number, casas: number): number {
+  if (!Number.isFinite(value)) return value;
+  const absoluto = Math.abs(value);
+  const texto = String(absoluto);
+  if (texto.includes("e") || texto.includes("E")) return Number(value.toFixed(casas));
+  const deslocado = Number(`${texto}e${casas}`);
+  if (!Number.isFinite(deslocado)) return Number(value.toFixed(casas));
+  const inteiro = Math.round(deslocado);
+  const devolta = Number(`${inteiro}e-${casas}`);
+  return value < 0 ? -devolta : devolta;
 }
 
 /**
@@ -67,6 +100,20 @@ export function clamp(value: number, min?: number, max?: number): number {
  * só a aparência: o estado continuava sendo número, e apagar devolvia zero na
  * mesma tecla.
  */
-export function displayValue(value: number, blankValue?: number): string {
-  return value === blankValue ? "" : formatTyped(value);
+export function displayValue(value: number, blankValue?: number, casas?: number): string {
+  return value === blankValue ? "" : formatTyped(value, casas);
+}
+
+/**
+ * Lê um campo de dinheiro que guarda TEXTO, não número.
+ *
+ * Vários campos do sistema (mão de obra da OS, valor do serviço rápido, gasto,
+ * conta a pagar) guardam o que foi digitado como string e liam com
+ * `Number(texto)`. Isso funcionava só enquanto o campo mostrava "40": assim que
+ * ele passa a mostrar "40,00" — que é como se escreve dinheiro em português —
+ * `Number("40,00")` vira NaN e o valor some da conta.
+ */
+export function valorDigitado(text: string, fallback = 0): number {
+  const typed = parseTyped(text ?? "");
+  return typed === null ? fallback : typed;
 }

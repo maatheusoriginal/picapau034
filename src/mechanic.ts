@@ -166,3 +166,25 @@ export function boardRow(order: OrderRecord, employeeId: string): BoardRow {
   if (order.status === "Em serviço") return { order, mine, actions: [] };
   return { order, mine, actions: [{ label: takeLabelFor(order.status), target: "Em serviço" }] };
 }
+
+/**
+ * O relato que o mecânico lê antes de abrir a OS.
+ *
+ * No computador ele abre a OS para saber o que a moto tem; no celular, com a
+ * mão suja, abrir cada uma para descobrir qual é a que ele quer é o que faz a
+ * lista não servir. O relato do cliente é a única informação que responde
+ * "qual dessas é a que eu vou pegar agora" sem um toque a mais.
+ *
+ * Corta na palavra, nunca no meio dela: "BARULHO NA RELA…" faz o mecânico
+ * abrir a OS de novo só para ler o resto, que é exatamente o que se quer
+ * evitar. Uma palavra única maior que o limite é o caso perdido — aí corta
+ * onde der, senão a linha estoura a tela.
+ */
+export function resumoDoServico(order: OrderRecord, limite = 84): string {
+  const relato = String(order.problem ?? "").replace(/\s+/g, " ").trim();
+  if (!relato) return "Sem relato na OS";
+  if (relato.length <= limite) return relato;
+  const corte = relato.slice(0, limite);
+  const espaco = corte.lastIndexOf(" ");
+  return `${(espaco > 0 ? corte.slice(0, espaco) : corte).replace(/[ ,.;:-]+$/, "")}…`;
+}

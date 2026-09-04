@@ -650,6 +650,54 @@ tela avisa isso explicitamente, porque a causa é o cadastro do usuário e não 
 falta de serviço. O vínculo é feito em **Usuários e acessos → Vincular ao
 funcionário**.
 
+### No celular
+
+O quadro é feito para o telefone, porque é ali que o mecânico usa o sistema — de
+pé na bancada, com uma mão. Cinco coisas mudam por causa disso — as três
+primeiras só abaixo de 560px de largura, as duas últimas em qualquer tela:
+
+**Os três cartões do resumo viram uma faixa de três colunas.** Empilhados, eles
+somavam quase 300px e empurravam a primeira OS para fora da tela: o mecânico
+abria "Ordens de serviço" e via três números antes de ver qualquer moto. Na
+faixa o número continua lá e a primeira OS aparece inteira, com os botões.
+
+**"Nenhuma OS com você" deixa de ocupar 260px.** O aviso de lista vazia é o
+mesmo do resto do sistema, desenhado para o meio de um painel grande. No quadro
+do mecânico ele fica bem em cima de "Na oficina · para pegar" — ou seja, quem
+está sem serviço na mão via um quadro dizendo que não tem serviço e precisava
+rolar para achar o que estava livre. No celular ele vira uma faixa com o ícone
+ao lado do texto.
+
+**Os botões da linha ocupam a largura toda, com 44px de altura.** Eram 31px de
+altura por 41px de largura — abaixo do mínimo em que o dedo acerta sem ampliar a
+tela, e "Falta peça" ficava colado em "Pronta".
+
+**O relato do cliente aparece na linha.** Sem ele, descobrir qual das OS é a que
+se vai pegar agora exigia abrir uma por uma. O texto é cortado na palavra, nunca
+no meio dela — um corte em "BARULHO NA RELA…" faz abrir a OS só para ler o
+resto, que é justamente o toque que o resumo existe para poupar.
+
+**A OS aberta mostra o cliente e as peças aprovadas.** `.order-info-grid` e
+`.order-section` usam `overflow: hidden` para arredondar as bordas internas, e
+isso zera o mínimo automático deles: dentro de um grid com altura definida — o
+corpo do diálogo no celular — os dois encolhiam para 15px de altura com 288px e
+142px de conteúdo dentro. O mecânico abria a OS e não via nem de quem era a moto
+nem o que estava aprovado. O corpo do diálogo agora usa
+`grid-auto-rows: max-content`, então cada cartão fica do tamanho do conteúdo e a
+página rola. No computador nada muda: lá o conteúdo já cabia.
+
+A barra de etapas da OS era um grid de cinco colunas para as **seis** situações
+de `serviceOrderStatuses`, então "Entrega" caía numa segunda linha e a linha de
+ligação saía pela borda — em qualquer tamanho de tela, não só no celular. Agora
+ela é flex e cada etapa vale uma fração do que existir: acrescentar ou tirar uma
+situação não mexe mais no CSS.
+
+O passo 36 do roteiro ponta a ponta entra como mecânico num aparelho de 390×844,
+pega uma OS com um toque, confere no Firestore que o mecânico foi gravado, e
+cobra o resto: a primeira OS inteira na tela, botões de 44px, o relato na linha,
+nenhum cartão achatado dentro da OS, as seis etapas numa linha só e nenhuma
+rolagem lateral.
+
 ## Tela branca e versões novas
 
 Não existia nenhuma rede de segurança: qualquer exceção durante a renderização
@@ -924,6 +972,55 @@ O **total fica fixo no rodapé** — peças, mão de obra, desconto do parceiro 
 valor final —, à vista o tempo todo enquanto se monta a OS. Era a única coisa
 que a etapa de revisão dava e que a tela única não daria sozinha.
 
+### Uma tela só, mas ainda com moldura demais
+
+Ser uma tela só não bastou: a tela era grande demais para caber nela mesma. Mais
+da metade do espaço era moldura — não conteúdo:
+
+| O que ocupava | Antes | Agora |
+| --- | --- | --- |
+| Cabeçalho do diálogo | 150px em três linhas (chapéu, título, explicação) | 47px, chapéu e título na mesma linha |
+| Ícone decorativo por seção | 42px | nenhum — o título dá conta |
+| Campo (input, select) | 40px | 32px no computador, 40px no celular |
+| Linha de peça do estoque | 51px | 38px |
+| Bloco de cliente/moto | círculo de 28px e padding de 11px | círculo de 20px e padding de 8px |
+
+O resultado prático: **960px de conteúdo numa área de 688px** viraram 755px numa
+área de 755px. Antes era preciso rolar para chegar no problema relatado, na
+prioridade, na previsão e nos mecânicos — os campos que o balcão mais preenche.
+Agora tudo cabe de uma vez numa tela de 1360×950.
+
+A compactação vale **só dentro da nova OS** (`.dialog-os` no CSS); o resto do
+sistema não muda. E no celular os campos voltam a 40px no `@media` de 560px:
+32px é medida de mouse, o dedo não acerta. O passo 38 do roteiro ponta a ponta
+mede as quatro coisas — que o conteúdo cabe sem rolar, que o cabeçalho não
+passa de 60px, que o campo não passa de 34px e que a linha de peça não passa de
+42px — e confere que "Problema relatado", "Mecânicos responsáveis", "Adicionar
+peças" e "Adicionar mão de obra" continuam todos na tela.
+
+### A nova OS entrou na mesma régua
+
+Compactar não bastava: a OS continuava com o **rótulo em cima do campo**,
+enquanto os quatro cadastros já tinham passado para o rótulo à esquerda. Duas
+telas do mesmo sistema pedindo a mesma coisa de dois jeitos é o que faz quem
+atende hesitar meio segundo em cada campo.
+
+Agora a OS usa a mesma régua, com uma diferença: a coluna do rótulo é de
+**104px** e não 122px, porque a OS já divide a tela em duas colunas e dentro de
+cada uma o campo precisa do espaço que sobra.
+
+Uma exceção de propósito: o **formulário da moto nova** tem três colunas de
+campo curto (placa, marca, modelo, versão, ano, cor). Ali a régua não cabe — o
+campo ficaria com 60px — e o rótulo continua em cima. No celular a régua toda
+volta a empilhar, como nos outros cadastros.
+
+Os rótulos encolheram junto: "Problema relatado pelo cliente" virou "Problema
+relatado", "Preço cobrado da peça" virou "Preço da peça".
+
+O diálogo desceu de 859px para **799px** de altura com isso, e o passo 38 do
+roteiro passou a cobrar também a régua — que o rótulo está ao lado do campo e
+alinhado à direita, além do que já media.
+
 ## A lista de peças
 
 Era um cartão por peça, com o nome e pouco mais: para conferir o código, a
@@ -1170,6 +1267,144 @@ que já existe é selecionado. Sem isso a lista encheria de "MOTUL", "Motul" e
 **não envia o formulário**: sem esse cuidado, apertar Enter aqui gravava o
 produto pela metade.
 
+## O cadastro de peça no formato do balcão
+
+A referência é o cadastro de produto do **White PDV**, o sistema que a oficina
+usa todo dia. Duas coisas o definem, e as duas eram o oposto do que estava aqui.
+
+**Cinco etapas viraram uma tela.** O cadastro pedia "Próxima etapa" quatro vezes
+— identificação, preços, estoque, compatibilidade, fornecedor — para uma peça
+que se cadastra em vinte segundos, e três dos quatro cliques só serviam para
+chegar no campo seguinte. Agora é uma aba só. A movimentação continua em aba
+própria: é leitura, não etapa do cadastro.
+
+**O rótulo foi para a esquerda do campo.** Empilhado em cima, cada campo gastava
+duas linhas; ao lado, a coluna de rótulos vira uma régua que o olho desce sem
+reler. É o que permite o cadastro inteiro caber numa tela de 1360×950 sem rolar.
+
+| Antes | Agora |
+| --- | --- |
+| 6 abas, 4 cliques de "Próxima etapa" | 2 abas, nenhum clique de etapa |
+| Rótulo empilhado sobre o campo | Rótulo à esquerda, alinhado à direita |
+| Campo de 40px | 28px no computador, 40px no celular |
+| Números misturados com o resto | Três colunas: **Preço**, **Estoque**, **Resultado** |
+| Marcações espalhadas pelas etapas | Painel **Parâmetros** à direita |
+| "Cancelar" e "Cadastrar Produto" | `Esc` Cancelar · `F5` Salvar, com o atalho ligado |
+
+A coluna **Resultado** é leitura, não campo — margem sobre a venda, lucro por
+unidade, desconto máximo e piso sem prejuízo. Ela não parece digitável de
+propósito: é o que sai da conta, não o que se informa.
+
+O que a referência não tem e o sistema manteve: o histórico de movimentação da
+peça, o botão de gerar código de barras interno, criar categoria e marca sem
+sair do cadastro, e o aviso de preço abaixo do custo.
+
+### Cliente, moto e fornecedor no mesmo formato
+
+Os outros três cadastros seguiram o mesmo caminho. Cliente e fornecedor tinham
+**cinco abas de etapa** cada um; agora as abas viraram títulos de bloco dentro
+de uma tela só, com a mesma régua de rótulos:
+
+| Cadastro | Antes | Agora |
+| --- | --- | --- |
+| **Cliente** | 5 abas: Dados Pessoais, Contato, Endereço, Financeiro, Observações | Uma tela com esses cinco blocos |
+| **Fornecedor** | 5 abas: Identificação, Contato, Comercial, Endereço, Observações | Uma tela com esses cinco blocos |
+| **Motocicleta** | Já era uma tela | A mesma tela, agora com a régua |
+
+A régua não custou uma reescrita campo a campo: os quatro formulários já usavam
+o mesmo par `field-group` / `field-label`, que tem exatamente a forma
+rótulo-e-campo. Uma regra de CSS sob `.pdv-form` transforma esse par nas duas
+colunas, e os agrupadores de duas e três colunas viram `display: contents` para
+que cada campo ocupe a sua linha. O JSX só mudou onde havia etapa de verdade.
+
+Os rótulos encolheram junto, porque a régua só funciona quando o rótulo cabe em
+uma linha: "Endereço Completo (Rua, Número, Bairro, Cidade)" virou "Endereço",
+"Nome Completo / Razão Social" virou "Nome / Razão social", "WhatsApp /
+Telefone Principal" virou "WhatsApp".
+
+### O `required` do navegador entrou na frente
+
+Achado ao juntar as etapas: enquanto o cadastro tinha abas, o campo obrigatório
+da aba seguinte **nem estava na tela**, então o `required` do HTML nunca barrava
+nada e a conferência era sempre a nossa. Numa tela só ele passa a barrar — e o
+balão do navegador entra na frente da mensagem escrita **dentro** do formulário,
+que é justamente a que diz o que a oficina precisa saber ("toda pessoa cadastrada
+precisa de pelo menos uma moto vinculada").
+
+Os quatro formulários ganharam `noValidate`. A conferência continua sendo a
+nossa, com a mensagem no lugar onde o projeto já tinha decidido que ela fica —
+depois de o aviso ter sido um toast que aparecia **atrás** do modal.
+
+### Os atalhos são de verdade
+
+`F5` grava e `Esc` fecha, como no sistema de origem. O atalho está escrito no
+botão, então precisa funcionar — um rótulo "F5" que não faz nada é pior que não
+ter rótulo. F5 é o refresh do navegador, e por isso o atalho é ligado **só
+enquanto o cadastro está aberto**: fechou, F5 volta a recarregar a página (e
+Ctrl+R continua funcionando mesmo com o cadastro aberto). F5 dispara o mesmo
+submit do botão, para passar pela conferência dos campos obrigatórios em vez de
+gravar por fora dela.
+
+### O defeito do clique duplo deixou de existir
+
+O assistente trazia junto o defeito que ele mesmo criava: o mesmo canto da tela
+trocava de botão entre "Próxima etapa" e "Cadastrar Produto", então um clique
+duplo — que é o que se faz num botão que parece não ter respondido — avançava e
+gravava a peça pela metade. Sem etapas, o problema some pela estrutura.
+
+O gesto continua existindo, então o roteiro passou a cobrar o que importa agora:
+**clique duplo no botão de gravar não pode cadastrar a mesma peça duas vezes**.
+O passo 18 também confere que não voltaram "Anterior" e "Próxima etapa", que o
+rótulo está ao lado do campo e alinhado à direita, que os números estão em três
+colunas, que o painel de parâmetros existe e que o formulário inteiro cabe sem
+rolar.
+
+No celular a régua não cabe: abaixo de 720px o rótulo volta para cima do campo e
+o campo volta a 40px — 28px é medida de mouse.
+
+## Dinheiro e porcentagem com as casas: 0,00
+
+Todo campo de valor e de porcentagem mostra as duas casas com vírgula — "2,68",
+"0,00", "51,27" — como no sistema de referência. Antes eram `input[type=number]`
+mostrando "5" e "2.68": esse tipo de campo **não exibe vírgula**, e num sistema
+de oficina brasileira "2.68" é o que faz alguém digitar o ponto e o valor entrar
+errado. Pior, "5" num campo de dinheiro obriga quem confere a adivinhar se é
+cinco reais ou cinco centavos, e uma coluna de valores com quantidade de dígitos
+variável não dá para somar de cabeça.
+
+Quantidade continua inteira — estoque, dias, minutos, parcelas —, também como na
+referência. Casa decimal em contagem de peça é ruído.
+
+São dois caminhos, porque o sistema guarda valor de dois jeitos:
+
+| Campo | Componente | Onde |
+| --- | --- | --- |
+| Guarda **número** | `NumberField casas={2}` | Cadastro de peça, cliente, funcionário, fornecedor, Configurações |
+| Guarda **texto** | `MoneyField` | Mão de obra da OS, serviço rápido, gasto, conta, caixa, troca |
+
+O segundo existe porque essas telas guardam o que foi digitado como string e
+liam com `Number(texto)`. Isso funcionava só enquanto o campo mostrava "40":
+assim que ele passa a mostrar "40,00", `Number("40,00")` vira **NaN** e o valor
+some da conta. Quem lê passou a usar `valorDigitado`, que entende a vírgula.
+
+### O centavo que sumia
+
+`(2.675).toFixed(2)` devolve **"2,67"**. Não é bug do JavaScript: o double mais
+próximo de 2,675 é um pouquinho *menor* que 2,675, então arredondar para baixo
+está certo do ponto de vista da máquina — e errado do ponto de vista de quem põe
+o preço na peça. Um centavo por peça, em toda entrada de nota, vira diferença no
+fechamento que ninguém consegue explicar.
+
+`arredondar()` desloca a vírgula pelo **texto** ("2.675" → "2.675e2" → 267,5),
+onde o meio-termo existe de verdade e o arredondamento acontece como no papel.
+
+E o valor sobe arredondado, não só *escrito* arredondado: digitar 2,675 no custo
+mostrava "2,68" e guardava 2,675, então o preço calculado saía de um custo que
+não era o que estava na tela — 4,28 em vez de 4,29. Agora o que se vê é o que
+fica gravado.
+
+`npm run check:number-input` cobre as duas coisas em 53 casos.
+
 ## O preço mostra a conta que decide a venda
 
 A tela mostrava custo, margem e preço. Faltava o que decide se a venda vale a
@@ -1177,7 +1412,7 @@ pena:
 
 | O que entrou | Por quê |
 | --- | --- |
-| **Margem sobre a venda** | O campo "+60%" é margem sobre o **custo**: custo 25 vira preço 40. Sobre a venda isso é **37,5%** — e é essa a porcentagem que se compara com a do cartão e a do concorrente. Ver só o número maior faz a oficina achar que ganha mais do que ganha |
+| **Margem sobre a venda** | O campo "Margem s/ custo (%)" é margem sobre o **custo**: custo 25 vira preço 40. Sobre a venda isso é **37,5%** — e é essa a porcentagem que se compara com a do cartão e a do concorrente. Ver só o número maior faz a oficina achar que ganha mais do que ganha. Por isso os dois rótulos dizem sobre o quê a margem é |
 | **Desconto máximo sem prejuízo** | O PDV deixa descontar. Sem saber o piso, o desconto "de bom moço" vende abaixo do que se pagou ao fornecedor |
 | **Aviso de preço** | Abaixo do custo, igual ao custo, ou margem abaixo de 10% sobre a venda |
 
@@ -1310,6 +1545,43 @@ inventar um cliente para cada moto — e é conferido no roteiro ponta a ponta, 
 verifica no Firestore que a moto ficou sem dono e que **nenhum cliente foi
 criado** ao abrir a OS da frota.
 
+### A busca acha a moto pela placa, e acha a que já está no sistema
+
+Dois defeitos que a oficina encontrou usando o sistema, os dois reproduzidos
+antes de mexer em qualquer linha:
+
+**A placa é gravada com hífen ("FLA-2C34"), e a busca comparava o texto cru.**
+Quem digita "FLA2" — que é como se digita placa com pressa — não achava a moto
+que estava ali, na frota, na lista logo abaixo. Agora a placa é comparada
+normalizada dos dois lados, então "FLA2", "fla-2c34" e "FLA 2C34" acham a mesma
+moto.
+
+**Uma moto que já existe no sistema em nome de um cliente não aparecia.** A
+busca só olhava as motos com `partnerId` da parceira escolhida, e é o caso comum
+— a oficina já atendeu aquela moto como cliente direto antes de ela passar a
+rodar para a parceira. Sem achá-la, o caminho que sobrava era cadastrar a mesma
+placa outra vez, o que parte o histórico da moto em dois.
+
+A busca agora devolve **dois grupos separados**, nunca uma lista só:
+
+| Grupo | O que traz |
+| --- | --- |
+| **Frota da _parceira_** | As motos que têm essa empresa como responsável |
+| **Já no sistema, fora desta frota** | Qualquer outra moto que bateu com a busca, com o nome do dono ao lado |
+
+Os grupos ficam separados de propósito: puxar a moto de um cliente para uma OS
+da parceira é legítimo — a moto está lá, quem paga é a parceira —, mas quem
+atende precisa ver de onde ela veio antes de salvar. Escolher uma moto de fora
+mostra um aviso dizendo de quem ela é, e **incluir a moto na frota é um botão à
+parte, nunca automático**: mover a moto de um cliente para a frota é uma decisão
+do atendente, não um efeito colateral de escolher a moto. O dono continua sendo
+o dono depois disso — a moto passou a rodar para a parceira, não mudou de
+pessoa.
+
+A conta é de `src/fleet.ts` (`npm run check:fleet`, 35 casos) e o passo 37 do
+roteiro ponta a ponta refaz o caminho inteiro no navegador, incluindo a
+conferência no Firestore de que o botão gravou a parceira e não mexeu no dono.
+
 ### A etapa "Origem" saiu
 
 A OS tinha uma etapa só para perguntar de onde veio a moto e quem a trouxe. Com
@@ -1378,6 +1650,52 @@ selecionada, em vez de encerrar a errada em silêncio. O roteiro ponta a ponta
 confere que a OS do passo 6 continua com os seus R$ 150 em dinheiro depois de a
 OS da parceira ser encerrada.
 
+## O tamanho da letra
+
+A oficina estava dando **zoom no navegador** para conseguir ler o sistema. A
+causa era minha: ao compactar as telas para o formato do sistema de balcão, eu
+encolhi a letra junto — e densidade se faz com **espaçamento apertado, não com
+letra microscópica**.
+
+A folha de estilo tinha 364 declarações de `font-size` em 9px ou menos:
+
+| Tamanho | Quantas | Onde ficava |
+| --- | --- | --- |
+| 6px | 12 | Legendas de cartão |
+| 7px | 98 | Sublinha de lista, código da peça, dica de campo |
+| 8px | 141 | Rótulo pequeno, descrição de bloco, valor secundário |
+| 9px | 113 | Rótulo de campo, texto de tabela |
+
+7px é metade do tamanho que um sistema desktop usa para texto de apoio. Não é
+"compacto", é ilegível.
+
+A escala inteira subiu, preservando a hierarquia — 6→10, 7→10,5, 8→11,5, 9→12,
+10→13, 11→14, e assim por diante até os títulos. Nada abaixo de **10px**, e o
+texto que se lê o dia todo (rótulo de campo, linha de tabela) ficou em **12 a
+13px**.
+
+O espaçamento **não** mudou: as telas continuam com o mesmo aperto que ganharam
+no formato do balcão. O que mudou foi só o tamanho do que está escrito dentro
+delas.
+
+### O que precisou de ajuste junto
+
+Com o texto 30% maior, três coisas encostaram:
+
+- **A coluna de rótulos da régua** passou de 122px para 150px nos cadastros e de
+  104px para 126px na OS — rótulos de duas palavras estavam quebrando em duas
+  linhas.
+- **O cadastro de peça** ficou 100px mais largo (940 → 1040px), porque as três
+  colunas de números apertavam "Margem s/ custo (%)" contra a caixa do valor.
+- **O cartão da oficina no painel administrativo**, no celular, quebrava o nome
+  em três linhas ("Pica / Pau / Motos"): o botão "Editar dados" disputava a
+  linha com o texto. Agora o texto fica com a largura toda e o botão vai para
+  baixo.
+
+Conferido a 1440×900 e a 390×844: nenhuma rolagem lateral, nenhum botão ou
+rótulo cortado, nenhum rótulo em duas linhas nas telas da régua, e a nova OS e o
+cadastro de peça continuam cabendo inteiros sem rolar.
+
 ## Responsividade
 
 O que foi conferido, renderizando cada tela em 360, 768 e 1440px: **18 telas e
@@ -1393,6 +1711,88 @@ O que foi conferido, renderizando cada tela em 360, 768 e 1440px: **18 telas e
   somem abaixo de 560px. Fica o que identifica a linha, o dinheiro, a situação
   e a ação; sai o contexto (categoria, responsável, data de entrada, descrição).
   Nada se perde — abrir o registro mostra tudo.
+
+## Excluir cadastro sem apagar a história
+
+Os cadastros principais — **produto, cliente, moto, fornecedor e funcionário** —
+não tinham exclusão nenhuma: dava para editar e nunca remover. Quem digitou o
+nome errado, cadastrou a mesma peça duas vezes ou criou um cliente de teste
+ficava com o lixo na lista para sempre. (Usuário de acesso e os itens das
+Configurações — serviço rápido, categoria, forma de pagamento, maquininha e
+parceiro — já tinham.)
+
+Mas **apagar de verdade só é seguro quando o cadastro nunca foi usado**. Um
+produto que já foi vendido, um cliente que já tem OS, uma moto que já passou
+pela bancada: apagar esses não limpa nada, quebra. A OS antiga passa a apontar
+para um produto que não existe, o relatório do mês muda sozinho, e o custo médio
+da peça perde a origem. Nada disso dá erro na hora — só aparece semanas depois,
+quando ninguém mais liga uma coisa à outra.
+
+Então são **dois caminhos**, e a tela diz qual dos dois vai acontecer **antes**
+de confirmar:
+
+| Situação | O que acontece | O botão diz |
+| --- | --- | --- |
+| Nenhum vínculo | O documento sai do banco | **Apagar de vez** |
+| Tem vínculo | Fica gravado como inativo | **Desativar cadastro** |
+
+A confirmação não é um "Tem certeza?" genérico: ela lista **onde** o cadastro
+aparece — "1 venda no balcão, 2 entradas de estoque" — porque a diferença entre
+sumir do banco e ficar inativo é a diferença entre perder e não perder o
+histórico da oficina.
+
+### O que segura cada cadastro
+
+| Cadastro | Vínculos que impedem apagar |
+| --- | --- |
+| **Produto** | Item de OS, venda no balcão, entrada de estoque |
+| **Cliente** | OS, venda, conta a receber, e as motos no nome dele |
+| **Moto** | OS pelo id **ou pela placa** — a OS aberta sem cadastro de moto prende do mesmo jeito, e é a que ninguém lembra |
+| **Fornecedor** | Peça cadastrada, entrada de estoque, gasto lançado, conta a pagar |
+| **Funcionário** | OS, venda, lançamento no financeiro, e a conta de acesso |
+
+A moto do cliente conta como vínculo do cliente mesmo não sendo histórico:
+apagar o dono deixaria a moto órfã, sem ninguém a quem cobrar na entrada
+seguinte. E a conta de acesso é a trava mais dura do funcionário — apagar quem
+ainda entra no sistema deixaria um login sem cadastro nenhum na oficina, que é
+exatamente o defeito de "mecânico que não aparecia na OS".
+
+### Desativar precisa significar alguma coisa
+
+`active` já existia nos formulários de produto, cliente, fornecedor e
+funcionário, mas **ninguém lia**: o cadastro marcado como inativo continuava
+aparecendo em todo lugar. Oferecer "desativar" como alternativa segura ao apagar
+seria mentira nesse estado.
+
+Agora `active: false` some **de onde se escolhe** e continua **onde já foi
+usado**:
+
+| Some | Continua |
+| --- | --- |
+| Lista de peças da nova OS e do faturamento | A própria lista de cadastros, marcada **Inativo** |
+| Busca do PDV e catálogo de peças | Toda OS, venda e entrada antiga |
+| Busca de cliente da OS | O histórico do cliente e da moto |
+| Motos do cliente e da frota da parceira | O relatório e o fechamento do caixa |
+
+O cadastro inativo fica na sua própria lista de propósito: é de lá que se
+reativa, abrindo o cadastro e marcando o campo "ativo" de novo.
+
+### A venda do balcão não gravava de qual peça era
+
+Achado ao montar essa conta: o item de venda do PDV gravava o id do produto no
+campo `id`, sem `productId` — o item de OS usa `id` para o código da peça e
+`productId` para o documento, e a venda seguia outra convenção. O efeito: uma
+peça vendida no balcão parecia nunca ter sido usada, e seria apagada de vez com
+a venda apontando para ela.
+
+A venda passa a gravar `productId` como a OS, e a conta olha os **dois** campos,
+senão as vendas feitas antes desta correção continuariam invisíveis.
+
+A decisão inteira é de `src/removal.ts` (`npm run check:removal`, 30 casos), e o
+passo 39 do roteiro ponta a ponta faz os dois caminhos no navegador: apaga uma
+peça sem uso e confere que ela saiu do Firestore; desativa a peça vendida e
+confere que ela continua no banco com `active: false`, aparece marcada na lista
+de cadastros e sumiu da lista de peças da OS.
 
 ## Cópia de segurança
 
