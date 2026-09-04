@@ -24,10 +24,11 @@ try { ({ chromium } = await import("playwright-core")); }
 catch { console.error("Falta o navegador do teste. Rode antes:\n\n  npm i --no-save playwright-core\n"); process.exit(1); }
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const OUT = process.argv[2] ?? AQUI;
 const GRUPO = { "Ordens de serviço":"Oficina","Orçamentos":"Oficina","PDV Balcão":"Balcão","Serviço rápido":"Balcão",
-  "Vendas do balcão":"Balcão","Produtos e estoque":"Estoque","Compras e entradas":"Estoque","Fornecedores":"Estoque",
+  "Vendas do balcão":"Balcão","Produtos e estoque":"Estoque","Compras e entradas":"Estoque","Ajuste de estoque":"Estoque","Fornecedores":"Estoque",
   "Clientes":"Cadastros","Motocicletas":"Cadastros","Funcionários":"Cadastros","Financeiro":"Gestão",
   "Contas a receber":"Gestão","Contas a pagar":"Gestão","Relatórios":"Gestão" };
 
@@ -2069,6 +2070,165 @@ await passo("excluir cadastro: some quem nunca foi usado, e desativa quem tem hi
   await p.locator(".dialog-footer .ghost-button", { hasText: /Cancelar/ }).first().click().catch(() => {});
   await p.waitForTimeout(1200);
   if (problemas.length) throw new Error("exclusão de cadastro:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("relatório do período: os números saem do banco, e a planilha desce de verdade", async () => {
+  // Relatórios era uma casca: lista vazia e um aviso de "exportado em PDF" que
+  // não baixava nada. Aqui a tela é conferida contra o banco e contra ela
+  // mesma — o DRE e a tabela de formas de pagamento são calculados por funções
+  // diferentes, então bater uma na outra pega conta furada nas duas.
+  const problemas = [];
+  await ir("Relatórios");
+  await p.waitForTimeout(2200);
+
+  const dinheiro = (texto) => Number(String(texto).replace(/[^\d,-]/g, "").replace(/\./g, "").replace(",", ".")) || 0;
+  const linhaDre = async (rotulo) => {
+    const linha = p.locator(".dre-linha").filter({ hasText: rotulo }).first();
+    if (!(await linha.count())) { problemas.push(`o DRE não tem a linha "${rotulo}"`); return 0; }
+    return dinheiro(await linha.locator("strong").innerText());
+  };
+  const cartao = async (rotulo) => {
+    const art = p.locator(".report-mini article").filter({ hasText: rotulo }).first();
+    if (!(await art.count())) { problemas.push(`os cartões do período não mostram "${rotulo}"`); return 0; }
+    return dinheiro(await art.locator("strong").innerText());
+  };
+
+  const faturamento = await linhaDre("Faturamento");
+  // A venda de R$ 35 do passo 3 e a OS de R$ 150 do passo 7 foram recebidas em
+  // dinheiro nesta mesma execução: têm de estar dentro do faturamento de hoje.
+  if (faturamento < 185) problemas.push(`o faturamento de hoje é R$ ${faturamento}, mas só a venda do PDV e a OS em dinheiro já somam R$ 185`);
+
+  // A tela não pode faturar mais do que existe gravado.
+  const vendas = await banco("sales");
+  const ordens = await banco("serviceOrders");
+  const tetoDoBanco = vendas.reduce((soma, v) => soma + Number(v.total || 0), 0)
+    + ordens.filter((o) => o.closed).reduce((soma, o) => soma + Number(o.total || 0), 0);
+  if (faturamento > tetoDoBanco + 0.05) problemas.push(`a tela fatura R$ ${faturamento}, mais do que as vendas e OS encerradas do banco somam (R$ ${tetoDoBanco})`);
+
+  // O DRE contra a tabela de formas de pagamento: contas independentes.
+  const formas = await p.locator(".panel", { hasText: "Como entrou o dinheiro" }).locator("tbody tr").all();
+  let somaFormas = 0, somaAtend = 0;
+  for (const f of formas) {
+    const colunas = await f.locator("td").allInnerTexts();
+    if (colunas.length < 5) continue;
+    somaAtend += Number(colunas[1].trim()) || 0;
+    somaFormas += dinheiro(colunas[2]);
+  }
+  if (!formas.length || !somaFormas) problemas.push("a tabela de formas de pagamento veio vazia num período com faturamento");
+  if (Math.abs(somaFormas - faturamento) > 0.05) problemas.push(`as formas de pagamento somam R$ ${somaFormas}, mas o DRE fatura R$ ${faturamento}`);
+
+  const atendimentos = await cartao("Atendimentos");
+  if (atendimentos !== somaAtend) problemas.push(`o cartão diz ${atendimentos} atendimento(s) e as formas de pagamento somam ${somaAtend}`);
+  if (atendimentos > vendas.length + ordens.filter((o) => o.closed).length) problemas.push(`${atendimentos} atendimentos para ${vendas.length} venda(s) e ${ordens.filter((o) => o.closed).length} OS encerrada(s)`);
+
+  // O lucro é a conta inteira: sem o custo das peças o número seria fantasia.
+  const custo = await linhaDre("Custo das peças");
+  const lucro = await linhaDre("Lucro");
+  if (custo <= 0) problemas.push("o período vendeu peças, mas o custo delas saiu zerado");
+  if (lucro >= faturamento) problemas.push(`o lucro (R$ ${lucro}) não pode alcançar o faturamento (R$ ${faturamento}) com peças custando R$ ${custo}`);
+  if ((await cartao("Ticket médio")) <= 0) problemas.push("o ticket médio saiu zerado num período com atendimento");
+
+  if (!(await p.locator(".panel", { hasText: "Peças que mais saíram" }).locator("tbody tr").count())) {
+    problemas.push("nenhuma peça na lista das que mais saíram, mesmo com peça vendida no roteiro");
+  }
+
+  // Trocar o período tem de mudar o resultado — antes não havia período nenhum.
+  const antesTexto = await p.locator(".report-period-label").innerText();
+  await p.locator(".report-period .filter-pills button", { hasText: /Mês passado/ }).first().click();
+  await p.waitForTimeout(1400);
+  if ((await p.locator(".report-period-label").innerText()) === antesTexto) problemas.push(`trocar para "Mês passado" não mudou o período: continua ${JSON.stringify(antesTexto)}`);
+  const noPassado = await linhaDre("Faturamento");
+  if (noPassado !== 0) problemas.push(`o mês passado não teve movimento, mas a tela mostra R$ ${noPassado}`);
+
+  await p.locator(".report-period .filter-pills button", { hasText: /Hoje/ }).first().click();
+  await p.waitForTimeout(1400);
+  if ((await linhaDre("Faturamento")) !== faturamento) problemas.push("voltar para Hoje não trouxe o faturamento de volta");
+
+  // "Baixar planilha" precisa baixar um arquivo, não só avisar que baixou.
+  const baixando = p.waitForEvent("download", { timeout: 12000 }).catch(() => null);
+  await p.locator("button", { hasText: /Baixar planilha/ }).first().click();
+  const arquivo = await baixando;
+  if (!arquivo) problemas.push("clicar em Baixar planilha não baixou arquivo nenhum");
+  else {
+    if (!/^relatorio-.*\.csv$/.test(arquivo.suggestedFilename())) problemas.push(`o arquivo saiu com o nome ${arquivo.suggestedFilename()}`);
+    const caminho = `${OUT}/relatorio.csv`;
+    await arquivo.saveAs(caminho);
+    const conteudo = readFileSync(caminho, "utf8");
+    if (!conteudo.startsWith("﻿")) problemas.push("o CSV saiu sem BOM: o Excel brasileiro abre com acento quebrado");
+    if (!conteudo.includes(";")) problemas.push("o CSV não usa ponto e vírgula: o Excel brasileiro joga tudo numa coluna só");
+    if (!/Faturamento/i.test(conteudo)) problemas.push("o CSV baixou sem as linhas do resultado");
+  }
+  await foto("relatorio");
+  if (problemas.length) throw new Error("relatório do período:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("ajuste de estoque: corrige o saldo contado sem inventar compra nem mexer no custo", async () => {
+  // Sem essa tela, quem precisava corrigir uma contagem lançava uma compra que
+  // nunca existiu — e aí o custo médio da peça mudava sozinho.
+  const problemas = [];
+  const texto = (valor) => ({ stringValue: valor });
+  const FS = "http://127.0.0.1:8080/v1/projects/picapau-teste/databases/(default)/documents";
+  await fetch(`${FS}/products/PRD-800`, {
+    method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" },
+    body: JSON.stringify({ fields: {
+      code: texto("PRD-800"), name: texto("PASTILHA DE FREIO PARA CONTAR"), category: texto("Freios"),
+      cost: texto("R$ 30,00"), price: texto("R$ 60,00"), status: texto("Em estoque"),
+      stock: { integerValue: "42" }, minimum: { integerValue: "5" }, active: { booleanValue: true },
+    } }),
+  });
+  await p.reload();
+  await p.waitForTimeout(4000);
+  await ir("Ajuste de estoque");
+  await p.waitForTimeout(1500);
+  if (!(await p.locator(".adjust-form").count())) throw new Error("a tela de ajuste não abriu: o menu leva a um espaço vazio");
+
+  await p.locator(".adjust-form input").first().fill("PASTILHA DE FREIO PARA CONTAR");
+  await p.waitForTimeout(1200);
+  if (!(await p.locator(".adjust-results button").count())) throw new Error("a busca não achou a peça que acabou de ser cadastrada");
+  await p.locator(".adjust-results button").first().click();
+  await p.waitForTimeout(900);
+
+  // Contou 38 numa peça que o sistema achava que tinha 42: faltam 4.
+  await p.locator(".adjust-input").first().fill("38");
+  await p.locator(".adjust-form input").first().click();
+  await p.waitForTimeout(800);
+
+  // O resumo não pode esperar o motivo: quem conta a prateleira precisa ver o
+  // impacto na hora, senão parece que a contagem não entrou.
+  const resumo = (await p.locator(".adjust-resumo").innerText()).replace(/\n/g, " ");
+  if (!/Saindo\s*−?-?4/.test(resumo)) problemas.push(`o resumo não mostrou as 4 unidades saindo: ${JSON.stringify(resumo)}`);
+  if (!/120,00/.test(resumo)) problemas.push(`o impacto de 4 × R$ 30 não apareceu no resumo: ${JSON.stringify(resumo)}`);
+
+  // Sem motivo não grava: ajuste anônimo é indistinguível de erro de digitação.
+  await p.locator("button", { hasText: /Confirmar ajuste/ }).first().click();
+  await p.waitForTimeout(1500);
+  const aviso = await p.locator(".dialog-error-strip").innerText().catch(() => "");
+  if (!/motivo/i.test(aviso)) problemas.push(`gravar sem motivo não foi barrado: ${JSON.stringify(aviso)}`);
+  if ((await banco("stockAdjustments")).length) problemas.push("o ajuste sem motivo foi gravado assim mesmo");
+
+  await p.locator(".adjust-form select").first().selectOption("Perda, quebra ou vencimento");
+  await p.waitForTimeout(600);
+  await p.locator("button", { hasText: /Confirmar ajuste/ }).first().click();
+  await p.waitForTimeout(4500);
+
+  const peca = (await banco("products")).find((item) => item._id === "PRD-800");
+  if (Number(peca?.stock) !== 38) problemas.push(`o saldo ficou ${peca?.stock}, esperado 38`);
+  // O custo é o ponto todo do ajuste: ele NÃO pode se mexer.
+  if (String(peca?.cost) !== "R$ 30,00") problemas.push(`o ajuste mexeu no custo da peça: virou ${JSON.stringify(peca?.cost)}, esperado "R$ 30,00"`);
+
+  const ajustes = await banco("stockAdjustments");
+  if (ajustes.length !== 1) problemas.push(`gravou ${ajustes.length} ajuste(s), esperado 1`);
+  const gravado = ajustes[0] || {};
+  if (gravado.motivo !== "Perda, quebra ou vencimento") problemas.push(`o motivo gravado foi ${JSON.stringify(gravado.motivo)}`);
+  if (Number(gravado.valor) !== -120) problemas.push(`o impacto gravado foi ${gravado.valor}, esperado -120`);
+  if (!gravado.operatorName) problemas.push("o ajuste foi gravado sem dizer quem fez");
+
+  await p.waitForTimeout(1200);
+  const historico = await p.locator(".panel", { hasText: "Ajustes anteriores" }).locator("tbody").innerText();
+  if (!/Perda, quebra ou vencimento/.test(historico)) problemas.push("o ajuste não apareceu no histórico da tela");
+  if (!/120,00/.test(historico)) problemas.push("o histórico não mostra o valor do ajuste");
+  await foto("ajuste-estoque");
+  if (problemas.length) throw new Error("ajuste de estoque:\n      - " + problemas.join("\n      - "));
 });
 
 console.log(`\n=== ${falhas} falha(s) ===`);

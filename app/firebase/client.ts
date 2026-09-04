@@ -663,6 +663,49 @@ export async function recordSale(
  * atômico. Com um batch, duas entradas simultâneas da mesma peça leriam o mesmo
  * custo antigo e a segunda apagaria a média da primeira.
  */
+/**
+ * Grava um ajuste de estoque.
+ *
+ * Diferente da entrada de compra em duas coisas que importam:
+ *
+ * 1. O saldo é DEFINIDO, não somado. O ajuste vem de uma contagem — "tem 8 na
+ *    prateleira" —, e somar a diferença sobre um saldo que mudou entre abrir a
+ *    tela e confirmar deixaria o número errado de novo.
+ * 2. O custo NÃO muda. Ajuste é correção de quantidade, não compra: mexer no
+ *    custo médio aqui faria uma perda de estoque baratear a peça.
+ *
+ * Tudo numa transação: o saldo e o registro do ajuste entram juntos ou não
+ * entram. Estoque corrigido sem o papel que explica por quê é exatamente o que
+ * faz ninguém confiar no número.
+ */
+export async function recordStockAdjustment(
+  adjustmentId: string,
+  adjustment: Record<string, unknown>,
+  items: Array<{ productId: string; contado: number }>,
+) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const references = items.map((item) => doc(db, "products", item.productId));
+      // Todas as leituras antes de qualquer escrita: é exigência do Firestore.
+      const snapshots = await Promise.all(references.map((reference) => transaction.get(reference)));
+      snapshots.forEach((snapshot, index) => {
+        if (!snapshot.exists()) throw new Error(`A peça ${items[index]!.productId} não existe mais no cadastro.`);
+        transaction.set(references[index]!, {
+          stock: items[index]!.contado,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      });
+      transaction.set(doc(db, "stockAdjustments", adjustmentId), {
+        ...withoutUndefined(adjustment),
+        createdAt: serverTimestamp(),
+      }, { merge: true });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `stockAdjustments/${adjustmentId}`);
+  }
+}
+
 export async function recordStockEntry(
   entryId: string,
   entry: Record<string, unknown>,

@@ -10,6 +10,8 @@ import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
 import { formatPlate, motorcycleIdFor, normalizePlate, platePattern } from "../src/plate";
 import { avisoDeMotoDeFora, buscarMotos, estaNaFrota } from "../src/fleet";
 import { somenteAtivos, type BaseDaOficina } from "../src/removal";
+import { ajusteProblema, diferencaDoAjuste, motivosDeAjuste, resumoDoAjuste, valorDoAjuste, type Ajuste, type MotivoDeAjuste } from "../src/stock-adjust";
+import { atalhosDePeriodo, nomeDoArquivo, paraCSV, pecasMaisVendidas, periodoDe, periodoEmTexto, porFormaDePagamento, resultadoDoPeriodo, servicosMaisFeitos, type AtalhoDePeriodo } from "../src/report";
 import { emMaiusculo } from "../src/text-case";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
@@ -18,7 +20,7 @@ import { addToList } from "../src/quick-list";
 import { helpTopic, searchHelp } from "../src/help-topics";
 import { conferirNota, custoUnitario, fatorProblema, lerNfe, quantidadeQueEntra, resumoDaConferencia, type ItemConferido, type NfeNota } from "../src/nfe";
 import { HistoryPanel } from "../src/components/HistoryPanel";
-import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
+import { accountOpen, accountStatus, openAccounts, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, priceFromMarkup, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoDoServico } from "../src/mechanic";
@@ -58,6 +60,7 @@ import {
   openCashSession,
   readAllCollections,
   recordMovement,
+  recordStockAdjustment,
   recordStockEntry,
   saveImportedProducts,
   saveOrderWithStock,
@@ -112,6 +115,7 @@ import type {
   QuickServiceConfig,
   SaleRecord,
   ServiceOrderStatus,
+  StockAdjustmentRecord,
   StockEntryRecord,
   SystemLists,
   ServiceOrderItem,
@@ -176,6 +180,7 @@ const initialSuppliers: SupplierConfig[] = [];
 const initialSales: SaleRecord[] = [];
 
 const initialStockEntries: StockEntryRecord[] = [];
+const initialStockAdjustments: StockAdjustmentRecord[] = [];
 
 const initialAccounts: AccountRecord[] = [];
 const initialCashSessions: CashSession[] = [];
@@ -242,6 +247,7 @@ const navGroups: Array<{
     items: [
       { label: "Produtos e estoque", icon: "box" },
       { label: "Compras e entradas", icon: "file" },
+      { label: "Ajuste de estoque", icon: "check" },
       { label: "Fornecedores", icon: "users" },
     ],
   },
@@ -274,6 +280,7 @@ const destinationPermissions: Record<string, FirebasePermission[]> = {
   "Vendas do balcão": ["pos.use"],
   "Produtos e estoque": ["inventory.view"],
   "Compras e entradas": ["inventory.manage"],
+  "Ajuste de estoque": ["inventory.view"],
   "Fornecedores": ["inventory.manage"],
   "Clientes": ["customers.view"],
   "Motocicletas": ["customers.view"],
@@ -809,6 +816,338 @@ function AccountsWorkspace({
       <section className="panel module-panel">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder={`Buscar ${isReceivable ? "cliente" : "fornecedor"}, descrição ou código`}/></label><div className="filter-pills">{["Todos", "A vencer", "Vence hoje", "Atrasado"].map((filter) => <button className={accountFilter === filter ? "selected" : ""} key={filter} onClick={() => setAccountFilter(filter)}>{filter}</button>)}</div></div>
         <div className="table-scroll"><table><thead><tr><th>{isReceivable ? "Cliente / Pagador" : "Fornecedor / Favorecido"}</th><th className="col-secondary">Descrição</th><th>Vencimento</th><th className="col-secondary">Valor original</th><th>Saldo</th><th>Status</th><th>Ação</th></tr></thead><tbody>{filteredRecords.length ? filteredRecords.map((record) => <tr key={record.id}><td><strong>{record.person}</strong><span className="mono">{record.id}</span></td><td className="col-secondary"><strong>{record.description}</strong><span>{isReceivable ? "Receita operacional" : "Despesa da oficina"}</span></td><td>{record.dueDate}</td><td className="col-secondary mono">{formatBRL(record.original)}</td><td><strong className="mono">{formatBRL(record.open)}</strong></td><td><span className={`status ${record.status === "Atrasado" ? "red" : record.status === "Vence hoje" ? "amber" : record.status === "Parcial" ? "violet" : record.status === "Quitado" ? "green" : "blue"}`}><i/>{record.status}</span></td><td><button className="account-action" onClick={() => openDialog(isReceivable ? "settleReceivable" : "settlePayable", record.id)}>{isReceivable ? "Receber" : "Pagar"}</button></td></tr>) : <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhuma conta {isReceivable ? "a receber" : "a pagar"} cadastrada no momento.</td></tr>}</tbody></table></div>
+      </section>
+    </>
+  );
+}
+
+/**
+ * Relatórios do período.
+ *
+ * A aba era uma casca: a lista nascia vazia e o botão "Exportar relatório" só
+ * disparava um aviso dizendo "Relatório exportado em formato PDF", sem gerar
+ * arquivo nenhum. Mentir que gerou é pior que não ter o botão.
+ *
+ * O resto do financeiro só sabia responder "hoje" e "acumulado", e nenhuma
+ * pergunta que o dono faz de verdade cabe nesses dois. Aqui tudo é por período,
+ * e a conta é de src/report.ts.
+ */
+function ReportWorkspace({ sales, orders, expenses, movements, accounts, notify }: {
+  sales: SaleRecord[]; orders: OrderRecord[]; expenses: ExpenseRecord[];
+  movements: MovementRecord[]; accounts: AccountRecord[]; notify: (mensagem: string) => void;
+}) {
+  const [atalho, setAtalho] = useState<AtalhoDePeriodo | "Personalizado">("Este mês");
+  const [de, setDe] = useState(() => periodoDe("Este mês").de);
+  const [ate, setAte] = useState(() => periodoDe("Este mês").ate);
+  const periodo = useMemo(() => ({ de, ate }), [de, ate]);
+
+  const escolherAtalho = (novo: AtalhoDePeriodo) => {
+    const calculado = periodoDe(novo);
+    setAtalho(novo); setDe(calculado.de); setAte(calculado.ate);
+  };
+
+  const resultado = useMemo(() => resultadoDoPeriodo(periodo, { sales, orders, expenses, movements }),
+    [periodo, sales, orders, expenses, movements]);
+  const formas = useMemo(() => porFormaDePagamento(periodo, sales, orders), [periodo, sales, orders]);
+  const pecas = useMemo(() => pecasMaisVendidas(periodo, sales, orders), [periodo, sales, orders]);
+  const servicos = useMemo(() => servicosMaisFeitos(periodo, sales, orders), [periodo, sales, orders]);
+  const aReceber = useMemo(() => openAccounts(accounts, "receber").reduce((s, c) => s + accountOpen(c), 0), [accounts]);
+  const aPagar = useMemo(() => openAccounts(accounts, "pagar").reduce((s, c) => s + accountOpen(c), 0), [accounts]);
+
+  /**
+   * O botão entrega um arquivo de verdade.
+   *
+   * CSV e não PDF: é o formato que abre no Excel e no Google Sheets, que o
+   * contador aceita, e que dá para somar por cima. PDF seria bonito e inútil
+   * para o que a oficina faz com isso.
+   */
+  const exportar = () => {
+    const linhas: Array<Array<string | number>> = [
+      ["Resultado", "", ""],
+      ["Faturamento", resultado.faturamento, ""],
+      ["Custo das peças", -resultado.custoDasPecas, ""],
+      ["Taxas de maquininha", -resultado.taxas, ""],
+      ["Despesas pagas", -resultado.despesas, ""],
+      ["Entradas avulsas", resultado.entradasAvulsas, ""],
+      ["Saídas avulsas", -resultado.saidasAvulsas, ""],
+      ["Lucro do período", resultado.lucro, `${resultado.margem}%`],
+      ["Atendimentos", resultado.atendimentos, ""],
+      ["Ticket médio", resultado.ticketMedio, ""],
+      ["Desconto concedido", resultado.descontos, ""],
+      ["", "", ""],
+      ["Forma de pagamento", "Atendimentos", "Total", "Taxa", "Líquido"],
+      ...formas.map((linha) => [linha.forma, linha.atendimentos, linha.total, linha.taxa, linha.liquido]),
+      ["", "", ""],
+      ["Peça", "Quantidade", "Faturamento", "Custo", "Lucro"],
+      ...pecas.map((linha) => [linha.nome, linha.quantidade, linha.total, linha.custo, linha.lucro]),
+      ["", "", ""],
+      ["Serviço", "Quantidade", "Faturamento", "", ""],
+      ...servicos.map((linha) => [linha.nome, linha.quantidade, linha.total, "", ""]),
+    ];
+    const csv = paraCSV([`Relatório da oficina — ${periodoEmTexto(periodo)}`, "", "", "", ""], linhas);
+    // BOM na frente: sem ele o Excel em português abre "ÓLEO" como "Ã“LEO".
+    const arquivo = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(arquivo);
+    const link = document.createElement("a");
+    link.href = url; link.download = nomeDoArquivo("relatorio", periodo);
+    document.body.appendChild(link); link.click(); link.remove();
+    URL.revokeObjectURL(url);
+    notify(`Relatório de ${periodoEmTexto(periodo)} baixado.`);
+  };
+
+  const linha = (rotulo: string, valor: number, tom?: "menos" | "total") => (
+    <div className={`dre-linha ${tom ?? ""}`}><span>{rotulo}</span><strong>{tom === "menos" ? `− ${formatBRL(valor)}` : formatBRL(valor)}</strong></div>
+  );
+
+  return (
+    <>
+      <div className="module-heading">
+        <div><p>Indicadores</p><h1>Relatórios</h1><span>O resultado da oficina no período que você escolher.</span></div>
+        <button className="primary-button" onClick={exportar}><Icon name="file" size={18}/>Baixar planilha</button>
+      </div>
+
+      <div className="report-period panel">
+        <div className="filter-pills">
+          {atalhosDePeriodo.map((nome) => (
+            <button className={atalho === nome ? "selected" : ""} key={nome} onClick={() => escolherAtalho(nome)}>{nome}</button>
+          ))}
+        </div>
+        <label className="field"><span>De</span><input type="date" value={de} onChange={(e) => { setDe(e.target.value); setAtalho("Personalizado"); }}/></label>
+        <label className="field"><span>Até</span><input type="date" value={ate} onChange={(e) => { setAte(e.target.value); setAtalho("Personalizado"); }}/></label>
+        <span className="report-period-label">{periodoEmTexto(periodo)}</span>
+      </div>
+
+      <div className="report-grid">
+        {/* O resultado na ordem em que se lê um DRE: o que entrou, o que saiu,
+            e o que sobrou. O custo das peças entra porque sem ele o "lucro" é
+            fantasia — vender R$ 1.000 de peça que custou R$ 700 não são
+            R$ 1.000 de resultado. */}
+        <section className="panel report-dre">
+          <div className="panel-header"><div><h2>Resultado do período</h2><p>{periodoEmTexto(periodo)}</p></div></div>
+          <div className="dre">
+            {linha("Faturamento", resultado.faturamento)}
+            {linha("Custo das peças vendidas", resultado.custoDasPecas, "menos")}
+            {linha("Taxas de maquininha", resultado.taxas, "menos")}
+            {linha("Despesas pagas", resultado.despesas, "menos")}
+            {resultado.entradasAvulsas ? linha("Entradas avulsas", resultado.entradasAvulsas) : null}
+            {resultado.saidasAvulsas ? linha("Saídas avulsas", resultado.saidasAvulsas, "menos") : null}
+            {linha("Lucro do período", resultado.lucro, "total")}
+          </div>
+          <div className="report-mini">
+            <article><span>Margem</span><strong>{resultado.margem.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong></article>
+            <article><span>Atendimentos</span><strong>{resultado.atendimentos}</strong></article>
+            <article><span>Ticket médio</span><strong>{formatBRL(resultado.ticketMedio)}</strong></article>
+            <article><span>Desconto dado</span><strong>{formatBRL(resultado.descontos)}</strong></article>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header"><div><h2>Como entrou o dinheiro</h2><p>A taxa da maquininha ao lado do total, não diluída no mês</p></div></div>
+          <div className="table-scroll"><table><thead><tr><th>Forma</th><th className="num">Atend.</th><th className="num">Total</th><th className="num">Taxa</th><th className="num">Líquido</th></tr></thead>
+            <tbody>{formas.length ? formas.map((l) => (
+              <tr key={l.forma}><td><strong>{l.forma}</strong></td><td className="num">{l.atendimentos}</td><td className="num mono">{formatBRL(l.total)}</td>
+                <td className="num mono">{l.taxa ? `− ${formatBRL(l.taxa)}` : "—"}</td><td className="num mono"><strong>{formatBRL(l.liquido)}</strong></td></tr>
+            )) : <tr><td colSpan={5} className="report-vazio">Nenhuma entrada neste período.</td></tr>}</tbody></table></div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header"><div><h2>Peças que mais saíram</h2><p>Ordenado pelo que faturou, com o lucro de cada uma</p></div></div>
+          <div className="table-scroll"><table><thead><tr><th>Peça</th><th className="num">Qtd.</th><th className="num">Faturou</th><th className="num">Lucro</th></tr></thead>
+            <tbody>{pecas.length ? pecas.map((l) => (
+              <tr key={l.nome}><td><strong>{l.nome}</strong></td><td className="num">{l.quantidade}</td><td className="num mono">{formatBRL(l.total)}</td>
+                <td className="num mono"><strong className={l.lucro >= 0 ? "lucro-bom" : "lucro-ruim"}>{formatBRL(l.lucro)}</strong></td></tr>
+            )) : <tr><td colSpan={4} className="report-vazio">Nenhuma peça vendida neste período.</td></tr>}</tbody></table></div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header"><div><h2>Serviços mais feitos</h2><p>A mão de obra que sustenta a oficina</p></div></div>
+          <div className="table-scroll"><table><thead><tr><th>Serviço</th><th className="num">Qtd.</th><th className="num">Faturou</th></tr></thead>
+            <tbody>{servicos.length ? servicos.map((l) => (
+              <tr key={l.nome}><td><strong>{l.nome}</strong></td><td className="num">{l.quantidade}</td><td className="num mono">{formatBRL(l.total)}</td></tr>
+            )) : <tr><td colSpan={3} className="report-vazio">Nenhum serviço neste período.</td></tr>}</tbody></table></div>
+        </section>
+
+        {/* Em aberto não é do período: é o que está de pé hoje, e é a conta que
+            decide se dá para comprar peça esta semana. */}
+        <section className="panel report-aberto">
+          <div className="panel-header"><div><h2>Em aberto hoje</h2><p>Independe do período escolhido</p></div></div>
+          <div className="report-mini">
+            <article><span>A receber</span><strong className="lucro-bom">{formatBRL(aReceber)}</strong></article>
+            <article><span>A pagar</span><strong className="lucro-ruim">{formatBRL(aPagar)}</strong></article>
+            <article><span>Diferença</span><strong>{formatBRL(aReceber - aPagar)}</strong></article>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Ajuste de estoque.
+ *
+ * O estoque só se mexia por compra, venda, OS, planilha ou XML. Quem precisava
+ * corrigir uma contagem — peça quebrada na bancada, óleo usado na moto da
+ * própria oficina, item lançado em dobro, ou o saldo do dia em que se começou a
+ * usar o sistema — inventava uma compra que não existiu. Aí o custo médio da
+ * peça mudava, aparecia um fornecedor que ninguém reconhece, e o relatório de
+ * compras do mês passava a mentir.
+ *
+ * A conta e as travas são de src/stock-adjust.ts. Aqui é só a tela.
+ */
+function StockAdjustWorkspace({ products, adjustments, currentUser, notify, canManage }: {
+  products: ProductRecord[]; adjustments: StockAdjustmentRecord[];
+  currentUser: FirebaseUserSummary | null; notify: (mensagem: string) => void; canManage: boolean;
+}) {
+  const [linhas, setLinhas] = useState<Ajuste[]>([]);
+  const [busca, setBusca] = useState("");
+  const [motivo, setMotivo] = useState<MotivoDeAjuste | "">("");
+  const [observacao, setObservacao] = useState("");
+  const [gravando, setGravando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const ativos = useMemo(() => somenteAtivos(products), [products]);
+  const achados = useMemo(() => {
+    const texto = busca.trim().toLowerCase();
+    if (!texto) return [];
+    return ativos.filter((peca) => `${peca.name} ${peca.code} ${peca.barcode ?? ""}`.toLowerCase().includes(texto))
+      .filter((peca) => !linhas.some((linha) => linha.productId === peca.id)).slice(0, 8);
+  }, [ativos, busca, linhas]);
+
+  // O motivo e a observação valem para o lote inteiro: uma contagem de
+  // prateleira é uma contagem só, ainda que corrija doze peças.
+  const comMotivo = useMemo(() => linhas.map((linha) => ({ ...linha, motivo, observacao })), [linhas, motivo, observacao]);
+  const resumo = useMemo(() => resumoDoAjuste(comMotivo), [comMotivo]);
+  const primeiroProblema = comMotivo.map((linha) => ajusteProblema(linha)).find(Boolean) ?? "";
+
+  const acrescentar = (peca: ProductRecord) => {
+    setLinhas((atual) => [...atual, {
+      productId: peca.id, nome: peca.name, saldoAtual: peca.stock ?? 0, contado: peca.stock ?? 0,
+      motivo: "", custoUnitario: parseBRL(peca.cost),
+    }]);
+    setBusca("");
+  };
+  const mexer = (id: string, contado: number) =>
+    setLinhas((atual) => atual.map((linha) => linha.productId === id ? { ...linha, contado } : linha));
+  const tirar = (id: string) => setLinhas((atual) => atual.filter((linha) => linha.productId !== id));
+
+  const confirmar = async () => {
+    if (!canManage) return setErro("Seu perfil pode consultar o estoque, mas não ajustar.");
+    if (!linhas.length) return setErro("Acrescente pelo menos uma peça.");
+    if (primeiroProblema) return setErro(primeiroProblema);
+    setGravando(true); setErro("");
+    try {
+      const id = `AJU-${String(highestSequence(adjustments, "AJU") + 1).padStart(4, "0")}`;
+      await recordStockAdjustment(id, {
+        id,
+        date: new Date().toLocaleDateString("pt-BR"),
+        adjustedAt: new Date().toISOString(),
+        motivo, observacao: observacao.trim(), valor: resumo.valor,
+        items: comMotivo.map((linha) => ({
+          productId: linha.productId, name: linha.nome, saldoAtual: linha.saldoAtual,
+          contado: linha.contado, diferenca: diferencaDoAjuste(linha), custoUnitario: linha.custoUnitario ?? 0,
+        })),
+        operatorUid: currentUser?.uid ?? "", operatorName: currentUser?.displayName ?? "",
+      }, comMotivo.map((linha) => ({ productId: linha.productId, contado: linha.contado })));
+      setLinhas([]); setMotivo(""); setObservacao("");
+      notify(`Ajuste ${id} gravado: ${resumo.itens} peça(s), ${resumo.entram > 0 ? `+${resumo.entram}` : "0"} entrando e ${resumo.saem} saindo.`);
+    } catch (problema) {
+      setErro(problema instanceof Error ? problema.message : "Não foi possível gravar o ajuste.");
+    } finally {
+      setGravando(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="module-heading">
+        <div><p>Estoque</p><h1>Ajuste de estoque</h1><span>Corrija o saldo contado na prateleira, sem inventar uma compra.</span></div>
+        <span className="system-healthy"><i/><b>{adjustments.length} ajuste(s) no histórico</b></span>
+      </div>
+
+      <section className="panel module-panel adjust-panel">
+        <div className="panel-header"><div><h2>Nova conferência</h2><p>Procure a peça, digite o que existe de verdade e diga o motivo</p></div></div>
+
+        <div className="adjust-form">
+          <label className="field field-full"><span>Peça</span>
+            <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Nome, código ou código de barras"/>
+          </label>
+          {achados.length ? (
+            <div className="adjust-results">
+              {achados.map((peca) => (
+                <button key={peca.id} onClick={() => acrescentar(peca)}>
+                  <span className="catalog-code">{peca.code.slice(-2)}</span>
+                  <div><strong>{peca.name}</strong><small>{peca.code} · {peca.stock} em estoque</small></div>
+                  <i>+</i>
+                </button>
+              ))}
+            </div>
+          ) : busca.trim() ? <div className="os-search-hint"><Icon name="box" size={17}/><span>Nenhuma peça com "{busca.trim()}".</span></div> : null}
+
+          {linhas.length ? (
+            <div className="table-scroll adjust-table">
+              <table><thead><tr><th>Peça</th><th className="num">Sistema</th><th className="num">Contado</th><th className="num">Diferença</th><th className="num">Em dinheiro</th><th></th></tr></thead>
+                <tbody>{comMotivo.map((linha) => {
+                  const diferenca = diferencaDoAjuste(linha);
+                  return (
+                    <tr key={linha.productId}>
+                      <td><strong>{linha.nome}</strong></td>
+                      <td className="num mono">{linha.saldoAtual}</td>
+                      <td className="num"><NumberField min={0} fallback={linha.saldoAtual} value={linha.contado} onChange={(valor) => mexer(linha.productId, valor)} className="adjust-input"/></td>
+                      <td className="num mono"><strong className={diferenca > 0 ? "lucro-bom" : diferenca < 0 ? "lucro-ruim" : ""}>{diferenca > 0 ? `+${diferenca}` : diferenca}</strong></td>
+                      <td className="num mono">{formatBRL(valorDoAjuste(linha))}</td>
+                      <td><button className="remove-item" onClick={() => tirar(linha.productId)} aria-label="Tirar da lista">×</button></td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
+          ) : <div className="pdv-empty"><span><Icon name="box" size={20}/></span><strong>Nenhuma peça na conferência</strong><p>Procure a peça acima para começar.</p></div>}
+
+          {/* O motivo é obrigatório de propósito: ajuste sem motivo é
+              indistinguível de erro, e um estoque cheio de correções anônimas é
+              um estoque em que ninguém confia. */}
+          <label className="field"><span>Motivo <b className="req">*</b></span>
+            <select value={motivo} onChange={(e) => setMotivo(e.target.value as MotivoDeAjuste)}>
+              <option value="">Escolha o motivo</option>
+              {motivosDeAjuste.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+            </select>
+          </label>
+          <label className="field"><span>Observação{motivo === "Correção de lançamento" ? <b className="req"> *</b> : null}</span>
+            <input value={observacao} onChange={(e) => setObservacao(emMaiusculo(e.target.value))} placeholder="Ex.: ENTRADA ENT-0003 LANÇADA EM DOBRO"/>
+          </label>
+        </div>
+
+        {erro ? <div className="dialog-error-strip" role="alert"><b>!</b><span>{erro}</span></div> : null}
+
+        <div className="adjust-footer">
+          <div className="adjust-resumo">
+            <span>Peças<b>{resumo.itens}</b></span>
+            <span>Entrando<b className="lucro-bom">+{resumo.entram}</b></span>
+            <span>Saindo<b className="lucro-ruim">−{resumo.saem}</b></span>
+            <span>Impacto<b>{formatBRL(resumo.valor)}</b></span>
+          </div>
+          <button className="primary-button" disabled={gravando || !linhas.length} onClick={() => void confirmar()}>
+            {gravando ? "Gravando..." : "Confirmar ajuste"}
+          </button>
+        </div>
+      </section>
+
+      <section className="panel module-panel">
+        <div className="summary-title"><span>Ajustes anteriores</span><b>{adjustments.length} NO HISTÓRICO</b></div>
+        <div className="table-scroll">
+          <table><thead><tr><th>Ajuste</th><th>Data</th><th>Motivo</th><th className="num">Peças</th><th className="num">Em dinheiro</th><th>Quem fez</th></tr></thead>
+            <tbody>{adjustments.length ? [...adjustments].sort((a, b) => String(b.adjustedAt).localeCompare(String(a.adjustedAt))).map((ajuste) => (
+              <tr key={ajuste.id}>
+                <td><strong className="order-id">{ajuste.id}</strong>{ajuste.observacao ? <span>{ajuste.observacao}</span> : null}</td>
+                <td>{ajuste.date}</td>
+                <td>{ajuste.motivo}</td>
+                <td className="num mono">{(ajuste.items ?? []).length}</td>
+                <td className="num mono"><strong className={ajuste.valor >= 0 ? "lucro-bom" : "lucro-ruim"}>{formatBRL(ajuste.valor)}</strong></td>
+                <td>{ajuste.operatorName || "—"}</td>
+              </tr>
+            )) : <tr><td colSpan={6} className="report-vazio">Nenhum ajuste registrado ainda.</td></tr>}</tbody>
+          </table>
+        </div>
       </section>
     </>
   );
@@ -1590,6 +1929,7 @@ function AdminWorkspace({
 }
 
 export function ModuleWorkspace({
+  stockAdjustments,
   active,
   canOperate,
   canCreateOrders,
@@ -1633,6 +1973,7 @@ export function ModuleWorkspace({
   settings,
   motorcycles,
 }: {
+  stockAdjustments: StockAdjustmentRecord[];
   active: string;
   canOperate: boolean;
   canCreateOrders: boolean;
@@ -1700,6 +2041,8 @@ export function ModuleWorkspace({
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
+  if (active === "Ajuste de estoque") return <StockAdjustWorkspace products={products} adjustments={stockAdjustments} currentUser={currentFirebaseUser} notify={notify} canManage={canOperate}/>;
+  if (active === "Relatórios") return <ReportWorkspace sales={sales} orders={orders} expenses={expenses} movements={movements} accounts={accounts} notify={notify}/>;
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} orders={orders} sales={sales} expenses={expenses} canManageTeam={canOperate}/>;
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} setEmployees={setUsers} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
   if (active === "Configurações") return (
@@ -5155,6 +5498,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [paymentMethods, setPaymentMethods] = useFirebaseSyncedCollection("paymentMethods", initialPaymentMethods, firebaseEnabled && (canSeeFinance || canUsePdv), canManageSettings, firebaseSession.reportSyncError);
   const [sales] = useFirebaseSyncedCollection<SaleRecord>("sales", initialSales, firebaseEnabled && (canSeeFinance || canUsePdv || canUseQuickService), false, firebaseSession.reportSyncError);
   const [stockEntries] = useFirebaseSyncedCollection<StockEntryRecord>("stockEntries", initialStockEntries, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
+  const [stockAdjustments] = useFirebaseSyncedCollection<StockAdjustmentRecord>("stockAdjustments", initialStockAdjustments, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
   const [accounts] = useFirebaseSyncedCollection<AccountRecord>("accounts", initialAccounts, firebaseEnabled && canSeeFinance, false, firebaseSession.reportSyncError);
   const [cashSessions] = useFirebaseSyncedCollection<CashSession>("cashSessions", initialCashSessions, firebaseEnabled && (canSeeFinance || canUsePdv), false, firebaseSession.reportSyncError);
   const [movements] = useFirebaseSyncedCollection<MovementRecord>("movements", initialMovements, firebaseEnabled && canSeeFinance, false, firebaseSession.reportSyncError);
@@ -5485,7 +5829,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
+            <ModuleWorkspace stockAdjustments={stockAdjustments} active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>

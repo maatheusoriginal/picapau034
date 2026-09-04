@@ -57,6 +57,8 @@ npm run dev             # http://localhost:3000
 | `npm run check:barcode` | Confere o gerador de código de barras interno (EAN-13) |
 | `npm run check:motorcycle-catalog` | Confere o catálogo de marca, modelo e versão de moto |
 | `npm run check:plate` | Confere as regras de placa (padrão antigo, Mercosul e comparação) |
+| `npm run check:report` | Confere o relatório do período: DRE, formas de pagamento, ranking e CSV |
+| `npm run check:stock-adjust` | Confere o ajuste de estoque: diferença, motivo obrigatório e impacto em dinheiro |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -1793,6 +1795,104 @@ passo 39 do roteiro ponta a ponta faz os dois caminhos no navegador: apaga uma
 peça sem uso e confere que ela saiu do Firestore; desativa a peça vendida e
 confere que ela continua no banco com `active: false`, aparece marcada na lista
 de cadastros e sumiu da lista de peças da OS.
+
+## Relatório do período
+
+**Relatórios era uma casca.** A tela abria com uma lista vazia, e o botão de
+exportar mandava um aviso — "Relatório exportado em formato PDF." — sem gerar
+arquivo nenhum. Não havia nem escolha de período: nenhuma tela do sistema
+perguntava "de quando até quando".
+
+Agora **Gestão → Relatórios** monta o resultado do intervalo escolhido:
+
+- **Atalhos de período**: Hoje, Últimos 7 dias, Este mês, Mês passado, Este ano —
+  ou as duas datas na mão, que passam o rótulo para "Personalizado".
+- **Resultado do período**, na ordem em que se lê um DRE: faturamento, menos o
+  custo das peças vendidas, menos as taxas de maquininha, menos as despesas
+  pagas, mais e menos as movimentações avulsas, e o lucro embaixo.
+- **Margem, atendimentos, ticket médio e desconto dado** nos quatro cartões.
+- **Como entrou o dinheiro**: por forma de pagamento, com a taxa da maquininha
+  ao lado do total em vez de diluída no mês.
+- **Peças que mais saíram**, ordenadas pelo que faturaram (e não pela
+  quantidade: vinte parafusos de R$ 2 não são o resultado do mês), com o lucro
+  de cada uma. E **serviços mais feitos**.
+- **A receber e a pagar em aberto**, para o resultado não ser lido sem o que
+  ainda está na rua.
+- **Baixar planilha** gera um **CSV de verdade**: com BOM, separador `;` e
+  decimal com vírgula, que é o que abre certo no Excel brasileiro e no Google
+  Sheets. O nome traz o período: `relatorio-2026-09-01-a-2026-09-30.csv`.
+
+O custo das peças entra no DRE de propósito. Sem ele o "lucro" é fantasia:
+vender R$ 1.000 de peça que custou R$ 700 não são R$ 1.000 de resultado.
+
+As contas são de `src/report.ts` (`npm run check:report`, 41 casos). A
+comparação de datas é feita pelo **texto ISO**, não por `Date`: comparar
+`Date` traria o fuso do navegador para dentro da conta, e um atendimento das
+21h de 31 de janeiro cairia em fevereiro. Registro sem data fica de fora, em vez
+de ser contado no período errado.
+
+O passo 40 do roteiro ponta a ponta confere a tela contra o banco e contra ela
+mesma: o faturamento não pode passar do que as vendas e OS encerradas somam no
+Firestore, o DRE tem de bater com a tabela de formas de pagamento (são funções
+diferentes calculando), "Mês passado" tem de dar zero, e o botão tem de baixar
+um arquivo com BOM e `;` dentro.
+
+## Ajuste de estoque
+
+O estoque só se mexia por **compra, venda, OS, planilha ou XML**. Não havia como
+corrigir uma contagem — e contagem errada é o estado normal de um estoque: peça
+que quebrou na bancada, peça que o cliente devolveu, óleo usado na própria moto
+da oficina, item digitado com a quantidade errada, ou simplesmente o saldo do
+dia em que se começou a usar o sistema.
+
+Sem esse caminho, quem precisa corrigir **inventa uma compra que não existiu**.
+Aí o custo médio da peça muda, aparece uma entrada de fornecedor que ninguém
+reconhece, e o relatório de compras do mês passa a mentir.
+
+**Estoque → Ajuste de estoque** faz a correção sem disfarce:
+
+1. Procure a peça por nome, código ou código de barras.
+2. Digite **o que existe de verdade na prateleira**. O sistema mostra o que ele
+   achava que tinha, a diferença e quanto ela vale em dinheiro, pelo custo.
+3. Várias peças cabem na mesma conferência — uma contagem de prateleira é uma
+   contagem só, ainda que corrija doze peças.
+4. **O motivo é obrigatório**: Contagem de prateleira, Perda/quebra/vencimento,
+   Uso interno da oficina, Devolução ao fornecedor, Devolução de cliente,
+   Correção de lançamento ou Saldo inicial. Ajuste sem motivo é indistinguível
+   de erro de digitação, e um estoque cheio de correções anônimas é um estoque
+   em que ninguém confia. "Correção de lançamento" ainda exige dizer **qual**
+   lançamento.
+
+Três coisas o ajuste **não** faz, de propósito:
+
+- **Não mexe no custo da peça.** É o ponto todo: o saldo passa a ser o contado, o
+  custo médio fica como estava. Ajuste não é compra.
+- **Não grava diferença zero.** Um ajuste que não muda nada só enche o histórico
+  de linhas que não explicam nada.
+- **Não soma o que não vai ser gravado.** O resumo do rodapé conta as linhas que
+  mexem no saldo — mas **não espera o motivo** para aparecer: quem acabou de
+  contar quatro óleos a menos precisa ver o impacto na hora, senão parece que a
+  contagem não entrou.
+
+A gravação é uma transação (`recordStockAdjustment` em `app/firebase/client.ts`):
+lê os produtos, **define** o saldo como o valor contado (não soma, para duas
+conferências ao mesmo tempo não se duplicarem), e escreve o ajuste em
+`stockAdjustments` com quem fez, quando, o motivo, a observação e o impacto em
+dinheiro. Se a peça tiver sido apagada no meio, a transação falha inteira em vez
+de gravar pela metade.
+
+Nas regras do Firestore, `stockAdjustments` é legível por quem vê estoque ou
+financeiro, criável por quem gerencia estoque, e **alterável ou apagável só por
+quem gerencia o financeiro** — o histórico de correções é justamente o que não
+pode ser corrigido em silêncio.
+
+As contas são de `src/stock-adjust.ts` (`npm run check:stock-adjust`, 30 casos),
+e o passo 41 do roteiro ponta a ponta faz a conferência inteira no navegador:
+conta 38 numa peça de saldo 42 e custo R$ 30, confere que o resumo mostra as 4
+saindo e os R$ 120 antes de escolher o motivo, tenta gravar sem motivo e confere
+que **nada** foi para o banco, grava com motivo, e então confere no Firestore que
+o saldo virou 38, que **o custo continuou R$ 30,00** e que o ajuste ficou
+registrado com o nome de quem fez.
 
 ## Cópia de segurança
 
