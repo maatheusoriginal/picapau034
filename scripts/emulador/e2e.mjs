@@ -1664,6 +1664,153 @@ await passo("abrir cada formulário de cadastro sem quebrar a tela", async () =>
   if (quebrados.length) throw new Error("formulários com falha:\n      - " + quebrados.join("\n      - "));
 });
 
+await passo("no celular, o mecânico vê a OS inteira sem rolar e acerta os botões com o dedo", async () => {
+  // O mecânico usa o sistema no celular, de pé na bancada, muitas vezes com
+  // uma mão só. Este passo entra como ele num aparelho de 390x844 e cobra
+  // quatro coisas que só quebram nesse tamanho:
+  //   1. a primeira OS cabe na tela — os três cartões do resumo empilhados
+  //      empurravam a lista uns 800px para baixo;
+  //   2. os botões têm 44px, o mínimo em que o dedo acerta sem ampliar;
+  //   3. o relato do cliente aparece na linha, senão ele abre cada OS só para
+  //      descobrir qual é a que vai pegar;
+  //   4. dentro da OS nenhum cartão fica achatado — .order-info-grid e
+  //      .order-section usam overflow:hidden e, num grid de altura definida,
+  //      encolhiam para 15px: o cliente e as peças aprovadas sumiam da tela.
+  const problemas = [];
+  const AUTH = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1";
+  const FS = "http://127.0.0.1:8080/v1/projects/picapau-teste/databases/(default)/documents";
+  const texto = (valor) => ({ stringValue: valor });
+
+  // A conta de login de verdade: o passo 27 deixou o funcionário e o perfil de
+  // acesso, mas com um uid inventado. Aqui ela passa a existir no Auth.
+  const entrar = async () => {
+    for (const rota of ["accounts:signUp", "accounts:signInWithPassword"]) {
+      const r = await fetch(`${AUTH}/${rota}?key=fake-api-key`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "erasmo@picapau.test", password: "teste123", returnSecureToken: true }),
+      });
+      const d = await r.json();
+      if (d.localId) return d.localId;
+    }
+    return "";
+  };
+  const uid = await entrar();
+  if (!uid) throw new Error("não foi possível criar a conta do mecânico no Auth");
+
+  const erasmo = (await banco("employees")).find((f) => /ERASMO/i.test(f.name || ""));
+  if (!erasmo) throw new Error("o funcionário ERASMO não existe; o passo 27 deveria tê-lo criado");
+  const perfil = { uid: texto(uid), name: texto("ERASMO SOUZA"), email: texto("erasmo@picapau.test"),
+    phone: texto("(34) 98888-1111"), role: texto("Mecânico"), employeeId: texto(erasmo._id),
+    active: { booleanValue: true }, mustChangePassword: { booleanValue: false },
+    permissions: { arrayValue: { values: ["orders.view", "orders.update", "budgets.view", "inventory.view", "customers.view"].map(texto) } } };
+  await fetch(`${FS}/userAccess/${uid}`, { method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" }, body: JSON.stringify({ fields: perfil }) });
+  await fetch(`${FS}/users/${uid}`, { method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" }, body: JSON.stringify({ fields: perfil }) });
+
+  // Uma OS aberta, sem mecânico e com relato: é o que ele vê em "para pegar".
+  const aberta = (await banco("serviceOrders")).find((os) => !os.closed && os.status !== "Entrega" && !(os.mechanicIds || []).length);
+  if (!aberta) throw new Error("nenhuma OS aberta e livre para o mecânico pegar");
+  const RELATO = "MOTO FALHANDO EM MARCHA LENTA E VAZANDO OLEO PELO RETENTOR";
+  await fetch(`${FS}/serviceOrders/${aberta._id}?updateMask.fieldPaths=problem`, {
+    method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" },
+    body: JSON.stringify({ fields: { problem: texto(RELATO) } }),
+  });
+
+  const contexto = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const cel = await contexto.newPage();
+  const errosCel = [];
+  cel.on("pageerror", (e) => errosCel.push(String(e).split("\n")[0]));
+  try {
+    await cel.goto(process.env.URL_TESTE ?? "http://127.0.0.1:5199/");
+    await cel.waitForTimeout(2200);
+    await cel.getByPlaceholder(/e-mail|email/i).first().fill("erasmo@picapau.test");
+    await cel.locator('input[type="password"]').first().fill("teste123");
+    await cel.getByRole("button", { name: /^Entrar$/ }).click();
+    await cel.waitForTimeout(6000);
+
+    // No celular o menu vive atrás do botão de sanduíche.
+    await cel.locator(".mobile-menu").first().click().catch(() => {});
+    await cel.waitForTimeout(900);
+    const alvo = cel.locator(".nav-subitem", { hasText: "Ordens de serviço" }).first();
+    if (!(await alvo.isVisible().catch(() => false))) {
+      await cel.locator(".nav-group-trigger", { hasText: "Oficina" }).first().click().catch(() => {});
+      await cel.waitForTimeout(700);
+    }
+    await alvo.click();
+    await cel.waitForTimeout(2600);
+    await cel.screenshot({ path: `${OUT}/e2e-celular-mecanico.png` });
+
+    const titulo = await cel.locator("h1").first().innerText().catch(() => "");
+    if (!/Minhas ordens/i.test(titulo)) problemas.push(`o mecânico não caiu no quadro dele: ${JSON.stringify(titulo)}`);
+
+    const largura = await cel.evaluate(() => ({ rolagem: document.documentElement.scrollWidth, tela: window.innerWidth }));
+    if (largura.rolagem > largura.tela + 1) problemas.push(`a lista rola de lado: ${largura.rolagem}px numa tela de ${largura.tela}px`);
+
+    const linhas = cel.locator(".registry-row");
+    if (!(await linhas.count())) problemas.push("nenhuma OS apareceu no quadro do mecânico");
+    else {
+      // Sem rolar: a primeira OS e os botões dela têm de estar na tela.
+      const primeira = await linhas.first().evaluate((el) => ({
+        topo: Math.round(el.getBoundingClientRect().top),
+        fim: Math.round(el.getBoundingClientRect().bottom),
+        tela: window.innerHeight,
+      }));
+      if (primeira.fim > primeira.tela) problemas.push(`a primeira OS termina em ${primeira.fim}px numa tela de ${primeira.tela}px: o mecânico precisa rolar para ver o que fazer`);
+
+      const relato = await cel.locator(".registry-row .row-problem").first().innerText().catch(() => "");
+      if (!relato.trim()) problemas.push("a linha não mostra o relato do cliente");
+      const comRelato = await cel.locator(".registry-row").filter({ hasText: /MARCHA LENTA/i }).count();
+      if (!comRelato) problemas.push(`o relato da OS ${aberta._id} não chegou à lista`);
+
+      const pequenos = await cel.locator(".registry-row button").evaluateAll((els) => els
+        .map((e) => ({ t: (e.innerText || "?").replace(/\s+/g, " ").trim(), a: Math.round(e.getBoundingClientRect().height), l: Math.round(e.getBoundingClientRect().width) }))
+        .filter((x) => x.a < 44 || x.l < 44));
+      if (pequenos.length) problemas.push(`botão pequeno para o dedo (mínimo 44px): ${JSON.stringify(pequenos.slice(0, 4))}`);
+    }
+
+    // Pegar a OS com um toque, e a prova é no banco.
+    const pegar = cel.locator(".registry-row").filter({ hasText: /MARCHA LENTA/i }).first().locator("button", { hasText: /^(Pegar|Assumir|Iniciar)$/ }).first();
+    if (!(await pegar.count())) problemas.push("a OS livre não trouxe o botão de pegar");
+    else {
+      await pegar.click();
+      await cel.waitForTimeout(3500);
+      const depois = (await banco("serviceOrders")).find((os) => os._id === aberta._id);
+      if (!(depois?.mechanicIds || []).includes(erasmo._id)) problemas.push(`pegar a OS no celular não gravou o mecânico: ${JSON.stringify(depois?.mechanicIds)}`);
+    }
+
+    // Dentro da OS: nenhum cartão achatado e as etapas numa linha só.
+    await cel.locator(".registry-row button", { hasText: /^Abrir$/ }).first().click();
+    await cel.waitForTimeout(3000);
+    await cel.screenshot({ path: `${OUT}/e2e-celular-os.png` });
+    const corpo = cel.locator(".dialog-body.order-detail").first();
+    if (!(await corpo.count())) problemas.push("a OS não abriu no celular");
+    else {
+      const achatados = await corpo.evaluate((el) => [...el.children]
+        .map((filho) => ({ cls: filho.className.split(" ")[0], alt: Math.round(filho.getBoundingClientRect().height), conteudo: filho.scrollHeight }))
+        .filter((x) => x.conteudo - x.alt > 8));
+      if (achatados.length) problemas.push(`cartão cortado dentro da OS: ${JSON.stringify(achatados)}`);
+      const rolaTudo = await corpo.evaluate((el) => ({ visivel: Math.round(el.getBoundingClientRect().height), total: el.scrollHeight }));
+      const soma = await corpo.evaluate((el) => [...el.children].reduce((t, f) => t + f.getBoundingClientRect().height, 0));
+      if (rolaTudo.total < soma) problemas.push(`o corpo da OS não rola até o fim: ${rolaTudo.total}px de rolagem para ${Math.round(soma)}px de conteúdo`);
+
+      // A barra de etapas tem seis situações (serviceOrderStatuses); num grid
+      // de cinco colunas a última caía para uma segunda linha.
+      const etapas = await cel.locator(".order-progress").first().evaluate((el) => ({
+        quantas: el.children.length,
+        linhas: new Set([...el.children].map((c) => Math.round(c.getBoundingClientRect().top))).size,
+      })).catch(() => null);
+      if (!etapas) problemas.push("a barra de etapas não apareceu");
+      else if (etapas.linhas > 1) problemas.push(`as ${etapas.quantas} etapas da OS quebraram em ${etapas.linhas} linhas`);
+
+      const larguraOS = await cel.evaluate(() => ({ rolagem: document.documentElement.scrollWidth, tela: window.innerWidth }));
+      if (larguraOS.rolagem > larguraOS.tela + 1) problemas.push(`a OS aberta rola de lado: ${larguraOS.rolagem}px numa tela de ${larguraOS.tela}px`);
+    }
+    if (errosCel.length) problemas.push(`erro de JavaScript no celular: ${errosCel[0]}`);
+  } finally {
+    await contexto.close();
+  }
+  if (problemas.length) throw new Error("celular do mecânico:\n      - " + problemas.join("\n      - "));
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();

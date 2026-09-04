@@ -17,7 +17,7 @@ import { HistoryPanel } from "../src/components/HistoryPanel";
 import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
 import { mergeParts, priceFromMarkup, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
-import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking } from "../src/mechanic";
+import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoDoServico } from "../src/mechanic";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
 import { openWhatsapp, printDocument } from "./printing";
@@ -1718,6 +1718,7 @@ export function ModuleWorkspace({
           <span>
             <strong>{order.customer}</strong>
             <small>{order.id} · {order.bike}{order.plate ? ` · ${order.plate}` : ""}{!row.mine && equipe.length ? ` · ${equipe.join(" + ")}` : ""}</small>
+            <small className="row-problem">{resumoDoServico(order)}</small>
             <span className={`status ${statusTone(order.status)}`}><i/>{order.status}</span>
           </span>
           <div className="order-actions">
@@ -1733,7 +1734,9 @@ export function ModuleWorkspace({
     };
 
     return (
-      <>
+      // O contêiner existe para o CSS: é ele que deixa o quadro se apertar no
+      // celular sem mexer nas mesmas classes usadas pelo dono e pelo balcão.
+      <div className="mechanic-board">
         <div className="module-heading">
           <div><p>Oficina</p><h1>Minhas ordens</h1><span>O que está com você e o que a oficina tem para pegar.</span></div>
           <span className="system-healthy"><i/><b>{resumo.working} na bancada agora</b></span>
@@ -1770,7 +1773,7 @@ export function ModuleWorkspace({
               : <div className="pdv-empty"><span><Icon name="check" size={20}/></span><strong>{board.shop.length ? "Nada bate com a busca" : "Oficina em dia"}</strong><p>{board.shop.length ? "Apague a busca para ver todas." : "Nenhuma outra OS aberta agora."}</p></div>}
           </div>
         </section>
-      </>
+      </div>
     );
   }
 

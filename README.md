@@ -650,6 +650,54 @@ tela avisa isso explicitamente, porque a causa é o cadastro do usuário e não 
 falta de serviço. O vínculo é feito em **Usuários e acessos → Vincular ao
 funcionário**.
 
+### No celular
+
+O quadro é feito para o telefone, porque é ali que o mecânico usa o sistema — de
+pé na bancada, com uma mão. Cinco coisas mudam por causa disso — as três
+primeiras só abaixo de 560px de largura, as duas últimas em qualquer tela:
+
+**Os três cartões do resumo viram uma faixa de três colunas.** Empilhados, eles
+somavam quase 300px e empurravam a primeira OS para fora da tela: o mecânico
+abria "Ordens de serviço" e via três números antes de ver qualquer moto. Na
+faixa o número continua lá e a primeira OS aparece inteira, com os botões.
+
+**"Nenhuma OS com você" deixa de ocupar 260px.** O aviso de lista vazia é o
+mesmo do resto do sistema, desenhado para o meio de um painel grande. No quadro
+do mecânico ele fica bem em cima de "Na oficina · para pegar" — ou seja, quem
+está sem serviço na mão via um quadro dizendo que não tem serviço e precisava
+rolar para achar o que estava livre. No celular ele vira uma faixa com o ícone
+ao lado do texto.
+
+**Os botões da linha ocupam a largura toda, com 44px de altura.** Eram 31px de
+altura por 41px de largura — abaixo do mínimo em que o dedo acerta sem ampliar a
+tela, e "Falta peça" ficava colado em "Pronta".
+
+**O relato do cliente aparece na linha.** Sem ele, descobrir qual das OS é a que
+se vai pegar agora exigia abrir uma por uma. O texto é cortado na palavra, nunca
+no meio dela — um corte em "BARULHO NA RELA…" faz abrir a OS só para ler o
+resto, que é justamente o toque que o resumo existe para poupar.
+
+**A OS aberta mostra o cliente e as peças aprovadas.** `.order-info-grid` e
+`.order-section` usam `overflow: hidden` para arredondar as bordas internas, e
+isso zera o mínimo automático deles: dentro de um grid com altura definida — o
+corpo do diálogo no celular — os dois encolhiam para 15px de altura com 288px e
+142px de conteúdo dentro. O mecânico abria a OS e não via nem de quem era a moto
+nem o que estava aprovado. O corpo do diálogo agora usa
+`grid-auto-rows: max-content`, então cada cartão fica do tamanho do conteúdo e a
+página rola. No computador nada muda: lá o conteúdo já cabia.
+
+A barra de etapas da OS era um grid de cinco colunas para as **seis** situações
+de `serviceOrderStatuses`, então "Entrega" caía numa segunda linha e a linha de
+ligação saía pela borda — em qualquer tamanho de tela, não só no celular. Agora
+ela é flex e cada etapa vale uma fração do que existir: acrescentar ou tirar uma
+situação não mexe mais no CSS.
+
+O passo 36 do roteiro ponta a ponta entra como mecânico num aparelho de 390×844,
+pega uma OS com um toque, confere no Firestore que o mecânico foi gravado, e
+cobra o resto: a primeira OS inteira na tela, botões de 44px, o relato na linha,
+nenhum cartão achatado dentro da OS, as seis etapas numa linha só e nenhuma
+rolagem lateral.
+
 ## Tela branca e versões novas
 
 Não existia nenhuma rede de segurança: qualquer exceção durante a renderização

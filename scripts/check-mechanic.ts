@@ -8,7 +8,7 @@
  *
  * Rode com: npm run check:mechanic
  */
-import { actionsFor, boardRow, isAssignedTo, mechanicBoard, mechanicSummary, mechanicsAfterTaking, takeLabelFor } from "../src/mechanic";
+import { actionsFor, boardRow, isAssignedTo, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoDoServico, takeLabelFor } from "../src/mechanic";
 import type { OrderRecord } from "../src/types";
 
 const json = (value: unknown) => JSON.stringify(value);
@@ -106,6 +106,18 @@ const casos: Array<[string, unknown, unknown]> = [
   ["a linha livre leva direto para a bancada", boardRow(livre, RONALDO).actions[0]!.target, "Em serviço"],
   ["e o botão convida a pegar", boardRow(livre, RONALDO).actions[0]!.label, "Pegar"],
   ["OS parada da colega pode ser assumida", boardRow(paradaDaAna, RONALDO).actions[0]!.label, "Assumir"],
+
+  // --- O relato na linha, para não abrir a OS só para ler ---
+  ["o relato curto aparece inteiro", resumoDoServico({ problem: "TROCA DE OLEO E FILTRO" } as OrderRecord), "TROCA DE OLEO E FILTRO"],
+  ["sem relato, a linha diz que não tem", resumoDoServico({} as OrderRecord), "Sem relato na OS"],
+  ["relato só de espaços conta como vazio", resumoDoServico({ problem: "   \n  " } as OrderRecord), "Sem relato na OS"],
+  ["quebra de linha vira espaço", resumoDoServico({ problem: "BARULHO\nNA RELACAO" } as OrderRecord), "BARULHO NA RELACAO"],
+  // Cortar no meio da palavra obriga a abrir a OS para ler o resto — que é
+  // justamente o toque que este resumo existe para poupar.
+  ["relato longo corta na palavra", resumoDoServico({ problem: "MOTO NAO PEGA DE MANHA E O FAROL APAGA SOZINHO QUANDO PASSA EM BURACO FUNDO" } as OrderRecord, 30), "MOTO NAO PEGA DE MANHA E O…"],
+  ["e não deixa pontuação solta antes das reticências", resumoDoServico({ problem: "NAO PEGA, FAROL QUEIMADO" } as OrderRecord, 12), "NAO PEGA…"],
+  ["palavra única maior que o limite corta onde der", resumoDoServico({ problem: "AAAAAAAAAAAAAAAAAAAA" } as OrderRecord, 8), "AAAAAAAA…"],
+  ["no limite exato não corta", resumoDoServico({ problem: "FREIO RUIM" } as OrderRecord, 10), "FREIO RUIM"],
 ];
 
 let falhas = 0;

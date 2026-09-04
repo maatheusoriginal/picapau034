@@ -664,13 +664,27 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .cash-actions svg { width: 17px; }
 .cash-actions strong { font-size: 8px; }
 .cash-actions small { font-size: 7px; color: #929296; }
-.order-detail { display: grid; gap: 12px; }
+/* grid-auto-rows: max-content, e não o "auto" implícito. No celular o corpo
+   do diálogo tem altura definida e menor que o conteúdo; com linhas auto, os
+   cartões que usam overflow:hidden (.order-info-grid e .order-section) têm
+   mínimo automático zero e encolhiam para 15px — o mecânico abria a OS e não
+   via nem o cliente nem as peças aprovadas. Com max-content cada cartão fica
+   do tamanho do conteúdo e o corpo rola. No computador nada muda. */
+.order-detail { display: grid; grid-auto-rows: max-content; gap: 12px; }
 .order-detail-top { display: flex; align-items: center; justify-content: space-between; }
 /* Quebra em duas linhas quando não cabe: no quadro do mecânico uma OS em
    serviço tem três botões (Abrir, Aguardando peça, Marcar pronta), e no
    celular eles espremeriam o nome do cliente até sumir. */
 .order-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .order-actions button, .order-section-title button { display: flex; align-items: center; gap: 6px; height: 31px; padding: 0 10px; border: 1px solid #deddda; border-radius: 7px; background: white; color: #5f6064; font-size: 8px; font-weight: 700; }
+
+/* O quadro do mecânico.
+   Ele usa o sistema com o celular na bancada, de pé, quase sempre com uma mão
+   só. O relato do cliente entra na linha porque, sem ele, descobrir qual das
+   OS é a que se vai pegar agora exigia abrir uma por uma. O resto do que muda
+   por causa do celular está no @media de 560px, sob .mechanic-board. */
+.mechanic-board .row-problem { color: #6b6c70; }
+.mechanic-board .registry-row .status { margin-top: 6px; }
 .order-info-grid { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #e4e2de; border-radius: 10px; overflow: hidden; }
 .order-info-grid > div { min-height: 72px; padding: 12px; border-left: 1px solid #eeece9; }
 .order-info-grid > div:first-child { border-left: 0; }
@@ -696,8 +710,12 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .order-total { min-height: 43px; display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 0 12px; border-top: 1px solid #e4e2de; background: #faf9f7; }
 .order-total span { color: #77787c; font-size: 8px; }
 .order-total strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-.order-progress { display: grid; grid-template-columns: repeat(5, 1fr); padding: 13px; border-radius: 10px; background: #f4f2ef; }
-.order-progress > div { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; color: #a0a0a3; font-size: 7px; }
+/* Flex, e não repeat(5): as etapas da OS são seis (serviceOrderStatuses) e
+   um grid de cinco colunas jogava "Entrega" para uma segunda linha, com a
+   linha de ligação saindo pela borda. Em flex, cada etapa vale 1fr do que
+   existir — acrescentar ou tirar uma etapa não mexe mais no CSS. */
+.order-progress { display: flex; padding: 13px; border-radius: 10px; background: #f4f2ef; }
+.order-progress > div { flex: 1 1 0; min-width: 0; position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; color: #a0a0a3; font-size: 7px; text-align: center; }
 .order-progress > div:not(:last-child)::after { content: ""; position: absolute; top: 10px; left: 58%; right: -42%; height: 1px; background: #d7d5d1; }
 .order-progress i { position: relative; z-index: 1; width: 21px; height: 21px; display: grid; place-items: center; border: 1px solid #d7d5d1; border-radius: 50%; background: white; font-size: 7px; font-style: normal; }
 .order-progress .done { color: var(--green); font-weight: 700; }
@@ -1055,7 +1073,7 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .ready-action { height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--green); color: white; font-size: 8px; font-weight: 800; white-space: nowrap; }
 .ready-action.done { background: #292a2e; }
 .order-progress.interactive { padding: 10px; }
-.order-progress.interactive > button { position: relative; min-height: 42px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 0; background: transparent; color: #a0a0a3; font-size: 7px; }
+.order-progress.interactive > button { flex: 1 1 0; min-width: 0; text-align: center; position: relative; min-height: 42px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 0; background: transparent; color: #a0a0a3; font-size: 7px; }
 .order-progress.interactive > button:not(:last-child)::after { content: ""; position: absolute; top: 13px; left: 58%; right: -42%; height: 1px; background: #d7d5d1; }
 .order-progress.interactive > button i { position: relative; z-index: 1; width: 21px; height: 21px; display: grid; place-items: center; border: 1px solid #d7d5d1; border-radius: 50%; background: white; font-size: 7px; font-style: normal; }
 .order-progress.interactive > button.done { color: var(--green); font-weight: 700; }
@@ -1618,6 +1636,27 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   .firebase-user-summary, .firebase-user-summary.connected { grid-template-columns: 1fr; align-items: stretch; }
   .firebase-user-summary.connected > .registry-avatar { display: none; }
   .firebase-connection-card > b { display: none; }
+  /* Tudo que fica acima da primeira OS é o que o mecânico rola antes de
+     conseguir trabalhar. Numa tela de 390x844 eram mais de 900px: os três
+     cartões do resumo empilhados somavam ~300px, e "Nenhuma OS com você"
+     ocupava outros 260px bem em cima da lista de onde ele ia pegar a
+     próxima — que é exatamente o que ele abriu a tela para ver. */
+  .mechanic-board .module-summary { grid-template-columns: repeat(3, 1fr); gap: 7px; }
+  .mechanic-board .module-summary article { min-height: 0; padding: 9px 7px; text-align: center; }
+  .mechanic-board .module-summary article span { font-size: 8px; }
+  .mechanic-board .module-summary article strong { margin: 4px 0 0; font-size: 18px; }
+  .mechanic-board .module-summary article small { display: none; }
+  .mechanic-board .pdv-empty { min-height: 0; padding: 16px 14px; flex-flow: row wrap; align-items: center; justify-content: flex-start; gap: 3px 11px; text-align: left; }
+  .mechanic-board .pdv-empty > span { width: 34px; height: 34px; flex: 0 0 auto; margin-bottom: 0; }
+  .mechanic-board .pdv-empty strong { flex: 1 1 auto; }
+  .mechanic-board .pdv-empty p { flex: 1 0 100%; margin: 0; padding-left: 45px; }
+  /* Os botões passam a ocupar a linha toda com 44px de altura: eram 31x41px,
+     abaixo do mínimo em que o dedo acerta sem ampliar a tela. */
+  .mechanic-board .registry-row { flex-wrap: wrap; padding: 12px 14px; }
+  .mechanic-board .registry-avatar { width: 31px; height: 31px; font-size: 9px; }
+  .mechanic-board .registry-row > span:nth-child(2) { flex: 1 1 60%; min-width: 0; }
+  .mechanic-board .order-actions { width: 100%; gap: 8px; margin-top: 4px; }
+  .mechanic-board .order-actions button { flex: 1 1 0; min-width: 0; height: 44px; justify-content: center; font-size: 10px; }
   .firebase-bootstrap > div { grid-template-columns: 75px 1fr; }
   .firebase-setup-list article > i { display: none; }
   .access-activation { padding: 18px; }
