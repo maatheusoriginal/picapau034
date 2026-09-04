@@ -297,7 +297,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
                 <label className="field-group">
                   <span className="field-label">Salário Base (R$)</span>
-                  <NumberField
+                  <NumberField casas={2}
                     step="0.01"
                     min={0}
                     fallback={0}
@@ -326,7 +326,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
               <div className="form-grid-2">
                 <label className="field-group">
                   <span className="field-label">Comissão em Serviços (%)</span>
-                  <NumberField
+                  <NumberField casas={2}
                     step="0.5"
                     min={0}
                     max={100}
@@ -340,7 +340,7 @@ export const EmployeeFormModal: React.FC<EmployeeFormModalProps> = ({
 
                 <label className="field-group">
                   <span className="field-label">Comissão em Peças / Vendas (%)</span>
-                  <NumberField
+                  <NumberField casas={2}
                     step="0.5"
                     min={0}
                     max={100}

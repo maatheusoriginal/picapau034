@@ -1276,6 +1276,42 @@ O que a referência não tem e o sistema manteve: o histórico de movimentação
 peça, o botão de gerar código de barras interno, criar categoria e marca sem
 sair do cadastro, e o aviso de preço abaixo do custo.
 
+### Cliente, moto e fornecedor no mesmo formato
+
+Os outros três cadastros seguiram o mesmo caminho. Cliente e fornecedor tinham
+**cinco abas de etapa** cada um; agora as abas viraram títulos de bloco dentro
+de uma tela só, com a mesma régua de rótulos:
+
+| Cadastro | Antes | Agora |
+| --- | --- | --- |
+| **Cliente** | 5 abas: Dados Pessoais, Contato, Endereço, Financeiro, Observações | Uma tela com esses cinco blocos |
+| **Fornecedor** | 5 abas: Identificação, Contato, Comercial, Endereço, Observações | Uma tela com esses cinco blocos |
+| **Motocicleta** | Já era uma tela | A mesma tela, agora com a régua |
+
+A régua não custou uma reescrita campo a campo: os quatro formulários já usavam
+o mesmo par `field-group` / `field-label`, que tem exatamente a forma
+rótulo-e-campo. Uma regra de CSS sob `.pdv-form` transforma esse par nas duas
+colunas, e os agrupadores de duas e três colunas viram `display: contents` para
+que cada campo ocupe a sua linha. O JSX só mudou onde havia etapa de verdade.
+
+Os rótulos encolheram junto, porque a régua só funciona quando o rótulo cabe em
+uma linha: "Endereço Completo (Rua, Número, Bairro, Cidade)" virou "Endereço",
+"Nome Completo / Razão Social" virou "Nome / Razão social", "WhatsApp /
+Telefone Principal" virou "WhatsApp".
+
+### O `required` do navegador entrou na frente
+
+Achado ao juntar as etapas: enquanto o cadastro tinha abas, o campo obrigatório
+da aba seguinte **nem estava na tela**, então o `required` do HTML nunca barrava
+nada e a conferência era sempre a nossa. Numa tela só ele passa a barrar — e o
+balão do navegador entra na frente da mensagem escrita **dentro** do formulário,
+que é justamente a que diz o que a oficina precisa saber ("toda pessoa cadastrada
+precisa de pelo menos uma moto vinculada").
+
+Os quatro formulários ganharam `noValidate`. A conferência continua sendo a
+nossa, com a mensagem no lugar onde o projeto já tinha decidido que ela fica —
+depois de o aviso ter sido um toast que aparecia **atrás** do modal.
+
 ### Os atalhos são de verdade
 
 `F5` grava e `Esc` fecha, como no sistema de origem. O atalho está escrito no
@@ -1302,6 +1338,49 @@ rolar.
 
 No celular a régua não cabe: abaixo de 720px o rótulo volta para cima do campo e
 o campo volta a 40px — 28px é medida de mouse.
+
+## Dinheiro e porcentagem com as casas: 0,00
+
+Todo campo de valor e de porcentagem mostra as duas casas com vírgula — "2,68",
+"0,00", "51,27" — como no sistema de referência. Antes eram `input[type=number]`
+mostrando "5" e "2.68": esse tipo de campo **não exibe vírgula**, e num sistema
+de oficina brasileira "2.68" é o que faz alguém digitar o ponto e o valor entrar
+errado. Pior, "5" num campo de dinheiro obriga quem confere a adivinhar se é
+cinco reais ou cinco centavos, e uma coluna de valores com quantidade de dígitos
+variável não dá para somar de cabeça.
+
+Quantidade continua inteira — estoque, dias, minutos, parcelas —, também como na
+referência. Casa decimal em contagem de peça é ruído.
+
+São dois caminhos, porque o sistema guarda valor de dois jeitos:
+
+| Campo | Componente | Onde |
+| --- | --- | --- |
+| Guarda **número** | `NumberField casas={2}` | Cadastro de peça, cliente, funcionário, fornecedor, Configurações |
+| Guarda **texto** | `MoneyField` | Mão de obra da OS, serviço rápido, gasto, conta, caixa, troca |
+
+O segundo existe porque essas telas guardam o que foi digitado como string e
+liam com `Number(texto)`. Isso funcionava só enquanto o campo mostrava "40":
+assim que ele passa a mostrar "40,00", `Number("40,00")` vira **NaN** e o valor
+some da conta. Quem lê passou a usar `valorDigitado`, que entende a vírgula.
+
+### O centavo que sumia
+
+`(2.675).toFixed(2)` devolve **"2,67"**. Não é bug do JavaScript: o double mais
+próximo de 2,675 é um pouquinho *menor* que 2,675, então arredondar para baixo
+está certo do ponto de vista da máquina — e errado do ponto de vista de quem põe
+o preço na peça. Um centavo por peça, em toda entrada de nota, vira diferença no
+fechamento que ninguém consegue explicar.
+
+`arredondar()` desloca a vírgula pelo **texto** ("2.675" → "2.675e2" → 267,5),
+onde o meio-termo existe de verdade e o arredondamento acontece como no papel.
+
+E o valor sobe arredondado, não só *escrito* arredondado: digitar 2,675 no custo
+mostrava "2,68" e guardava 2,675, então o preço calculado saía de um custo que
+não era o que estava na tela — 4,28 em vez de 4,29. Agora o que se vê é o que
+fica gravado.
+
+`npm run check:number-input` cobre as duas coisas em 53 casos.
 
 ## O preço mostra a conta que decide a venda
 

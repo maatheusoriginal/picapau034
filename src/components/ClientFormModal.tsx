@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { ClientRecord, MotorcycleRecord } from "../types";
 import { emMaiusculo } from "../text-case";
 import { QuickAddSelect } from "./QuickAddSelect";
@@ -47,8 +47,8 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
   onCreateBrand,
   defaultMotorcycle,
 }) => {
-  const [activeTab, setActiveTab] = useState<"ident" | "contact" | "address" | "financial" | "notes">("ident");
   const [isSaving, setIsSaving] = useState(false);
+  const formularioRef = useRef<HTMLFormElement>(null);
   // O que falta preencher, dito DENTRO do formulário.
   //
   // Era um `notify` — o aviso de canto da aplicação —, que num formulário
@@ -119,7 +119,6 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
       setMotoVersion(defaultMotorcycle?.version || "");
       setMotoYear(defaultMotorcycle?.year || "");
       setMotoColor(defaultMotorcycle?.color || "");
-    setActiveTab("ident");
   }, [isOpen, editingClient]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -127,13 +126,11 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
 
     if (!name.trim()) {
       setErroForm("Informe o nome do cliente.");
-      setActiveTab("ident");
       return;
     }
 
     if (!phone.trim()) {
       setErroForm("Informe o WhatsApp ou telefone do cliente.");
-      setActiveTab("contact");
       return;
     }
 
@@ -141,12 +138,10 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
     // a próxima OS deste cliente não o encontra pela busca por placa.
     if (!jaTemMoto && !motoPlate.trim()) {
       setErroForm("Informe a placa da moto deste cliente. Toda pessoa cadastrada precisa de pelo menos uma moto vinculada.");
-      setActiveTab("ident");
       return;
     }
     if (motoPlate.trim() && !isValidPlate(motoPlate)) {
       setErroForm("A placa não está num dos padrões brasileiros (ABC-1234 ou ABC-1D23).");
-      setActiveTab("ident");
       return;
     }
     // Placa que já é de outro cliente seria roubada em silêncio: o id da moto
@@ -155,7 +150,6 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
     if (motoPlate.trim() && donoAtual && donoAtual.ownerId && donoAtual.ownerId !== editingClient?.id) {
       const nomeDoDono = allClients.find((cliente) => cliente.id === donoAtual.ownerId)?.name;
       setErroForm(`A placa ${formatPlate(motoPlate)} já está cadastrada${nomeDoDono ? ` no nome de ${nomeDoDono}` : ""}. Confira a placa ou edite a moto pelo cadastro de motocicletas.`);
-      setActiveTab("ident");
       return;
     }
 
@@ -230,12 +224,29 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
     }
   };
 
+  /**
+   * F5 grava e Esc fecha, como no sistema que a oficina já usa e como no
+   * cadastro de peça. O atalho é ligado só enquanto este formulário está
+   * aberto: fechou, F5 volta a recarregar a página.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+    const noTeclado = (evento: KeyboardEvent) => {
+      if (evento.key === "Escape") { evento.preventDefault(); onClose(); return; }
+      if (evento.key !== "F5") return;
+      evento.preventDefault();
+      formularioRef.current?.requestSubmit();
+    };
+    window.addEventListener("keydown", noTeclado);
+    return () => window.removeEventListener("keydown", noTeclado);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div className="dialog-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="dialog-window large-dialog" style={{ maxWidth: "740px" }}>
-        <div className="dialog-head">
+        <div className="dialog-head pdv-head">
           <div>
             <strong>{editingClient ? "Editar Cliente" : "Novo Cliente"}</strong>
             <span>{editingClient ? `${editingClient.name} · ${editingClient.phone}` : "Cadastro completo de clientes para histórico de OS e balcão"}</span>
@@ -243,32 +254,31 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
           <button className="icon-close" onClick={onClose} aria-label="Fechar modal">✕</button>
         </div>
 
-        <div className="dialog-tabs">
-          <button type="button" className={`dialog-tab ${activeTab === "ident" ? "active" : ""}`} onClick={() => setActiveTab("ident")}>
-            1. Dados Pessoais
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "contact" ? "active" : ""}`} onClick={() => setActiveTab("contact")}>
-            2. Contato
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "address" ? "active" : ""}`} onClick={() => setActiveTab("address")}>
-            3. Endereço
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "financial" ? "active" : ""}`} onClick={() => setActiveTab("financial")}>
-            4. Financeiro & Crediário
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "notes" ? "active" : ""}`} onClick={() => setActiveTab("notes")}>
-            5. Observações
-          </button>
-        </div>
 
-        <form onSubmit={handleSubmit} className="dialog-body">
+        {/*
+            noValidate: a conferência é nossa, não a do navegador.
+
+            Enquanto o cadastro tinha etapas, o campo obrigatório da etapa
+            seguinte nem estava na tela, então o `required` do HTML nunca
+            barrava nada. Numa tela só ele barra — e o balão do navegador
+            entra na frente da mensagem escrita DENTRO do formulário, que é
+            justamente a que diz o que a oficina precisa ("toda pessoa
+            cadastrada precisa de pelo menos uma moto vinculada").
+          */}
+          <form noValidate ref={formularioRef} onSubmit={handleSubmit} className="dialog-body">
+          {/*
+            Uma tela só, no formato do sistema de balcão: sem etapa, e com o
+            rótulo à esquerda do campo. As abas viraram os títulos dos blocos.
+          */}
+          <div className="pdv-form">
           {erroForm ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erroForm}</span></div> : null}
           {/* TAB 1: IDENTIFICAÇÃO */}
-          {activeTab === "ident" && (
+          <h4>Dados pessoais</h4>
+          {(
             <div className="form-section-stack">
               <div className="form-grid-2">
                 <label className="field-group">
-                  <span className="field-label">Nome Completo / Razão Social <b className="req">*</b></span>
+                  <span className="field-label">Nome / Razão social <b className="req">*</b></span>
                   <input
                     type="text"
                     required
@@ -280,7 +290,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                   />
                 </label>
                 <label className="field-group">
-                  <span className="field-label">Tipo de Cadastro</span>
+                  <span className="field-label">Tipo</span>
                   <select
                     value={type}
                     onChange={(e) => setType(e.target.value as "Pessoa física" | "Empresa")}
@@ -385,11 +395,12 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
           )}
 
           {/* TAB 2: CONTATO */}
-          {activeTab === "contact" && (
+          <h4>Contato</h4>
+          {(
             <div className="form-section-stack">
               <div className="form-grid-2">
                 <label className="field-group">
-                  <span className="field-label">WhatsApp / Celular <b className="req">*</b></span>
+                  <span className="field-label">WhatsApp <b className="req">*</b></span>
                   <input
                     type="text"
                     required
@@ -414,10 +425,11 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
           )}
 
           {/* TAB 3: ENDEREÇO */}
-          {activeTab === "address" && (
+          <h4>Endereço</h4>
+          {(
             <div className="form-section-stack">
               <label className="field-group">
-                <span className="field-label">Endereço Completo (Rua, Número, Bairro, Cidade)</span>
+                <span className="field-label">Endereço</span>
                 <input
                   type="text"
                   value={address}
@@ -430,10 +442,11 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
           )}
 
           {/* TAB 4: FINANCEIRO & CREDIÁRIO */}
-          {activeTab === "financial" && (
+          <h4>Financeiro e crediário</h4>
+          {(
             <div className="form-section-stack">
               <label className="field-group">
-                <span className="field-label">Condição de Pagamento e Relacionamento</span>
+                <span className="field-label">Condição de pagamento</span>
                 <select
                   value={condition}
                   onChange={(e) => setCondition(e.target.value as "Pagamento normal" | "Cliente a prazo" | "Troca de serviços")}
@@ -448,8 +461,8 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
               {condition === "Cliente a prazo" && (
                 <div className="alert-card" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                   <label className="field-group">
-                    <span className="field-label">Limite de Crédito Autorizado (R$)</span>
-                    <NumberField
+                    <span className="field-label">Limite de crédito</span>
+                    <NumberField casas={2}
                       step="0.01"
                       min={0}
                       fallback={0}
@@ -466,7 +479,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
               {condition === "Troca de serviços" && (
                 <div className="alert-card" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                   <label className="field-group">
-                    <span className="field-label">Detalhes da Parceria / Permuta</span>
+                    <span className="field-label">Detalhes da permuta</span>
                     <input
                       type="text"
                       value={tradeDetails}
@@ -481,10 +494,11 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
           )}
 
           {/* TAB 5: OBSERVAÇÕES */}
-          {activeTab === "notes" && (
+          <h4>Observações</h4>
+          {(
             <div className="form-section-stack">
               <label className="field-group">
-                <span className="field-label">Observações e Preferências do Cliente</span>
+                <span className="field-label">Observações</span>
                 <textarea
                   rows={4}
                   value={notes}
@@ -510,52 +524,25 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
               </div>
             </div>
           )}
+          </div>
 
           <div className="dialog-actions-row">
             <div>
-              <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
+              <button type="button" className="outline-button pdv-footer-button" onClick={onClose} disabled={isSaving}>
+                <kbd>Esc</kbd>
                 Cancelar
               </button>
               {editingClient && removal ? <RemovalButton tipo="cliente" colecao="clients" id={editingClient.id} nome={editingClient.name} {...removal}/> : null}
             </div>
+            {/*
+              Sem "Anterior" e "Próxima etapa": o cadastro é uma tela só, como o
+              de peça. Eram esses dois que traziam o defeito antigo — o mesmo
+              canto trocava de botão entre avançar e gravar, e um clique duplo
+              gravava o cadastro pela metade. Sem etapa, some pela estrutura.
+            */}
             <div style={{ display: "flex", gap: "8px" }}>
-              {activeTab !== "ident" && (
-                <button
-                  type="button"
-                  className="outline-button"
-                  onClick={() => {
-                    const tabs: Array<"ident" | "contact" | "address" | "financial" | "notes"> = ["ident", "contact", "address", "financial", "notes"];
-                    const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx > 0) setActiveTab(tabs[currIdx - 1]);
-                  }}
-                >
-                  Anterior
-                </button>
-              )}
-              {/*
-                Os dois botões ficam SEMPRE na tela, cada um no seu lugar.
-
-                Antes o mesmo canto trocava de botão: era "Próxima etapa" e, ao
-                avançar para a última etapa, virava o de gravar no mesmo pixel.
-                Dois cliques seguidos — o que se faz num botão que parece não ter
-                respondido — avançavam e gravavam em seguida: o cadastro saía
-                pela metade e a tela fechava sozinha. Na última etapa o "Próxima
-                etapa" fica desabilitado em vez de sumir, para nada mudar de
-                posição debaixo do cursor.
-              */}
-              <button
-                type="button"
-                className="outline-button"
-                disabled={activeTab === "notes"}
-                  onClick={() => {
-                    const tabs: Array<"ident" | "contact" | "address" | "financial" | "notes"> = ["ident", "contact", "address", "financial", "notes"];
-                    const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx < tabs.length - 1) setActiveTab(tabs[currIdx + 1]);
-                  }}
-              >
-                Próxima etapa →
-              </button>
-                <button type="submit" className="primary-button save-action-btn" disabled={isSaving}>
+              <button type="submit" className="primary-button save-action-btn pdv-footer-button" disabled={isSaving}>
+                <kbd>F5</kbd>
                   {isSaving ? "Salvando no Firestore..." : (editingClient ? "Salvar Alterações" : "Cadastrar Cliente")}
                 </button>
             </div>

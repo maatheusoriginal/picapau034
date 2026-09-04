@@ -208,7 +208,7 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
   await p.locator(".dialog textarea").first().fill("Barulho na relação");
   await p.waitForTimeout(400);
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Troca do kit relação");
-  await p.locator(".dialog input[type=number]").first().fill("150");
+  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("150");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);
@@ -260,7 +260,7 @@ await passo("serviço rápido de R$ 80 recebido em dinheiro", async () => {
   await ir("Serviço rápido");
   await p.getByRole("button", { name: /Novo serviço rápido/i }).first().click();
   await p.waitForTimeout(2200);
-  await p.locator(".dialog input[type=number]").first().fill("80");
+  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("80");
   await p.getByPlaceholder("Nome ou telefone").fill("Cliente do balcão");
   await p.waitForTimeout(400);
   const pagamento = p.locator(".dialog select").filter({ has: p.locator('option:text-is("Dinheiro")') }).first();
@@ -281,7 +281,7 @@ await passo("entrada de estoque: 10 peças a R$ 30 sobem o saldo e o custo médi
   const linha = p.locator(".dialog select").last();
   await linha.selectOption({ index: 1 }).catch(() => {});
   await p.waitForTimeout(600);
-  const numeros = p.locator(".dialog input[type=number]");
+  const numeros = p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]");
   const quantos = await numeros.count();
   if (quantos < 2) throw new Error(`a linha da entrada não trouxe quantidade e custo (${quantos} campos)`);
   await numeros.nth(quantos - 2).fill("10");
@@ -300,7 +300,7 @@ await passo("lançar uma conta a receber de R$ 200", async () => {
   await p.getByRole("button", { name: /Nova conta/i }).first().click();
   await p.waitForTimeout(2200);
   await p.getByPlaceholder("Ex.: Parcela de peças e serviço").fill("Parcela do kit relação");
-  await p.locator(".dialog input[type=number]").first().fill("200");
+  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("200");
   await p.waitForTimeout(400);
   await p.locator(".dialog button", { hasText: /Criar conta a receber/ }).click();
   await p.waitForTimeout(4500);
@@ -315,7 +315,7 @@ await passo("registrar um gasto de R$ 40 pago pelo caixa", async () => {
   await p.getByRole("button", { name: /Adicionar gasto/i }).first().click();
   await p.waitForTimeout(2200);
   await p.getByPlaceholder("Ex.: Retificador CG 160").fill("Óleo para a bancada");
-  await p.locator(".dialog input[type=number]").first().fill("40");
+  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("40");
   await p.waitForTimeout(400);
   await p.locator(".dialog button", { hasText: /Registrar gasto/ }).click();
   await p.waitForTimeout(4500);
@@ -465,7 +465,7 @@ await passo("campo de número deixa apagar o valor", async () => {
   await p.locator("button").filter({ hasText: /Novo Serviço Rápido/ }).first().click();
   await p.waitForTimeout(1800);
 
-  const preco = p.locator(".dialog input[type=number]").first();
+  const preco = p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first();
   await preco.click();
   await p.keyboard.press("Control+a");
   await p.keyboard.press("Backspace");
@@ -486,7 +486,9 @@ await passo("campo de número deixa apagar o valor", async () => {
   await p.locator(".dialog input[type=text]").first().click();
   await p.waitForTimeout(500);
   const aoSair = await preco.inputValue();
-  if (aoSair !== "0") problemas.push(`sair vazio deixou "${aoSair}", esperado o padrão do campo`);
+  // Dinheiro assenta com os centavos: o padrão do campo é 0, e ele aparece
+  // escrito "0,00" como em qualquer sistema de balcão.
+  if (aoSair !== "0,00") problemas.push(`sair vazio deixou "${aoSair}", esperado "0,00" (o padrão do campo, com centavos)`);
   await p.locator(".dialog button", { hasText: /Cancelar/ }).first().click();
   await p.waitForTimeout(1000);
 
@@ -504,10 +506,17 @@ await passo("campo de número deixa apagar o valor", async () => {
   await p.keyboard.type("30");
   await p.waitForTimeout(700);
   const valor = async (rotulo) => numeroDaPeca(rotulo).inputValue();
+  // Dinheiro e porcentagem saem com as duas casas e vírgula, como no sistema de
+  // balcão: "30" obriga quem confere a adivinhar se é trinta reais ou trinta
+  // centavos, e uma coluna com dígitos variáveis não dá para somar de cabeça.
+  await p.locator(".dialog-window .pdv-row").filter({ hasText: "Descrição" }).first().locator("input").click();
+  await p.waitForTimeout(600);
   const custoNaTela = await valor("Preço compra");
   const precoNaTela = await valor("Preço venda");
-  if (custoNaTela !== "30") problemas.push(`custo ficou "${custoNaTela}", esperado 30`);
-  if (precoNaTela !== "48") problemas.push(`preço ficou "${precoNaTela}", esperado 48 (custo 30 + margem 60%)`);
+  const margemNaTela = await valor("Margem s/ custo");
+  if (custoNaTela !== "30,00") problemas.push(`custo ficou "${custoNaTela}", esperado "30,00"`);
+  if (precoNaTela !== "48,00") problemas.push(`preço ficou "${precoNaTela}", esperado "48,00" (custo 30 + margem 60%)`);
+  if (margemNaTela !== "60,00") problemas.push(`margem ficou "${margemNaTela}", esperado "60,00"`);
   await p.locator(".dialog-window button", { hasText: /Cancelar/ }).first().click().catch(() => {});
   await p.waitForTimeout(1000);
 
@@ -611,8 +620,11 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
   if (!atalhos.some((t) => /completo/i.test(t))) problemas.push(`sem atalho de cadastro completo: ${JSON.stringify(atalhos)}`);
   await p.locator(".os-inline-actions .outline-button", { hasText: /completo/i }).first().click();
   await p.waitForTimeout(2500);
-  const abas = await p.locator(".dialog-window .dialog-tabs button").allInnerTexts();
-  if (!abas.some((t) => /Endereço/i.test(t))) problemas.push(`o cadastro completo não abriu: ${JSON.stringify(abas)}`);
+  // O cadastro completo virou uma tela só, no formato do sistema de balcão: as
+  // abas viraram títulos de bloco dentro da mesma tela.
+  const blocos = await p.locator(".dialog-window .pdv-form > h4").allInnerTexts();
+  if (!blocos.some((t) => /Endereço/i.test(t))) problemas.push(`o cadastro completo não abriu: ${JSON.stringify(blocos)}`);
+  if (await p.locator(".dialog-window .dialog-tabs button").count()) problemas.push("o cadastro de cliente voltou a ter abas de etapa");
 
   // Salvar sem o telefone avisava por um toast que ficava ATRÁS do modal:
   // a aba trocava sozinha e nada mais acontecia.
@@ -624,11 +636,10 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
   if (!/WhatsApp|telefone/i.test(aviso)) problemas.push(`aviso dentro do formulário: ${JSON.stringify(aviso)}`);
   if ((await banco("clients")).length !== antes) problemas.push("gravou sem o telefone");
 
-  await p.locator(".dialog-window input").first().fill("34999998888");
+  await p.locator(".dialog-window .field-group").filter({ hasText: "WhatsApp" }).first().locator("input").fill("34999998888");
   await p.waitForTimeout(400);
   // Cliente sem placa vinculada é recusado: numa oficina não existe cliente sem
   // moto. A placa da OS já vem preenchida aqui, para não digitar duas vezes.
-  await p.locator(".dialog-tabs button", { hasText: /Dados Pessoais/ }).click();
   await p.waitForTimeout(600);
   await p.locator('.client-moto-block input[placeholder*="ABC-1234"]').fill("BOM-7C77");
   await p.waitForTimeout(500);
@@ -652,7 +663,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
   await p.locator("button").filter({ hasText: /Novo Parceiro/ }).first().click();
   await p.waitForTimeout(1800);
   await p.locator(".dialog input").first().fill("Flash Entregas");
-  await p.locator(".dialog input[type=number]").first().fill("15");
+  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("15");
   await p.waitForTimeout(400);
   await p.locator(".dialog button", { hasText: /Salvar Parceiro/ }).first().click();
   await p.waitForTimeout(3500);
@@ -721,7 +732,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
   await p.getByPlaceholder("Ex.: 38.420 km").fill("12.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão da frota");
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão completa");
-  await p.locator(".dialog input[type=number]").first().fill("200");
+  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("200");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);
@@ -911,10 +922,8 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
     await p.getByRole("button", { name: /Cadastrar cliente|Novo cliente|Adicionar cliente/i }).first().click();
     await p.waitForTimeout(2200);
     await p.locator('.dialog-window input[placeholder*="Carlos Eduardo"]').fill(pessoa.nome);
-    await p.locator(".dialog-tabs button", { hasText: /Contato/ }).click();
     await p.waitForTimeout(600);
-    await p.locator(".dialog-window input").first().fill(pessoa.telefone);
-    await p.locator(".dialog-tabs button", { hasText: /Dados Pessoais/ }).click();
+    await p.locator(".dialog-window .field-group").filter({ hasText: "WhatsApp" }).first().locator("input").fill(pessoa.telefone);
     await p.waitForTimeout(600);
     await p.locator('.client-moto-block input[placeholder*="ABC-1234"]').fill(pessoa.placa);
     await p.waitForTimeout(400);
@@ -954,7 +963,7 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
   await p.getByPlaceholder("Ex.: 38.420 km").fill("21.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão dos 20 mil");
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão");
-  await p.locator(".dialog input[type=number]").first().fill("90");
+  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("90");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);
@@ -1485,12 +1494,10 @@ await passo("cadastro novo entra em maiúsculo, sem depender de quem digita", as
   await p.getByRole("button", { name: /Cadastrar cliente|Novo cliente|Adicionar cliente/i }).first().click();
   await p.waitForTimeout(2200);
   await p.locator('.dialog-window input[placeholder*="Carlos Eduardo"]').fill("márcia gonçalves de assunção");
-  await p.locator(".dialog-tabs button", { hasText: /Contato/ }).click();
   await p.waitForTimeout(600);
-  await p.locator(".dialog-window input").first().fill("34955554444");
+  await p.locator(".dialog-window .field-group").filter({ hasText: "WhatsApp" }).first().locator("input").fill("34955554444");
   const email = p.locator('.dialog-window input[type="email"]');
   if (await email.count()) await email.fill("Marcia@Oficina.com");
-  await p.locator(".dialog-tabs button", { hasText: /Dados Pessoais/ }).click();
   await p.waitForTimeout(600);
   await p.locator('.client-moto-block input[placeholder*="ABC-1234"]').fill("MAI-3C33");
   await p.waitForTimeout(400);
@@ -1519,9 +1526,8 @@ await passo("cliente exige placa vinculada, e a moto vai junto", async () => {
   await p.waitForTimeout(2200);
   if (!(await p.locator(".client-moto-block").count())) problemas.push("o cadastro de cliente não tem o bloco da moto");
   await p.locator('.dialog-window input[placeholder*="Carlos Eduardo"]').fill("Rayane Souza");
-  await p.locator(".dialog-tabs button", { hasText: /Contato/ }).click();
   await p.waitForTimeout(600);
-  await p.locator(".dialog-window input").first().fill("34988887777");
+  await p.locator(".dialog-window .field-group").filter({ hasText: "WhatsApp" }).first().locator("input").fill("34988887777");
   await p.waitForTimeout(400);
   await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
   await p.waitForTimeout(1500);
@@ -1577,7 +1583,7 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   await p.getByPlaceholder("Ex.: 38.420 km").fill("50.000 km");
   await p.locator(".dialog textarea").first().fill("Chegou de guincho");
   await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão");
-  await p.locator(".dialog input[type=number]").first().fill("120");
+  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("120");
   await p.waitForTimeout(300);
   await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
   await p.waitForTimeout(900);

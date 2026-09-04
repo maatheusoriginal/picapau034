@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { SupplierConfig } from "../types";
 import { emMaiusculo } from "../text-case";
 import { saveFirestoreDoc } from "../../app/firebase/client";
@@ -26,8 +26,8 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
   notify,
   allSuppliers,
 }) => {
-  const [activeTab, setActiveTab] = useState<"ident" | "contact" | "commercial" | "address" | "notes">("ident");
   const [isSaving, setIsSaving] = useState(false);
+  const formularioRef = useRef<HTMLFormElement>(null);
   // O que falta preencher, dito DENTRO do formulário.
   //
   // Era um `notify` — o aviso de canto da aplicação —, que num formulário
@@ -93,7 +93,6 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
       setActive(true);
     }
     setErroForm("");
-    setActiveTab("ident");
   }, [isOpen, editingSupplier]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -101,13 +100,11 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
 
     if (!name.trim()) {
       setErroForm("Informe a Razão Social ou Nome do fornecedor.");
-      setActiveTab("ident");
       return;
     }
 
     if (!phone.trim()) {
       setErroForm("Informe o WhatsApp ou telefone de contato.");
-      setActiveTab("contact");
       return;
     }
 
@@ -166,12 +163,29 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
     }
   };
 
+  /**
+   * F5 grava e Esc fecha, como no sistema que a oficina já usa e como no
+   * cadastro de peça. O atalho é ligado só enquanto este formulário está
+   * aberto: fechou, F5 volta a recarregar a página.
+   */
+  useEffect(() => {
+    if (!isOpen) return;
+    const noTeclado = (evento: KeyboardEvent) => {
+      if (evento.key === "Escape") { evento.preventDefault(); onClose(); return; }
+      if (evento.key !== "F5") return;
+      evento.preventDefault();
+      formularioRef.current?.requestSubmit();
+    };
+    window.addEventListener("keydown", noTeclado);
+    return () => window.removeEventListener("keydown", noTeclado);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div className="dialog-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="dialog-window large-dialog" style={{ maxWidth: "740px" }}>
-        <div className="dialog-head">
+        <div className="dialog-head pdv-head">
           <div>
             <strong>{editingSupplier ? "Editar Fornecedor" : "Novo Fornecedor"}</strong>
             <span>{editingSupplier ? `${editingSupplier.name} · Contato: ${editingSupplier.phone}` : "Cadastre distribuidoras de peças, ferramentas e produtos"}</span>
@@ -179,32 +193,31 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
           <button className="icon-close" onClick={onClose} aria-label="Fechar modal">✕</button>
         </div>
 
-        <div className="dialog-tabs">
-          <button type="button" className={`dialog-tab ${activeTab === "ident" ? "active" : ""}`} onClick={() => setActiveTab("ident")}>
-            1. Empresa
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "contact" ? "active" : ""}`} onClick={() => setActiveTab("contact")}>
-            2. Contato
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "commercial" ? "active" : ""}`} onClick={() => setActiveTab("commercial")}>
-            3. Comercial & Prazo
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "address" ? "active" : ""}`} onClick={() => setActiveTab("address")}>
-            4. Endereço
-          </button>
-          <button type="button" className={`dialog-tab ${activeTab === "notes" ? "active" : ""}`} onClick={() => setActiveTab("notes")}>
-            5. Observações
-          </button>
-        </div>
 
-        <form onSubmit={handleSubmit} className="dialog-body">
+        {/*
+            noValidate: a conferência é nossa, não a do navegador.
+
+            Enquanto o cadastro tinha etapas, o campo obrigatório da etapa
+            seguinte nem estava na tela, então o `required` do HTML nunca
+            barrava nada. Numa tela só ele barra — e o balão do navegador
+            entra na frente da mensagem escrita DENTRO do formulário, que é
+            justamente a que diz o que a oficina precisa ("toda pessoa
+            cadastrada precisa de pelo menos uma moto vinculada").
+          */}
+          <form noValidate ref={formularioRef} onSubmit={handleSubmit} className="dialog-body">
+          {/*
+            Uma tela só, no formato do sistema de balcão: sem etapa, e com o
+            rótulo à esquerda do campo. As abas viraram os títulos dos blocos.
+          */}
+          <div className="pdv-form">
           {erroForm ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erroForm}</span></div> : null}
           {/* TAB 1: IDENTIFICAÇÃO */}
-          {activeTab === "ident" && (
+          <h4>Identificação</h4>
+          {(
             <div className="form-section-stack">
               <div className="form-grid-2">
                 <label className="field-group">
-                  <span className="field-label">Razão Social / Nome Oficial <b className="req">*</b></span>
+                  <span className="field-label">Razão social <b className="req">*</b></span>
                   <input
                     type="text"
                     required
@@ -216,7 +229,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   />
                 </label>
                 <label className="field-group">
-                  <span className="field-label">Nome Fantasia / Marca</span>
+                  <span className="field-label">Nome fantasia</span>
                   <input
                     type="text"
                     value={tradeName}
@@ -239,7 +252,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   />
                 </label>
                 <label className="field-group">
-                  <span className="field-label">Linhas / Categorias fornecidas</span>
+                  <span className="field-label">Categorias</span>
                   <input
                     type="text"
                     value={categories}
@@ -253,11 +266,12 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
           )}
 
           {/* TAB 2: CONTATO */}
-          {activeTab === "contact" && (
+          <h4>Contato</h4>
+          {(
             <div className="form-section-stack">
               <div className="form-grid-2">
                 <label className="field-group">
-                  <span className="field-label">WhatsApp / Telefone Principal <b className="req">*</b></span>
+                  <span className="field-label">WhatsApp <b className="req">*</b></span>
                   <input
                     type="text"
                     required
@@ -268,7 +282,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   />
                 </label>
                 <label className="field-group">
-                  <span className="field-label">Telefone Secundário / Fixo</span>
+                  <span className="field-label">Telefone fixo</span>
                   <input
                     type="text"
                     value={phoneSecondary}
@@ -281,7 +295,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
 
               <div className="form-grid-2">
                 <label className="field-group">
-                  <span className="field-label">E-mail Comercial / Pedidos</span>
+                  <span className="field-label">E-mail</span>
                   <input
                     type="email"
                     value={email}
@@ -291,7 +305,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   />
                 </label>
                 <label className="field-group">
-                  <span className="field-label">Nome do Vendedor / Representante</span>
+                  <span className="field-label">Representante</span>
                   <input
                     type="text"
                     value={representative}
@@ -305,11 +319,12 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
           )}
 
           {/* TAB 3: COMERCIAL */}
-          {activeTab === "commercial" && (
+          <h4>Condições comerciais</h4>
+          {(
             <div className="form-section-stack">
               <div className="form-grid-3">
                 <label className="field-group">
-                  <span className="field-label">Prazo Médio de Entrega (dias)</span>
+                  <span className="field-label">Entrega (dias)</span>
                   <NumberField
                     min={0}
                     fallback={0}
@@ -320,7 +335,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   <small className="field-hint">0 = Entrega no mesmo dia</small>
                 </label>
                 <label className="field-group">
-                  <span className="field-label">Condição de Pagamento Padrão</span>
+                  <span className="field-label">Condição de pagamento</span>
                   <input
                     type="text"
                     value={paymentTerms}
@@ -330,8 +345,8 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   />
                 </label>
                 <label className="field-group">
-                  <span className="field-label">Valor de Pedido Mínimo (R$)</span>
-                  <NumberField
+                  <span className="field-label">Pedido mínimo</span>
+                  <NumberField casas={2}
                     min={0}
                     step="0.01"
                     fallback={0}
@@ -347,10 +362,11 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
           )}
 
           {/* TAB 4: ENDEREÇO */}
-          {activeTab === "address" && (
+          <h4>Endereço</h4>
+          {(
             <div className="form-section-stack">
               <label className="field-group">
-                <span className="field-label">Endereço (Rua, Número e Bairro)</span>
+                <span className="field-label">Endereço</span>
                 <input
                   type="text"
                   value={address}
@@ -371,7 +387,7 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
                   />
                 </label>
                 <label className="field-group">
-                  <span className="field-label">Estado (UF)</span>
+                  <span className="field-label">Estado</span>
                   <input
                     type="text"
                     maxLength={2}
@@ -386,10 +402,11 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
           )}
 
           {/* TAB 5: OBSERVAÇÕES */}
-          {activeTab === "notes" && (
+          <h4>Observações</h4>
+          {(
             <div className="form-section-stack">
               <label className="field-group">
-                <span className="field-label">Observações e Histórico de Acordos</span>
+                <span className="field-label">Observações</span>
                 <textarea
                   rows={4}
                   value={notes}
@@ -415,52 +432,25 @@ export const SupplierFormModal: React.FC<SupplierFormModalProps> = ({
               </div>
             </div>
           )}
+          </div>
 
           <div className="dialog-actions-row">
             <div>
-              <button type="button" className="outline-button" onClick={onClose} disabled={isSaving}>
+              <button type="button" className="outline-button pdv-footer-button" onClick={onClose} disabled={isSaving}>
+                <kbd>Esc</kbd>
                 Cancelar
               </button>
               {editingSupplier && removal ? <RemovalButton tipo="fornecedor" colecao="suppliers" id={editingSupplier.id} nome={editingSupplier.name} {...removal}/> : null}
             </div>
+            {/*
+              Sem "Anterior" e "Próxima etapa": o cadastro é uma tela só, como o
+              de peça. Eram esses dois que traziam o defeito antigo — o mesmo
+              canto trocava de botão entre avançar e gravar, e um clique duplo
+              gravava o cadastro pela metade. Sem etapa, some pela estrutura.
+            */}
             <div style={{ display: "flex", gap: "8px" }}>
-              {activeTab !== "ident" && (
-                <button
-                  type="button"
-                  className="outline-button"
-                  onClick={() => {
-                    const tabs: Array<"ident" | "contact" | "commercial" | "address" | "notes"> = ["ident", "contact", "commercial", "address", "notes"];
-                    const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx > 0) setActiveTab(tabs[currIdx - 1]);
-                  }}
-                >
-                  Anterior
-                </button>
-              )}
-              {/*
-                Os dois botões ficam SEMPRE na tela, cada um no seu lugar.
-
-                Antes o mesmo canto trocava de botão: era "Próxima etapa" e, ao
-                avançar para a última etapa, virava o de gravar no mesmo pixel.
-                Dois cliques seguidos — o que se faz num botão que parece não ter
-                respondido — avançavam e gravavam em seguida: o cadastro saía
-                pela metade e a tela fechava sozinha. Na última etapa o "Próxima
-                etapa" fica desabilitado em vez de sumir, para nada mudar de
-                posição debaixo do cursor.
-              */}
-              <button
-                type="button"
-                className="outline-button"
-                disabled={activeTab === "notes"}
-                  onClick={() => {
-                    const tabs: Array<"ident" | "contact" | "commercial" | "address" | "notes"> = ["ident", "contact", "commercial", "address", "notes"];
-                    const currIdx = tabs.indexOf(activeTab);
-                    if (currIdx < tabs.length - 1) setActiveTab(tabs[currIdx + 1]);
-                  }}
-              >
-                Próxima etapa →
-              </button>
-                <button type="submit" className="primary-button save-action-btn" disabled={isSaving}>
+              <button type="submit" className="primary-button save-action-btn pdv-footer-button" disabled={isSaving}>
+                <kbd>F5</kbd>
                   {isSaving ? "Salvando no Firestore..." : (editingSupplier ? "Salvar Alterações" : "Cadastrar Fornecedor")}
                 </button>
             </div>

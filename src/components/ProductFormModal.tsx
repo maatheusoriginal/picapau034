@@ -361,7 +361,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           ) : null}
         </div>
 
-        <form ref={formularioRef} onSubmit={handleSubmit} className="dialog-body">
+        {/*
+            noValidate: a conferência é nossa, não a do navegador.
+
+            Enquanto o cadastro tinha etapas, o campo obrigatório da etapa
+            seguinte nem estava na tela, então o `required` do HTML nunca
+            barrava nada. Numa tela só ele barra — e o balão do navegador
+            entra na frente da mensagem escrita DENTRO do formulário, que é
+            justamente a que diz o que a oficina precisa ("toda pessoa
+            cadastrada precisa de pelo menos uma moto vinculada").
+          */}
+          <form noValidate ref={formularioRef} onSubmit={handleSubmit} className="dialog-body">
           {erro ? <div className="settings-modal-error" role="alert"><b>!</b><span>{erro}</span></div> : null}
 
           {activeTab === "dados" && (
@@ -482,15 +492,15 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                     <h4>Preço</h4>
                     <label className="pdv-num">
                       <span>Preço compra</span>
-                      <NumberField step="0.01" min={0} fallback={0} blankValue={0} value={cost} onChange={handleCostChange} placeholder="0,00"/>
+                      <NumberField casas={2} step="0.01" min={0} fallback={0} blankValue={0} value={cost} onChange={handleCostChange} placeholder="0,00"/>
                     </label>
                     <label className="pdv-num">
                       <span>Margem s/ custo (%)</span>
-                      <NumberField step="1" fallback={0} value={markup} onChange={handleMarkupChange} placeholder="45"/>
+                      <NumberField casas={2} step="1" fallback={0} value={markup} onChange={handleMarkupChange} placeholder="45"/>
                     </label>
                     <label className="pdv-num">
                       <span>Preço venda <b className="req">*</b></span>
-                      <NumberField step="0.01" min={0.01} required fallback={0} blankValue={0} value={price} onChange={handlePriceChange}
+                      <NumberField casas={2} step="0.01" min={0.01} required fallback={0} blankValue={0} value={price} onChange={handlePriceChange}
                         placeholder="0,00" readOnly={priceFollowsMarkup}/>
                     </label>
                     {priceFollowsMarkup ? <span className="pdv-hint">Sai do custo com a margem. Para digitar à mão, mude o modo de preço em Configurações.</span> : null}

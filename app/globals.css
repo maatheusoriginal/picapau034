@@ -2679,25 +2679,43 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .pdv-head { align-items: center; padding: 11px 18px; }
 .pdv-head > div { display: flex; align-items: baseline; gap: 9px; }
 .pdv-head strong { margin: 0; font-size: 14px; }
-.pdv-head span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+.pdv-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.pdv-head > div > span:only-of-type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .pdv-form { display: grid; gap: 6px; }
-.pdv-row { display: grid; grid-template-columns: 122px minmax(0, 1fr); align-items: center; gap: 10px; }
-.pdv-row > .pdv-label { color: #55565a; font-size: 9px; font-weight: 750; text-align: right; line-height: 1.3; }
-.pdv-row > .pdv-label .req { margin-left: 2px; color: var(--red); }
+.pdv-row,
+.pdv-form .field-group { display: grid; grid-template-columns: 122px minmax(0, 1fr); align-items: center; gap: 10px; }
+/* Os agrupadores de duas e três colunas somem: dentro da régua cada campo é
+   uma linha, senão o rótulo de um campo fica em cima do campo do vizinho. */
+.pdv-form .form-grid-2, .pdv-form .form-grid-3, .pdv-form .form-section-stack { display: contents; }
+.pdv-row > .pdv-label,
+.pdv-form .field-group > .field-label { color: #55565a; font-size: 9px; font-weight: 750; text-align: right; line-height: 1.3; }
+.pdv-row > .pdv-label .req, .pdv-form .field-group > .field-label .req { margin-left: 2px; color: var(--red); }
 .pdv-row .dialog-input, .pdv-row .dialog-select, .pdv-row .dialog-textarea,
-.pdv-row input, .pdv-row select { min-height: 28px; padding: 0 8px; border-radius: 6px; font-size: 10px; }
-.pdv-row textarea, .pdv-row .dialog-textarea { min-height: 44px; padding: 6px 8px; line-height: 1.45; }
+.pdv-row input, .pdv-row select,
+.pdv-form .field-group input, .pdv-form .field-group select { min-height: 28px; padding: 0 8px; border-radius: 6px; font-size: 10px; }
+.pdv-row textarea, .pdv-row .dialog-textarea,
+.pdv-form .field-group textarea { min-height: 44px; padding: 6px 8px; line-height: 1.45; }
+/* Campo alto alinha o rótulo pelo topo, senão ele flutua no meio da caixa. */
+.pdv-form .field-group:has(textarea) { align-items: start; }
+.pdv-form .field-group:has(textarea) > .field-label { padding-top: 7px; }
 /* O campo alto (observações, compatibilidade) alinha o rótulo pelo topo. */
 .pdv-row.tall { align-items: start; }
 .pdv-row.tall > .pdv-label { padding-top: 7px; }
 /* Dois campos na mesma linha, cada um com o seu rótulo. */
 .pdv-row.pair { grid-template-columns: 122px minmax(0, 1fr) auto minmax(0, .8fr); }
 .pdv-row.pair > .pdv-label:nth-child(3) { width: auto; }
-.pdv-hint { grid-column: 2 / -1; margin-top: -1px; color: #929296; font-size: 8px; line-height: 1.4; }
+.pdv-hint,
+.pdv-form .field-group > .field-help,
+.pdv-form .field-group > .field-hint,
+.pdv-form .field-group > .settings-hint { grid-column: 2 / -1; margin-top: -1px; color: #929296; font-size: 8px; line-height: 1.4; }
 
 /* As três colunas de números, como na referência: preço, estoque e o que sai
    da conta. Número alinhado à direita dentro da caixa — é assim que se confere
    uma coluna de valores sem ler dígito por dígito. */
+/* O título de cada bloco, no lugar da aba que sumiu. Ocupa a linha inteira. */
+.pdv-form > h4 { grid-column: 1 / -1; margin: 9px 0 1px; padding-top: 8px; border-top: 1px solid #eceae7; color: #8a8b8f; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
+.pdv-form > h4:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+
 .pdv-numbers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px 14px; margin-top: 4px; padding-top: 10px; border-top: 1px solid #eceae7; }
 .pdv-numbers > section { display: grid; gap: 5px; align-content: start; }
 .pdv-numbers h4 { margin: 0 0 2px; color: #8a8b8f; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
@@ -2732,14 +2750,16 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   /* No celular a régua de rótulos não cabe: volta a empilhar, e o campo volta
      ao tamanho do dedo. */
   .pdv-body { grid-template-columns: 1fr; }
-  .pdv-row, .pdv-row.pair { grid-template-columns: 1fr; gap: 3px; }
+  .pdv-row, .pdv-row.pair, .pdv-form .field-group { grid-template-columns: 1fr; gap: 3px; }
   /* Sem isto a linha volta a ter duas colunas: `grid-column: 2 / -1` num grid
      de uma coluna cria uma segunda coluna implícita, e o rótulo ia parar ao
      lado do campo de novo — só nas linhas que têm dica embaixo. */
-  .pdv-hint { grid-column: 1 / -1; }
-  .pdv-row > .pdv-label { text-align: left; }
+  .pdv-hint, .pdv-form .field-group > .field-help, .pdv-form .field-group > .field-hint, .pdv-form .field-group > .settings-hint { grid-column: 1 / -1; }
+  .pdv-form .field-group:has(textarea) > .field-label { padding-top: 0; }
+  .pdv-row > .pdv-label, .pdv-form .field-group > .field-label { text-align: left; }
   .pdv-row.tall > .pdv-label { padding-top: 0; }
-  .pdv-row .dialog-input, .pdv-row .dialog-select, .pdv-row input, .pdv-row select { min-height: 40px; }
+  .pdv-row .dialog-input, .pdv-row .dialog-select, .pdv-row input, .pdv-row select,
+  .pdv-form .field-group input, .pdv-form .field-group select { min-height: 40px; }
   .pdv-numbers { grid-template-columns: 1fr; }
   .pdv-num { grid-template-columns: minmax(0, 1fr) 108px; }
   .pdv-num input { min-height: 38px; }
@@ -2765,7 +2785,12 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .toggle-row-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #e3e1dd; border-radius: 10px; background: #faf9f7; }
 .toggle-row-card > div { min-width: 0; }
 .toggle-row-card strong { display: block; color: #444549; font-size: 9px; }
-.toggle-row-card small { display: block; margin-top: 3px; color: #929296; font-size: 8px; }
+/* O <span> ficava sem regra e herdava o tamanho do corpo da página: a frase de
+   apoio saía maior que o próprio título da marcação. */
+.toggle-row-card small, .toggle-row-card > div > span { display: block; margin-top: 3px; color: #929296; font-size: 8px; line-height: 1.4; }
+/* Dentro da régua, o cartão de marcação ocupa a linha inteira: ele não é um
+   par rótulo/campo. */
+.pdv-form .toggle-row-card, .pdv-form .settings-modal-error, .pdv-form .price-warning { grid-column: 1 / -1; }
 .switch-toggle { position: relative; width: 38px; height: 21px; flex: 0 0 auto; display: inline-block; cursor: pointer; }
 .switch-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
 .switch-toggle .slider { position: absolute; inset: 0; border-radius: 20px; background: #cccac6; transition: .18s; }
