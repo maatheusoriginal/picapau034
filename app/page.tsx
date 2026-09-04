@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories, isMechanicUser, orDefault, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { NumberField } from "../src/components/NumberField";
 import { MoneyField } from "../src/components/MoneyField";
@@ -20,8 +20,8 @@ import { addToList } from "../src/quick-list";
 import { helpTopic, searchHelp } from "../src/help-topics";
 import { conferirNota, custoUnitario, fatorProblema, lerNfe, quantidadeQueEntra, resumoDaConferencia, type ItemConferido, type NfeNota } from "../src/nfe";
 import { HistoryPanel } from "../src/components/HistoryPanel";
-import { accountOpen, accountStatus, openAccounts, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
-import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
+import { accountOpen, accountStatus, openAccounts, changeFor, round2, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
+import { buildMovement, cashDifference, cashHistorySummary, cashSummary, closedSessions, differenceLabel, drawerEntries, drawerOrigins, movementProblem, nonDrawerTotal, openSession, sessionIsStale, sessionsInPeriod } from "../src/cash";
 import { mergeParts, priceFromMarkup, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoDoServico } from "../src/mechanic";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
@@ -267,6 +267,7 @@ const navGroups: Array<{
       { label: "Financeiro", icon: "wallet" },
       { label: "Contas a receber", icon: "arrow" },
       { label: "Contas a pagar", icon: "file" },
+      { label: "Histórico de caixas", icon: "wallet" },
       { label: "Relatórios", icon: "chart" },
     ],
   },
@@ -288,6 +289,7 @@ const destinationPermissions: Record<string, FirebasePermission[]> = {
   "Financeiro": ["finance.view"],
   "Contas a receber": ["finance.view"],
   "Contas a pagar": ["finance.view"],
+  "Histórico de caixas": ["finance.view"],
   "Relatórios": ["finance.view"],
 };
 
@@ -994,6 +996,134 @@ function ReportWorkspace({ sales, orders, expenses, movements, accounts, notify 
  *
  * A conta e as travas são de src/stock-adjust.ts. Aqui é só a tela.
  */
+/**
+ * Histórico de caixas fechados.
+ *
+ * O histórico existia só dentro do diálogo de abrir o caixa, cortado nos cinco
+ * últimos. Quem precisava achar o fechamento de terça passada — porque o
+ * dinheiro não bateu e alguém quer entender onde — não tinha por onde começar.
+ */
+function CashHistoryWorkspace({ cashSessions, notify }: {
+  cashSessions: CashSession[]; notify: (mensagem: string) => void;
+}) {
+  const [atalho, setAtalho] = useState<AtalhoDePeriodo | "Personalizado">("Este mês");
+  const [de, setDe] = useState(() => periodoDe("Este mês").de);
+  const [ate, setAte] = useState(() => periodoDe("Este mês").ate);
+  const [busca, setBusca] = useState("");
+  const [aberto, setAberto] = useState("");
+  const periodo = useMemo(() => ({ de, ate }), [de, ate]);
+
+  const escolherAtalho = (novo: AtalhoDePeriodo) => {
+    const calculado = periodoDe(novo);
+    setAtalho(novo); setDe(calculado.de); setAte(calculado.ate);
+  };
+
+  const noPeriodo = useMemo(() => sessionsInPeriod(cashSessions, periodo), [cashSessions, periodo]);
+  const listados = useMemo(() => {
+    const texto = busca.trim().toLowerCase();
+    if (!texto) return noPeriodo;
+    return noPeriodo.filter((sessao) =>
+      `${sessao.id} ${sessao.openedByName ?? ""} ${sessao.closedByName ?? ""} ${sessao.closingNotes ?? ""}`.toLowerCase().includes(texto));
+  }, [noPeriodo, busca]);
+  const resumo = useMemo(() => cashHistorySummary(listados), [listados]);
+
+  const exportar = () => {
+    const linhas: Array<Array<string | number>> = listados.map((sessao) => [
+      sessao.id, sessao.openedDate, sessao.closedDate ?? "", sessao.openedByName ?? "", sessao.closedByName ?? "",
+      sessao.openingAmount, sessao.expectedAmount ?? 0, sessao.countedAmount ?? 0,
+      sessao.difference ?? 0, differenceLabel(sessao.difference ?? 0), sessao.closingNotes ?? "",
+    ]);
+    const csv = paraCSV(
+      ["Caixa", "Aberto em", "Fechado em", "Abriu", "Fechou", "Fundo de troco", "Esperado", "Contado", "Diferença", "Conferência", "Observação"],
+      linhas);
+    const arquivo = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(arquivo);
+    const link = document.createElement("a");
+    link.href = url; link.download = nomeDoArquivo("caixas", periodo);
+    document.body.appendChild(link); link.click(); link.remove();
+    URL.revokeObjectURL(url);
+    notify(`${listados.length} caixa(s) de ${periodoEmTexto(periodo)} baixado(s).`);
+  };
+
+  return (
+    <>
+      <div className="module-heading">
+        <div><p>Gestão</p><h1>Histórico de caixas</h1><span>Todo fechamento já feito, com a conferência de cada dia.</span></div>
+        <button className="primary-button" onClick={exportar} disabled={!listados.length}><Icon name="file" size={18}/>Baixar planilha</button>
+      </div>
+
+      <div className="report-period panel">
+        <div className="filter-pills">
+          {atalhosDePeriodo.map((nome) => (
+            <button className={atalho === nome ? "selected" : ""} key={nome} onClick={() => escolherAtalho(nome)}>{nome}</button>
+          ))}
+        </div>
+        <label className="field"><span>De</span><input type="date" value={de} onChange={(e) => { setDe(e.target.value); setAtalho("Personalizado"); }}/></label>
+        <label className="field"><span>Até</span><input type="date" value={ate} onChange={(e) => { setAte(e.target.value); setAtalho("Personalizado"); }}/></label>
+        <span className="report-period-label">{periodoEmTexto(periodo)}</span>
+      </div>
+
+      <div className="report-mini caixa-mini">
+        <article><span>Caixas fechados</span><strong>{resumo.caixas}</strong></article>
+        <article><span>Esperado no período</span><strong>{formatBRL(resumo.esperado)}</strong></article>
+        <article><span>Contado no período</span><strong>{formatBRL(resumo.contado)}</strong></article>
+        <article><span>Diferença somada</span><strong className={resumo.diferenca < 0 ? "lucro-ruim" : resumo.diferenca > 0 ? "lucro-bom" : ""}>{formatBRL(resumo.diferenca)}</strong></article>
+      </div>
+
+      {/* A soma das diferenças mente quando uma falta e uma sobra do mesmo
+          tamanho caem no mesmo período: fecha em zero, e foram dois erros.
+          Por isso o aviso conta os dias, e não o saldo. */}
+      {resumo.faltas ? (
+        <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>
+          {resumo.faltas === 1 ? "1 caixa fechou com falta" : `${resumo.faltas} caixas fecharam com falta`} neste período
+          {resumo.maiorFalta ? `, a maior de ${formatBRL(resumo.maiorFalta)} no ${resumo.maiorFaltaEm}` : ""}.
+          {resumo.sobras ? (resumo.sobras === 1 ? " Outro fechou com sobra — sobra também é erro de conferência." : ` Outros ${resumo.sobras} fecharam com sobra — sobra também é erro de conferência.`) : ""}
+        </span></div>
+      ) : null}
+
+      <section className="panel module-panel">
+        <div className="panel-header">
+          <div><h2>Fechamentos</h2><p>{resumo.conferem} conferiram · {resumo.faltas} com falta · {resumo.sobras} com sobra</p></div>
+          <div className="mini-search"><Icon name="search" size={16}/><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Caixa, quem abriu ou observação"/></div>
+        </div>
+        <div className="table-scroll">
+          <table>
+            <thead><tr><th>Caixa</th><th>Fechado em</th><th className="num">Fundo</th><th className="num">Esperado</th><th className="num">Contado</th><th>Conferência</th></tr></thead>
+            <tbody>{listados.length ? listados.map((sessao) => {
+              const gap = sessao.difference ?? round2((sessao.countedAmount ?? 0) - (sessao.expectedAmount ?? 0));
+              const rotulo = differenceLabel(gap);
+              const escolhido = aberto === sessao.id;
+              return (
+                <Fragment key={sessao.id}>
+                  <tr className="caixa-linha" onClick={() => setAberto(escolhido ? "" : sessao.id)}>
+                    <td><strong className="order-id">{sessao.id}</strong><span>Aberto {sessao.openedDate} por {sessao.openedByName || "—"}</span></td>
+                    <td>{sessao.closedDate || "—"}<span>{sessao.closedByName || "—"}</span></td>
+                    <td className="num mono">{formatBRL(sessao.openingAmount)}</td>
+                    <td className="num mono">{formatBRL(sessao.expectedAmount ?? 0)}</td>
+                    <td className="num mono">{formatBRL(sessao.countedAmount ?? 0)}</td>
+                    <td><span className={`status ${rotulo === "Confere" ? "green" : rotulo === "Sobra" ? "blue" : "red"}`}><i/>{rotulo === "Confere" ? "Confere" : `${rotulo} de ${formatBRL(Math.abs(gap))}`}</span></td>
+                  </tr>
+                  {escolhido ? (
+                    <tr className="caixa-detalhe"><td colSpan={6}>
+                      <div>
+                        <span>Fundo de troco<b>{formatBRL(sessao.openingAmount)}</b></span>
+                        <span>Esperado<b>{formatBRL(sessao.expectedAmount ?? 0)}</b></span>
+                        <span>Contado<b>{formatBRL(sessao.countedAmount ?? 0)}</b></span>
+                        <span>Diferença<b className={gap < 0 ? "lucro-ruim" : gap > 0 ? "lucro-bom" : ""}>{formatBRL(gap)}</b></span>
+                      </div>
+                      <p>{sessao.closingNotes ? sessao.closingNotes : "Fechado sem observação."}</p>
+                    </td></tr>
+                  ) : null}
+                </Fragment>
+              );
+            }) : <tr><td colSpan={6} className="report-vazio">{busca.trim() ? `Nenhum caixa com "${busca.trim()}" neste período.` : "Nenhum caixa fechado neste período."}</td></tr>}</tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
 function StockAdjustWorkspace({ products, adjustments, currentUser, notify, canManage }: {
   products: ProductRecord[]; adjustments: StockAdjustmentRecord[];
   currentUser: FirebaseUserSummary | null; notify: (mensagem: string) => void; canManage: boolean;
@@ -2041,6 +2171,7 @@ export function ModuleWorkspace({
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
+  if (active === "Histórico de caixas") return <CashHistoryWorkspace cashSessions={cashSessions} notify={notify}/>;
   if (active === "Ajuste de estoque") return <StockAdjustWorkspace products={products} adjustments={stockAdjustments} currentUser={currentFirebaseUser} notify={notify} canManage={canOperate}/>;
   if (active === "Relatórios") return <ReportWorkspace sales={sales} orders={orders} expenses={expenses} movements={movements} accounts={accounts} notify={notify}/>;
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} orders={orders} sales={sales} expenses={expenses} canManageTeam={canOperate}/>;
@@ -2436,6 +2567,7 @@ export function AppDialog({
   setDiscount,
   sales,
   stockEntries,
+  stockAdjustments,
   accounts,
   cashSessions,
   movements,
@@ -2473,6 +2605,7 @@ export function AppDialog({
   setDiscount: (value: number) => void;
   sales: SaleRecord[];
   stockEntries: StockEntryRecord[];
+  stockAdjustments: StockAdjustmentRecord[];
   accounts: AccountRecord[];
   cashSessions: CashSession[];
   movements: MovementRecord[];
@@ -2804,7 +2937,7 @@ export function AppDialog({
           onCreateCategory={criarCategoriaDeProduto}
           onCreatePartBrand={(nome) => criarItemDeLista("partBrands", nome)}
           settings={settings}
-          movementSources={{ stockEntries, sales, orders }}
+          movementSources={{ stockEntries, sales, orders, adjustments: stockAdjustments }}
           removal={exclusao(canOperate)}
         />
       </Suspense></ErrorBoundary>
@@ -4977,8 +5110,24 @@ export function AppDialog({
 
             <div className="module-summary">
               <article><span>Fundo de troco</span><strong>{formatBRL(drawer.opening)}</strong><small>Abertura do caixa</small></article>
-              <article><span>Entrou em dinheiro</span><strong>{formatBRL(drawer.sales + drawer.received + drawer.supplies)}</strong><small>{formatBRL(drawer.sales)} em vendas e OS</small></article>
-              <article><span>Saiu em dinheiro</span><strong>{formatBRL(drawer.withdrawals + drawer.expenses)}</strong><small>{formatBRL(drawer.withdrawals)} em sangrias</small></article>
+              <article><span>Entrou em dinheiro</span><strong>{formatBRL(drawer.incoming)}</strong><small>{formatBRL(drawer.counter + drawer.quick)} no balcão</small></article>
+              <article><span>Saiu em dinheiro</span><strong>{formatBRL(drawer.outgoing)}</strong><small>{formatBRL(drawer.withdrawals)} em sangrias</small></article>
+            </div>
+
+            {/* Cada origem na sua linha. Somadas num número só, uma diferença
+                no balcão aparecia como diferença do caixa inteiro, e quem
+                fecha a gaveta no fim do dia não tinha onde procurar. */}
+            <div className="cash-origins">
+              <div className="cash-origins-head"><strong>De onde veio o dinheiro da gaveta</strong><span>{formatBRL(drawer.incoming)} desde a abertura</span></div>
+              <ul>
+                {drawerOrigins(drawer).map((linha) => (
+                  <li key={linha.origem}><span>{linha.origem}</span><b className="mono">{formatBRL(linha.total)}</b></li>
+                ))}
+                {drawer.withdrawals ? <li className="saiu"><span>Sangria</span><b className="mono">− {formatBRL(drawer.withdrawals)}</b></li> : null}
+                {drawer.expenses ? <li className="saiu"><span>Gasto pago pela gaveta</span><b className="mono">− {formatBRL(drawer.expenses)}</b></li> : null}
+                {drawer.manualOut ? <li className="saiu"><span>Saída avulsa</span><b className="mono">− {formatBRL(drawer.manualOut)}</b></li> : null}
+                {!drawerOrigins(drawer).length && !drawer.outgoing ? <li className="cash-origins-vazio"><span>Nada passou pela gaveta ainda além do fundo de troco.</span></li> : null}
+              </ul>
             </div>
 
             <div className="cash-actions">{[{name:"Suprimento", detail:"Adicionar dinheiro", icon:"plus" as IconName},{name:"Sangria", detail:"Retirar dinheiro", icon:"arrow" as IconName},{name:"Fechar caixa", detail:"Conferir o dia", icon:"check" as IconName}].map((action) => <button className={cashAction === action.name ? "selected" : ""} key={action.name} onClick={() => { setCashAction(action.name); setDialogError(""); }}><Icon name={action.icon}/><strong>{action.name}</strong><small>{action.detail}</small></button>)}</div>
@@ -5008,7 +5157,12 @@ export function AppDialog({
               </div>
             )}
 
-            {cashProblem ? <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>{cashProblem}</span></div> : null}
+            {/* Só depois de escrever alguma coisa. Com o campo em branco o
+                diálogo abria já acusando "informe um valor maior que zero",
+                e um erro que aparece antes de a pessoa fazer nada ensina a
+                ignorar a tarja vermelha — inclusive quando ela é de verdade.
+                A validação em si continua no confirmar. */}
+            {cashProblem && cashAmount.trim() ? <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>{cashProblem}</span></div> : null}
 
             {drawerMoves.length ? (
               <div className="table-scroll">
@@ -5833,7 +5987,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {helpOpen ? (
         <div className="dialog-layer" role="presentation" onMouseDown={(evento) => evento.target === evento.currentTarget && setHelpOpen(false)}>
           <section className="dialog dialog-wide help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">

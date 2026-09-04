@@ -434,6 +434,30 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 11.5px; }
 
 /* Ajuste de estoque: a conferência de prateleira. A tabela é o centro da tela,
    e o resumo fica no rodapé — é o número que se confere antes de confirmar. */
+/* O extrato por origem do caixa: linhas densas, para caber no diálogo sem
+   empurrar o botão de fechar para fora da vista. */
+/* Histórico de caixas: a linha inteira é clicável para abrir o detalhe, então
+   ela precisa parecer clicável. */
+.caixa-mini { margin: 14px 0 0; border-radius: 10px; }
+.caixa-linha { cursor: pointer; }
+.caixa-linha:hover { background: #faf9f7; }
+.caixa-linha td span { display: block; margin-top: 2px; color: #929296; font-size: 11px; }
+.caixa-detalhe > td { padding: 0 14px 12px !important; background: #faf9f7; }
+.caixa-detalhe > td > div { display: flex; flex-wrap: wrap; gap: 8px 26px; padding: 10px 0 6px; }
+.caixa-detalhe span { color: #77787c; font-size: 11px; }
+.caixa-detalhe span b { margin-left: 7px; color: #35363a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+.caixa-detalhe p { margin: 0; color: #63646a; font-size: 12px; }
+.cash-origins { margin-top: 12px; border: 1px solid #e6e4e0; border-radius: 10px; background: #fff; overflow: hidden; }
+.cash-origins-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 12px; border-bottom: 1px solid #eceae7; background: #faf9f7; }
+.cash-origins-head strong { color: #35363a; font-size: 12px; }
+.cash-origins-head span { color: #8a8b8f; font-size: 11px; }
+.cash-origins ul { margin: 0; padding: 4px 0; list-style: none; }
+.cash-origins li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 6px 12px; }
+.cash-origins li span { color: #63646a; font-size: 12px; }
+.cash-origins li b { color: #2f7a55; font-size: 12.5px; font-weight: 700; }
+.cash-origins li.saiu b { color: #9a5c5c; }
+.cash-origins-vazio { justify-content: flex-start !important; }
+.cash-origins-vazio span { color: #929296 !important; }
 .adjust-panel { padding-bottom: 0; }
 .adjust-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; padding: 0 15px 13px; }
 .adjust-form .field-full { grid-column: 1 / -1; }
