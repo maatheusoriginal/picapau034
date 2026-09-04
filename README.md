@@ -53,6 +53,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:pricing` | Confere as contas de preço e a criação rápida de categoria e marca |
 | `npm run check:help` | Confere a central de ajuda: assuntos completos e apontando para abas que existem |
 | `npm run check:nfe` | Confere a leitura da nota do fornecedor: fator de conversão, custo e casamento com o cadastro |
+| `npm run check:settings-map` | Confere o mapa das Configurações: seções descritas, busca pelas palavras da oficina, e nenhuma seção órfã |
 | `npm run check:barcode` | Confere o gerador de código de barras interno (EAN-13) |
 | `npm run check:motorcycle-catalog` | Confere o catálogo de marca, modelo e versão de moto |
 | `npm run check:plate` | Confere as regras de placa (padrão antigo, Mercosul e comparação) |
@@ -1203,6 +1204,36 @@ recarregamento no meio, que zerava o estado da tela em que o teste estava.
 O `npm run e2e:emulador` agora roda contra `npm run preview:emulador`, que serve
 o **build**. Sem HMR, e exercitando o artefato que vai para produção em vez do
 servidor de desenvolvimento.
+
+## As Configurações viraram um menu, não oito pílulas
+
+Eram **oito abas em pílulas** que quebravam a linha no topo. Para achar onde se
+muda a margem padrão era preciso abrir uma por uma — e quem não sabia o nome da
+aba não achava nunca, porque a margem mora em "Estoque e reposição", nome que
+ninguém adivinha.
+
+Agora é um **menu lateral fixo**, com três coisas que a lista de pílulas não
+dava:
+
+1. **O que cada seção resolve**, escrito embaixo do nome. "Pagamentos e taxas —
+   formas de pagamento, máquinas de cartão e a taxa de cada bandeira."
+2. **Quantos itens cada seção já tem.** Seção vazia é o que a oficina precisa
+   ver de longe: sem forma de pagamento cadastrada, o PDV não recebe.
+3. **Busca pelas palavras da oficina.** "margem" leva ao estoque, "maquininha"
+   aos pagamentos, "frota" às parceiras.
+
+A busca casa **palavra por palavra** e ignora as ligações: "taxa **do** cartão"
+acha, em vez de reprovar por causa do "do". E ignora acento, porque ninguém
+digita "combustível" com acento no meio do atendimento.
+
+Quando a busca deixa de mostrar a seção aberta, a tela abre a primeira que
+sobrou — senão o conteúdo à direita ficaria órfão, mostrando o que não está
+mais no menu.
+
+O mapa fica em `src/settings-map.ts`, e `npm run check:settings-map` confere as
+27 regras — incluindo uma que compara o mapa com as abas que a tela realmente
+tem: **seção no mapa que a tela não tem vira item de menu que não abre nada, e
+aba na tela que não está no mapa vira seção que a busca nunca acha**.
 
 ## O botão de ajuda que não ajudava
 

@@ -1742,65 +1742,44 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
    mostrando só o contador ("0"), sem nome nenhum. No computador elas agora
    quebram em duas linhas e aparecem inteiras; a rolagem fica só no celular,
    onde não cabem mesmo. */
-.settings-tabs-bar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 4px 2px 18px;
+/* As Configurações: menu lateral fixo com busca, no lugar de oito pílulas que
+   quebravam a linha. Achar onde se muda a margem padrão exigia abrir aba por
+   aba, e quem não sabia o nome da aba não achava nunca. */
+.settings-shell {
+  display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 16px; align-items: start;
+}
+.settings-nav {
+  position: sticky; top: 16px; display: grid; gap: 5px;
+  padding: 11px; border: 1px solid #e6e4e0; border-radius: 13px; background: #ffffff;
+}
+.settings-nav-search { width: 100%; margin-bottom: 5px; }
+.settings-nav-search input { font-size: 11px; }
+.settings-nav-item {
+  display: flex; align-items: flex-start; gap: 9px; width: 100%; text-align: left;
+  padding: 10px 11px; border: 1px solid transparent; border-radius: 9px;
+  background: transparent; color: inherit; cursor: pointer; transition: .15s ease;
+}
+.settings-nav-item:hover { background: #faf9f7; }
+.settings-nav-item > div { flex: 1; min-width: 0; }
+.settings-nav-item strong { display: block; color: #343538; font-size: 12px; font-weight: 750; }
+.settings-nav-item small { display: block; margin-top: 3px; color: #929296; font-size: 9.5px; line-height: 1.45; }
+.settings-nav-item > b {
+  flex: 0 0 auto; min-width: 20px; height: 20px; padding: 0 6px;
+  display: grid; place-items: center; border-radius: 6px;
+  background: #f0efed; color: #5f6064; font-size: 9px; font-weight: 800;
+}
+.settings-nav-item.active { border-color: #e1aaa6; background: linear-gradient(135deg, #fff6f5, #ffffff); }
+.settings-nav-item.active strong { color: var(--red); }
+.settings-nav-item.active > b { background: #f7dedc; color: var(--red); }
+.settings-nav-empty { padding: 12px 11px; color: #929296; font-size: 10px; line-height: 1.5; }
+.settings-content { min-width: 0; display: grid; gap: 14px; }
+
+@media (max-width: 1000px) {
+  .settings-shell { grid-template-columns: minmax(0, 1fr); }
+  .settings-nav { position: static; }
+  .settings-nav-item small { display: none; }
 }
 
-.settings-tab-button {
-  height: 42px;
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 0 18px;
-  border: 1px solid #deddda;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #55565a;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.16s ease;
-  white-space: nowrap;
-}
-
-.settings-tab-button:hover {
-  border-color: #c9c7c2;
-  color: #17181b;
-  background: #faf9f7;
-}
-
-.settings-tab-button.active {
-  border-color: var(--red);
-  background: linear-gradient(135deg, #fff6f5, #ffffff);
-  color: var(--red);
-  box-shadow: 0 2px 8px rgba(214, 40, 40, 0.08);
-}
-
-.settings-tab-button b {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: #f0efed;
-  color: #68696d;
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.settings-tab-button.active b {
-  background: #ffe5e3;
-  color: var(--red);
-}
-
-/* Settings Panels & Cards */
 .settings-card {
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -2192,7 +2171,6 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
   .settings-grid-4, .settings-grid-3, .settings-grid-2 { grid-template-columns: 1fr; }
   /* No celular a quebra em duas linhas viraria uma parede de botões: volta a
      rolar na horizontal, mas agora com o rótulo inteiro visível. */
-  .settings-tabs-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
   .settings-card-header { flex-direction: column; align-items: flex-start; gap: 12px; }
   .settings-card-header .primary-button { width: 100%; }
 }

@@ -12,6 +12,7 @@ import type {
 import { categoryGroups, defaultPaymentMethods, defaultProductCategories, defaultSystemLists, orDefault, systemList, systemListLabels } from "../types";
 import { saveFirestoreDoc, deleteFirestoreDoc, observeFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
+import { searchSettings, settingsSections, type SettingsSectionId } from "../settings-map";
 
 interface SettingsWorkspaceProps {
   quickServices: QuickServiceConfig[];
@@ -46,6 +47,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
   initialTab = "general",
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const [buscaDeSecao, setBuscaDeSecao] = useState("");
   const [isSavingGeneral, setIsSavingGeneral] = useState(false);
 
   // O que falta preencher, dito em português e dentro do próprio formulário.
@@ -545,6 +547,24 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
     }
   };
 
+  // Quantos itens cada seção já tem. Uma seção vazia é o que a oficina precisa
+  // ver de longe: sem forma de pagamento cadastrada, o PDV não recebe.
+  const contagemDaSecao: Partial<Record<SettingsSectionId, number>> = {
+    services: quickServices.length,
+    categories: categories.length,
+    payments: formasDePagamento.length,
+    partners: partners.length,
+  };
+  const secoesAchadas = searchSettings(buscaDeSecao);
+  // A seção aberta some da busca? O conteúdo à direita ficaria órfão. Abre a
+  // primeira que sobrou, para a tela nunca ficar mostrando o que não está
+  // mais no menu.
+  useEffect(() => {
+    if (!secoesAchadas.length) return;
+    if (secoesAchadas.some((secao) => secao.id === activeTab)) return;
+    setActiveTab(secoesAchadas[0].id);
+  }, [secoesAchadas, activeTab]);
+
   return (
     <div className="settings-workspace-container">
       {/* Page Header */}
@@ -556,66 +576,45 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
         </div>
       </div>
 
-      {/* Main Settings Tab Bar */}
-      <div className="settings-tabs-bar">
-        <button
-          type="button"
-          className={`settings-tab-button ${activeTab === "general" ? "active" : ""}`}
-          onClick={() => setActiveTab("general")}
-        >
-          Oficina & OS
-        </button>
-        <button
-          type="button"
-          className={`settings-tab-button ${activeTab === "services" ? "active" : ""}`}
-          onClick={() => setActiveTab("services")}
-        >
-          Serviços Rápidos <b>{quickServices.length}</b>
-        </button>
-        <button
-          type="button"
-          className={`settings-tab-button ${activeTab === "categories" ? "active" : ""}`}
-          onClick={() => setActiveTab("categories")}
-        >
-          Categorias <b>{categories.length}</b>
-        </button>
-        <button
-          type="button"
-          className={`settings-tab-button ${activeTab === "payments" ? "active" : ""}`}
-          onClick={() => setActiveTab("payments")}
-        >
-          Pagamentos & Taxas <b>{formasDePagamento.length}</b>
-        </button>
-        <button
-          type="button"
-          className={`settings-tab-button ${activeTab === "partners" ? "active" : ""}`}
-          onClick={() => setActiveTab("partners")}
-        >
-          Parceiros & Frotas <b>{partners.length}</b>
-        </button>
-        <button
-          type="button"
-          className={`settings-tab-button ${activeTab === "stock" ? "active" : ""}`}
-          onClick={() => setActiveTab("stock")}
-        >
-          Estoque & Reposição
-        </button>
-        <button
-          type="button"
-          className={`settings-tab-button ${activeTab === "print" ? "active" : ""}`}
-          onClick={() => setActiveTab("print")}
-        >
-          Impressão & WhatsApp
-        </button>
-        <button
-          type="button"
-          className={`settings-tab-button ${activeTab === "lists" ? "active" : ""}`}
-          onClick={() => setActiveTab("lists")}
-        >
-          Listas do sistema
-        </button>
-      </div>
+      {/*
+        Oito abas em pílulas que quebravam a linha: para achar onde se muda a
+        margem padrão era preciso abrir uma por uma, e quem não sabia o nome da
+        aba não achava nunca. Virou um menu lateral fixo, com o que cada seção
+        resolve escrito embaixo do nome, e uma busca pelas palavras da oficina
+        — "margem" leva a "Estoque e reposição", que é o nome que ninguém
+        adivinharia.
+      */}
+      <div className="settings-shell">
+        <nav className="settings-nav" aria-label="Seções das configurações">
+          <label className="mini-search settings-nav-search">
+            <input
+              value={buscaDeSecao}
+              onChange={(evento) => setBuscaDeSecao(evento.target.value)}
+              placeholder="Buscar: margem, taxa, impressora..."
+              aria-label="Buscar nas configurações"
+            />
+          </label>
+          {secoesAchadas.length ? secoesAchadas.map((secao) => (
+            <button
+              type="button"
+              key={secao.id}
+              className={`settings-nav-item ${activeTab === secao.id ? "active" : ""}`}
+              onClick={() => setActiveTab(secao.id)}
+            >
+              <div>
+                <strong>{secao.title}</strong>
+                <small>{secao.summary}</small>
+              </div>
+              {contagemDaSecao[secao.id] !== undefined ? <b>{contagemDaSecao[secao.id]}</b> : null}
+            </button>
+          )) : (
+            <div className="settings-nav-empty">
+              Nada encontrado com "{buscaDeSecao.trim()}". Tente por outra palavra — margem, taxa, impressora, frota, categoria.
+            </div>
+          )}
+        </nav>
 
+        <div className="settings-content">
       {/* TAB 1: GERAL & OS */}
       {activeTab === "general" && (
         <form noValidate onSubmit={handleSaveGeneral} className="settings-card">
@@ -1815,6 +1814,8 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
           </div>
         </form>
       )}
+        </div>
+      </div>
     </div>
   );
 };
