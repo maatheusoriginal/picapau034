@@ -1244,6 +1244,65 @@ que já existe é selecionado. Sem isso a lista encheria de "MOTUL", "Motul" e
 **não envia o formulário**: sem esse cuidado, apertar Enter aqui gravava o
 produto pela metade.
 
+## O cadastro de peça no formato do balcão
+
+A referência é o cadastro de produto do **White PDV**, o sistema que a oficina
+usa todo dia. Duas coisas o definem, e as duas eram o oposto do que estava aqui.
+
+**Cinco etapas viraram uma tela.** O cadastro pedia "Próxima etapa" quatro vezes
+— identificação, preços, estoque, compatibilidade, fornecedor — para uma peça
+que se cadastra em vinte segundos, e três dos quatro cliques só serviam para
+chegar no campo seguinte. Agora é uma aba só. A movimentação continua em aba
+própria: é leitura, não etapa do cadastro.
+
+**O rótulo foi para a esquerda do campo.** Empilhado em cima, cada campo gastava
+duas linhas; ao lado, a coluna de rótulos vira uma régua que o olho desce sem
+reler. É o que permite o cadastro inteiro caber numa tela de 1360×950 sem rolar.
+
+| Antes | Agora |
+| --- | --- |
+| 6 abas, 4 cliques de "Próxima etapa" | 2 abas, nenhum clique de etapa |
+| Rótulo empilhado sobre o campo | Rótulo à esquerda, alinhado à direita |
+| Campo de 40px | 28px no computador, 40px no celular |
+| Números misturados com o resto | Três colunas: **Preço**, **Estoque**, **Resultado** |
+| Marcações espalhadas pelas etapas | Painel **Parâmetros** à direita |
+| "Cancelar" e "Cadastrar Produto" | `Esc` Cancelar · `F5` Salvar, com o atalho ligado |
+
+A coluna **Resultado** é leitura, não campo — margem sobre a venda, lucro por
+unidade, desconto máximo e piso sem prejuízo. Ela não parece digitável de
+propósito: é o que sai da conta, não o que se informa.
+
+O que a referência não tem e o sistema manteve: o histórico de movimentação da
+peça, o botão de gerar código de barras interno, criar categoria e marca sem
+sair do cadastro, e o aviso de preço abaixo do custo.
+
+### Os atalhos são de verdade
+
+`F5` grava e `Esc` fecha, como no sistema de origem. O atalho está escrito no
+botão, então precisa funcionar — um rótulo "F5" que não faz nada é pior que não
+ter rótulo. F5 é o refresh do navegador, e por isso o atalho é ligado **só
+enquanto o cadastro está aberto**: fechou, F5 volta a recarregar a página (e
+Ctrl+R continua funcionando mesmo com o cadastro aberto). F5 dispara o mesmo
+submit do botão, para passar pela conferência dos campos obrigatórios em vez de
+gravar por fora dela.
+
+### O defeito do clique duplo deixou de existir
+
+O assistente trazia junto o defeito que ele mesmo criava: o mesmo canto da tela
+trocava de botão entre "Próxima etapa" e "Cadastrar Produto", então um clique
+duplo — que é o que se faz num botão que parece não ter respondido — avançava e
+gravava a peça pela metade. Sem etapas, o problema some pela estrutura.
+
+O gesto continua existindo, então o roteiro passou a cobrar o que importa agora:
+**clique duplo no botão de gravar não pode cadastrar a mesma peça duas vezes**.
+O passo 18 também confere que não voltaram "Anterior" e "Próxima etapa", que o
+rótulo está ao lado do campo e alinhado à direita, que os números estão em três
+colunas, que o painel de parâmetros existe e que o formulário inteiro cabe sem
+rolar.
+
+No celular a régua não cabe: abaixo de 720px o rótulo volta para cima do campo e
+o campo volta a 40px — 28px é medida de mouse.
+
 ## O preço mostra a conta que decide a venda
 
 A tela mostrava custo, margem e preço. Faltava o que decide se a venda vale a
@@ -1251,7 +1310,7 @@ pena:
 
 | O que entrou | Por quê |
 | --- | --- |
-| **Margem sobre a venda** | O campo "+60%" é margem sobre o **custo**: custo 25 vira preço 40. Sobre a venda isso é **37,5%** — e é essa a porcentagem que se compara com a do cartão e a do concorrente. Ver só o número maior faz a oficina achar que ganha mais do que ganha |
+| **Margem sobre a venda** | O campo "Margem s/ custo (%)" é margem sobre o **custo**: custo 25 vira preço 40. Sobre a venda isso é **37,5%** — e é essa a porcentagem que se compara com a do cartão e a do concorrente. Ver só o número maior faz a oficina achar que ganha mais do que ganha. Por isso os dois rótulos dizem sobre o quê a margem é |
 | **Desconto máximo sem prejuízo** | O PDV deixa descontar. Sem saber o piso, o desconto "de bom moço" vende abaixo do que se pagou ao fornecedor |
 | **Aviso de preço** | Abaixo do custo, igual ao custo, ou margem abaixo de 10% sobre a venda |
 
