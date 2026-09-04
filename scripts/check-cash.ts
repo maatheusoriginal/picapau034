@@ -9,7 +9,7 @@
  *
  * Rode com: npm run check:cash
  */
-import { buildMovement, canOpenSession, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, isDrawerPayment, movementProblem, nonDrawerTotal, openSession, sessionIsStale, withdrawnTotal } from "../src/cash";
+import { buildMovement, canOpenSession, cashHistorySummary, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, drawerOrigins, sessionsInPeriod, isDrawerPayment, movementProblem, nonDrawerTotal, openSession, sessionIsStale, withdrawnTotal } from "../src/cash";
 import type { AccountRecord, CashSession, ExpenseRecord, MovementRecord, OrderRecord, SaleRecord } from "../src/types";
 
 const json = (value: unknown) => JSON.stringify(value);
@@ -96,6 +96,48 @@ const sessaoVazia: CashSession = { id: "CX-0002", openedAt: "2026-03-11T11:00:00
 const historico = [sessao, { ...sessao, id: "CX-0000", status: "fechado", closedAt: "2026-03-09T21:00:00.000Z" },
                    { ...sessao, id: "CX-0009", status: "fechado", closedAt: "2026-03-08T21:00:00.000Z" }] as CashSession[];
 
+// Um dia curto, só para conferir que cada origem cai na sua linha. Fica
+// separado do dia cheio de propósito: mexer no cenário grande para provar a
+// separação mudaria uma dúzia de outros números sem necessidade.
+const sessaoOrigens: CashSession = {
+  id: "CX-0003", openedAt: "2026-03-12T11:00:00.000Z", openedDate: "12/03/2026", openingAmount: 100, status: "aberto",
+};
+const vendasDeOrigem = [
+  { id: "VEN-1001", origin: "PDV", customer: "Balcão", items: [], total: 60, paymentMethod: "Dinheiro", date: "12/03/2026", soldAt: "2026-03-12T12:00:00.000Z" },
+  { id: "VEN-1002", origin: "Serviço rápido", customer: "Troca de óleo", items: [], total: 80, paymentMethod: "Dinheiro", date: "12/03/2026", soldAt: "2026-03-12T13:00:00.000Z" },
+  // Venda antiga, gravada antes de a origem existir: não pode sumir do esperado.
+  { id: "VEN-1003", customer: "Sem origem", items: [], total: 10, paymentMethod: "Dinheiro", date: "12/03/2026", soldAt: "2026-03-12T13:30:00.000Z" },
+] as unknown as SaleRecord[];
+const ordensDeOrigem = [
+  { id: "OS-1001", customer: "Bancada", total: 200, closed: true, paymentMethod: "Dinheiro", closedAt: "12/03/2026", closedAtISO: "2026-03-12T14:00:00.000Z" },
+] as unknown as OrderRecord[];
+const contasDeOrigem = [
+  { id: "CT-1001", kind: "receber", person: "Fiado", description: "Nota", amount: 50, installment: 1, installments: 1, dueDate: "12/03/2026",
+    settlements: [{ date: "12/03/2026", settledAt: "2026-03-12T15:00:00.000Z", amount: 50, method: "Dinheiro" }] },
+] as unknown as AccountRecord[];
+const porOrigem = cashSummary(sessaoOrigens, { sales: vendasDeOrigem, orders: ordensDeOrigem, accounts: contasDeOrigem });
+
+// Um mês de caixas fechados, para o histórico. Duas faltas, uma sobra e dois
+// que conferem — e uma falta e uma sobra do mesmo tamanho, de propósito.
+const fechado = (id: string, data: string, esperado: number, contado: number): CashSession => ({
+  id, openedAt: "", openedDate: data, openingAmount: 200, status: "fechado",
+  closedAt: `${data.split("/").reverse().join("-")}T21:00:00.000Z`, closedDate: data,
+  openedByName: "Matheus", closedByName: "Matheus",
+  expectedAmount: esperado, countedAmount: contado, difference: Number((contado - esperado).toFixed(2)),
+});
+const mes = [
+  fechado("CX-0101", "02/03/2026", 500, 500),
+  fechado("CX-0102", "03/03/2026", 640, 590),   // falta de 50
+  fechado("CX-0103", "05/03/2026", 700, 700),
+  fechado("CX-0104", "09/03/2026", 480, 530),   // sobra de 50
+  fechado("CX-0105", "12/03/2026", 900, 780),   // falta de 120
+  fechado("CX-0106", "02/04/2026", 300, 300),   // fora do mês
+  { ...fechado("CX-0107", "10/03/2026", 100, 100), status: "aberto" } as CashSession, // ainda aberto
+];
+const marco = { de: "2026-03-01", ate: "2026-03-31" };
+const noMes = sessionsInPeriod(mes, marco);
+const resumoDoMes = cashHistorySummary(noMes);
+
 const casos: Array<[string, unknown, unknown]> = [
   // --- O que é dinheiro de gaveta ---
   ["dinheiro é gaveta", isDrawerPayment("Dinheiro"), true],
@@ -130,7 +172,9 @@ const casos: Array<[string, unknown, unknown]> = [
 
   // --- Resumo do caixa ---
   ["o fundo de troco entra no esperado", resumo.opening, 200],
-  ["vendas e OS em dinheiro somam", resumo.sales, 580],
+  ["vendas do balcão em dinheiro somam", resumo.counter, 260],
+  ["OS em dinheiro somam à parte", resumo.orders, 320],
+  ["e as duas juntas dão o que entrou de venda", resumo.counter + resumo.quick + resumo.orders, 580],
   ["recebimento de fiado em dinheiro soma", resumo.received, 90],
   ["suprimentos somam", resumo.supplies, 100],
   ["sangrias são contadas à parte", resumo.withdrawals, 300],
@@ -138,7 +182,51 @@ const casos: Array<[string, unknown, unknown]> = [
   ["o esperado na gaveta fecha", resumo.expected, esperado],
   ["a abertura não conta como movimentação", resumo.count, 9],
   ["caixa recém-aberto espera só o fundo de troco", cashSummary(sessaoVazia, fontes).expected, 150],
+
+  // --- Cada origem na sua linha ---
+  // Antes o fechamento dizia só "entrou tanto em vendas e OS": uma diferença
+  // no balcão aparecia como diferença do caixa inteiro, sem onde procurar.
+  ["o balcão fica na linha do balcão", porOrigem.counter, 70],
+  ["o serviço rápido não é confundido com balcão", porOrigem.quick, 80],
+  ["a OS fica na linha dela", porOrigem.orders, 200],
+  ["a conta quitada fica na linha dela", porOrigem.received, 50],
+  ["a venda antiga sem origem não some do esperado", porOrigem.expected, 500],
+  ["o que entrou é a soma das origens", porOrigem.incoming, 400],
+  ["nada saiu neste dia", porOrigem.outgoing, 0],
+  ["as linhas saem na ordem em que se confere",
+    json(drawerOrigins(porOrigem).map((linha) => linha.origem)),
+    json(["Venda no balcão", "Serviço rápido", "Ordem de serviço", "Conta a receber quitada"])],
+  ["linha zerada não aparece no fechamento",
+    drawerOrigins(porOrigem).some((linha) => linha.origem === "Suprimento"), false],
+  ["a movimentação avulsa não vira recebimento de cliente", resumoComMov.received, 90],
+  ["ela fica na própria linha", resumoComMov.manualIn, 40],
+  ["e a saída avulsa não vira gasto", resumoComMov.manualOut, 25],
   ["e sem movimentação nenhuma", cashSummary(sessaoVazia, fontes).count, 0],
+
+  // --- Histórico de caixas fechados ---
+  // O histórico só existia dentro do diálogo, cortado nos cinco últimos: achar
+  // o fechamento de terça passada era impossível.
+  ["o período traz só os caixas fechados dentro dele", noMes.length, 5],
+  ["caixa de outro mês fica de fora", noMes.some((c) => c.id === "CX-0106"), false],
+  ["caixa ainda aberto não entra no histórico", noMes.some((c) => c.id === "CX-0107"), false],
+  ["o mais recente vem primeiro", noMes[0]!.id, "CX-0105"],
+  ["o esperado do mês soma", resumoDoMes.esperado, 3220],
+  ["o contado do mês soma", resumoDoMes.contado, 3100],
+  ["a diferença do mês é a soma das diferenças", resumoDoMes.diferenca, -120],
+  ["conta quantos conferiram", resumoDoMes.conferem, 2],
+  ["conta as faltas", resumoDoMes.faltas, 2],
+  ["conta as sobras", resumoDoMes.sobras, 1],
+  // Uma falta de 50 e uma sobra de 50 se anulam no total: olhar só a soma diria
+  // que o mês fechou certo, quando na verdade foram dois erros.
+  ["a maior falta do mês aparece sozinha", resumoDoMes.maiorFalta, 120],
+  ["e diz em qual caixa foi", resumoDoMes.maiorFaltaEm, "CX-0105"],
+  ["mês sem caixa fechado dá resumo zerado",
+    json(cashHistorySummary(sessionsInPeriod(mes, { de: "2026-01-01", ate: "2026-01-31" }))),
+    json({ caixas: 0, esperado: 0, contado: 0, diferenca: 0, conferem: 0, faltas: 0, sobras: 0, maiorFalta: 0, maiorFaltaEm: "" })],
+  // Caixa antigo, fechado antes de o sistema gravar a diferença: a conta é
+  // refeita do contado menos o esperado, em vez de sumir do resumo.
+  ["caixa sem diferença gravada ainda é contado",
+    cashHistorySummary([{ ...fechado("CX-0108", "04/03/2026", 400, 350), difference: undefined }]).faltas, 1],
 
   // --- Fechamento ---
   ["contando o esperado, o caixa confere", cashDifference(esperado, esperado), 0],
@@ -179,7 +267,7 @@ const casos: Array<[string, unknown, unknown]> = [
   ["dividida com fiado entra só o dinheiro", extrato.find((e) => e.id === "VEN-0006")!.amount, 80],
   ["o PIX e o fiado não passam pela gaveta", extrato.filter((e) => e.id === "VEN-0005").length, 1],
   // 470 do cenário base + 30 + 80 das duas divididas.
-  ["as partes em dinheiro somam nas vendas", resumo.sales, 580],
+  ["as partes em dinheiro somam nas vendas", resumo.counter + resumo.quick + resumo.orders, 580],
   // 850 do base + 70 do PIX da venda dividida. O fiado não entra: não virou dinheiro.
   ["o que entrou fora da gaveta soma só PIX e cartão", nonDrawerTotal(sessao, sales, orders), 920],
 
@@ -187,8 +275,8 @@ const casos: Array<[string, unknown, unknown]> = [
   ["entrada manual em dinheiro entra na gaveta", drawerEntries(sessao, comMovimentacoes).some((e) => e.id === "MOV-0001" && e.amount === 40), true],
   ["saída manual em dinheiro sai da gaveta", drawerEntries(sessao, comMovimentacoes).some((e) => e.id === "MOV-0002" && e.amount === -25), true],
   ["entrada manual por PIX não passa pela gaveta", drawerEntries(sessao, comMovimentacoes).some((e) => e.id === "MOV-0003"), false],
-  ["a entrada manual soma no que entrou", resumoComMov.received, 130],
-  ["a saída manual soma no que saiu", resumoComMov.expenses, 235],
+  ["a entrada manual soma no que entrou", resumoComMov.incoming - resumo.incoming, 40],
+  ["a saída manual soma no que saiu", resumoComMov.outgoing - resumo.outgoing, 25],
   // 460 do cenário base + 40 de entrada − 25 de saída.
   ["o esperado na gaveta considera as duas", resumoComMov.expected, 475],
   ["sem movimentação manual, o esperado não muda", cashSummary(sessao, fontes).expected, esperado],

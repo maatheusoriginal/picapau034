@@ -24,12 +24,13 @@ try { ({ chromium } = await import("playwright-core")); }
 catch { console.error("Falta o navegador do teste. Rode antes:\n\n  npm i --no-save playwright-core\n"); process.exit(1); }
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const OUT = process.argv[2] ?? AQUI;
 const GRUPO = { "Ordens de serviço":"Oficina","Orçamentos":"Oficina","PDV Balcão":"Balcão","Serviço rápido":"Balcão",
-  "Vendas do balcão":"Balcão","Produtos e estoque":"Estoque","Compras e entradas":"Estoque","Fornecedores":"Estoque",
+  "Vendas do balcão":"Balcão","Produtos e estoque":"Estoque","Compras e entradas":"Estoque","Ajuste de estoque":"Estoque","Fornecedores":"Estoque",
   "Clientes":"Cadastros","Motocicletas":"Cadastros","Funcionários":"Cadastros","Financeiro":"Gestão",
-  "Contas a receber":"Gestão","Contas a pagar":"Gestão","Relatórios":"Gestão" };
+  "Contas a receber":"Gestão","Contas a pagar":"Gestão","Histórico de caixas":"Gestão","Relatórios":"Gestão" };
 
 // Banco limpo a cada execução: teste que depende do estado anterior não vale nada.
 await fetch("http://127.0.0.1:8080/emulator/v1/projects/picapau-teste/databases/(default)/documents", { method: "DELETE" });
@@ -2069,6 +2070,396 @@ await passo("excluir cadastro: some quem nunca foi usado, e desativa quem tem hi
   await p.locator(".dialog-footer .ghost-button", { hasText: /Cancelar/ }).first().click().catch(() => {});
   await p.waitForTimeout(1200);
   if (problemas.length) throw new Error("exclusão de cadastro:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("relatório do período: os números saem do banco, e a planilha desce de verdade", async () => {
+  // Relatórios era uma casca: lista vazia e um aviso de "exportado em PDF" que
+  // não baixava nada. Aqui a tela é conferida contra o banco e contra ela
+  // mesma — o DRE e a tabela de formas de pagamento são calculados por funções
+  // diferentes, então bater uma na outra pega conta furada nas duas.
+  const problemas = [];
+  await ir("Relatórios");
+  await p.waitForTimeout(2200);
+
+  const dinheiro = (texto) => Number(String(texto).replace(/[^\d,-]/g, "").replace(/\./g, "").replace(",", ".")) || 0;
+  const linhaDre = async (rotulo) => {
+    const linha = p.locator(".dre-linha").filter({ hasText: rotulo }).first();
+    if (!(await linha.count())) { problemas.push(`o DRE não tem a linha "${rotulo}"`); return 0; }
+    return dinheiro(await linha.locator("strong").innerText());
+  };
+  const cartao = async (rotulo) => {
+    const art = p.locator(".report-mini article").filter({ hasText: rotulo }).first();
+    if (!(await art.count())) { problemas.push(`os cartões do período não mostram "${rotulo}"`); return 0; }
+    return dinheiro(await art.locator("strong").innerText());
+  };
+
+  const faturamento = await linhaDre("Faturamento");
+  // A venda de R$ 35 do passo 3 e a OS de R$ 150 do passo 7 foram recebidas em
+  // dinheiro nesta mesma execução: têm de estar dentro do faturamento de hoje.
+  if (faturamento < 185) problemas.push(`o faturamento de hoje é R$ ${faturamento}, mas só a venda do PDV e a OS em dinheiro já somam R$ 185`);
+
+  // A tela não pode faturar mais do que existe gravado.
+  const vendas = await banco("sales");
+  const ordens = await banco("serviceOrders");
+  const tetoDoBanco = vendas.reduce((soma, v) => soma + Number(v.total || 0), 0)
+    + ordens.filter((o) => o.closed).reduce((soma, o) => soma + Number(o.total || 0), 0);
+  if (faturamento > tetoDoBanco + 0.05) problemas.push(`a tela fatura R$ ${faturamento}, mais do que as vendas e OS encerradas do banco somam (R$ ${tetoDoBanco})`);
+
+  // O DRE contra a tabela de formas de pagamento: contas independentes.
+  const formas = await p.locator(".panel", { hasText: "Como entrou o dinheiro" }).locator("tbody tr").all();
+  let somaFormas = 0, somaAtend = 0;
+  for (const f of formas) {
+    const colunas = await f.locator("td").allInnerTexts();
+    if (colunas.length < 5) continue;
+    somaAtend += Number(colunas[1].trim()) || 0;
+    somaFormas += dinheiro(colunas[2]);
+  }
+  if (!formas.length || !somaFormas) problemas.push("a tabela de formas de pagamento veio vazia num período com faturamento");
+  if (Math.abs(somaFormas - faturamento) > 0.05) problemas.push(`as formas de pagamento somam R$ ${somaFormas}, mas o DRE fatura R$ ${faturamento}`);
+
+  const atendimentos = await cartao("Atendimentos");
+  if (atendimentos !== somaAtend) problemas.push(`o cartão diz ${atendimentos} atendimento(s) e as formas de pagamento somam ${somaAtend}`);
+  if (atendimentos > vendas.length + ordens.filter((o) => o.closed).length) problemas.push(`${atendimentos} atendimentos para ${vendas.length} venda(s) e ${ordens.filter((o) => o.closed).length} OS encerrada(s)`);
+
+  // O lucro é a conta inteira: sem o custo das peças o número seria fantasia.
+  const custo = await linhaDre("Custo das peças");
+  const lucro = await linhaDre("Lucro");
+  if (custo <= 0) problemas.push("o período vendeu peças, mas o custo delas saiu zerado");
+  if (lucro >= faturamento) problemas.push(`o lucro (R$ ${lucro}) não pode alcançar o faturamento (R$ ${faturamento}) com peças custando R$ ${custo}`);
+  if ((await cartao("Ticket médio")) <= 0) problemas.push("o ticket médio saiu zerado num período com atendimento");
+
+  if (!(await p.locator(".panel", { hasText: "Peças que mais saíram" }).locator("tbody tr").count())) {
+    problemas.push("nenhuma peça na lista das que mais saíram, mesmo com peça vendida no roteiro");
+  }
+
+  // Trocar o período tem de mudar o resultado — antes não havia período nenhum.
+  const antesTexto = await p.locator(".report-period-label").innerText();
+  await p.locator(".report-period .filter-pills button", { hasText: /Mês passado/ }).first().click();
+  await p.waitForTimeout(1400);
+  if ((await p.locator(".report-period-label").innerText()) === antesTexto) problemas.push(`trocar para "Mês passado" não mudou o período: continua ${JSON.stringify(antesTexto)}`);
+  const noPassado = await linhaDre("Faturamento");
+  if (noPassado !== 0) problemas.push(`o mês passado não teve movimento, mas a tela mostra R$ ${noPassado}`);
+
+  await p.locator(".report-period .filter-pills button", { hasText: /Hoje/ }).first().click();
+  await p.waitForTimeout(1400);
+  if ((await linhaDre("Faturamento")) !== faturamento) problemas.push("voltar para Hoje não trouxe o faturamento de volta");
+
+  // A comparação com o período anterior: ver "este mês" é bom, ver contra o
+  // mês passado é o que faz decidir preço.
+  const cabecalho = await p.locator(".report-dre .panel-header p").innerText();
+  if (!/Comparado com/.test(cabecalho)) problemas.push(`o resultado não diz com o que está comparando: ${JSON.stringify(cabecalho)}`);
+  if (!(await p.locator(".dre-delta").count())) problemas.push("nenhuma linha do DRE mostra a variação contra o período anterior");
+  await p.locator(".report-dre .panel-header button").click();
+  await p.waitForTimeout(900);
+  if (await p.locator(".dre-delta").count()) problemas.push("esconder a comparação não escondeu as variações");
+  await p.locator(".report-dre .panel-header button").click();
+  await p.waitForTimeout(900);
+
+  // Peça e mão de obra são dois negócios: somados, não dá para saber qual
+  // sustenta o mês.
+  const painelTipos = await p.locator(".report-tipos").innerText().catch(() => "");
+  // Sem o "i": o CSS põe os rótulos em maiúsculo e o innerText devolve o texto
+  // como ele aparece na tela, não como está no JSX.
+  if (!/Revenda de peça/i.test(painelTipos) || !/Mão de obra/i.test(painelTipos)) {
+    problemas.push("o relatório não separa revenda de peça de mão de obra");
+  }
+  const colunas = await p.locator(".tipo-grid article > strong").allInnerTexts();
+  const somaTipos = colunas.reduce((soma, texto) => soma + dinheiro(texto), 0);
+  const naoClassificado = (await p.locator(".report-tipos .info-strip").count())
+    ? dinheiro((await p.locator(".report-tipos .info-strip").innerText()).match(/R\$\s*[\d.,]+/)?.[0] ?? "0")
+    : 0;
+  // As duas partes mais o que não deu para separar têm de fechar o faturamento.
+  if (Math.abs(somaTipos + naoClassificado - faturamento) > 0.05) {
+    problemas.push(`peça (${somaTipos}) + não classificado (${naoClassificado}) não fecham o faturamento de ${faturamento}`);
+  }
+  // O custo da hora do mecânico não é cadastrado: margem no serviço seria
+  // mentira confortável. Lendo a coluna direto, e não cortando o texto do
+  // painel: "mão de obra" também aparece no título, antes das duas colunas.
+  const colunaServico = p.locator(".tipo-grid article").nth(1);
+  if (!/mão de obra/i.test(await colunaServico.innerText())) {
+    problemas.push(`a segunda coluna não é a da mão de obra: ${JSON.stringify((await colunaServico.innerText()).slice(0, 60))}`);
+  }
+  // Pelos RÓTULOS das linhas, e não pelo texto da coluna: a própria nota que
+  // explica a ausência contém a palavra "margem".
+  const rotulos = async (coluna) => (await coluna.locator(".tipo-linha:not(.nota) span").allInnerTexts()).map((t) => t.trim());
+  if ((await rotulos(colunaServico)).some((r) => /^Margem$/i.test(r))) {
+    problemas.push("a mão de obra está mostrando margem, e o sistema não sabe o custo da hora");
+  }
+  if (!/custo da hora/i.test(await colunaServico.innerText())) problemas.push("a coluna do serviço não explica por que não tem margem");
+  // E a coluna da peça precisa ter margem: é ela que decide o preço de venda.
+  const colunaPeca = p.locator(".tipo-grid article").nth(0);
+  if (!(await rotulos(colunaPeca)).some((r) => /^Margem$/i.test(r))) problemas.push("a revenda de peça saiu sem margem");
+
+  // "Baixar planilha" precisa baixar um arquivo, não só avisar que baixou.
+  const baixando = p.waitForEvent("download", { timeout: 12000 }).catch(() => null);
+  await p.locator("button", { hasText: /Baixar planilha/ }).first().click();
+  const arquivo = await baixando;
+  if (!arquivo) problemas.push("clicar em Baixar planilha não baixou arquivo nenhum");
+  else {
+    if (!/^relatorio-.*\.csv$/.test(arquivo.suggestedFilename())) problemas.push(`o arquivo saiu com o nome ${arquivo.suggestedFilename()}`);
+    const caminho = `${OUT}/relatorio.csv`;
+    await arquivo.saveAs(caminho);
+    const conteudo = readFileSync(caminho, "utf8");
+    if (!conteudo.startsWith("﻿")) problemas.push("o CSV saiu sem BOM: o Excel brasileiro abre com acento quebrado");
+    if (!conteudo.includes(";")) problemas.push("o CSV não usa ponto e vírgula: o Excel brasileiro joga tudo numa coluna só");
+    if (!/Faturamento/i.test(conteudo)) problemas.push("o CSV baixou sem as linhas do resultado");
+    if (!/Anterior/i.test(conteudo)) problemas.push("o CSV saiu sem a coluna do período anterior");
+    if (!/Revenda de peça/i.test(conteudo)) problemas.push("o CSV saiu sem a separação entre peça e mão de obra");
+    // Porcentagem com ponto numa planilha brasileira faz o contador refazer o arquivo.
+    if (/\d+\.\d+%/.test(conteudo)) problemas.push("o CSV traz porcentagem com ponto em vez de vírgula");
+  }
+  await foto("relatorio");
+  if (problemas.length) throw new Error("relatório do período:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("ajuste de estoque: corrige o saldo contado sem inventar compra nem mexer no custo", async () => {
+  // Sem essa tela, quem precisava corrigir uma contagem lançava uma compra que
+  // nunca existiu — e aí o custo médio da peça mudava sozinho.
+  const problemas = [];
+  const texto = (valor) => ({ stringValue: valor });
+  const FS = "http://127.0.0.1:8080/v1/projects/picapau-teste/databases/(default)/documents";
+  await fetch(`${FS}/products/PRD-800`, {
+    method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" },
+    body: JSON.stringify({ fields: {
+      code: texto("PRD-800"), name: texto("PASTILHA DE FREIO PARA CONTAR"), category: texto("Freios"),
+      cost: texto("R$ 30,00"), price: texto("R$ 60,00"), status: texto("Em estoque"),
+      stock: { integerValue: "42" }, minimum: { integerValue: "5" }, active: { booleanValue: true },
+    } }),
+  });
+  await p.reload();
+  await p.waitForTimeout(4000);
+  await ir("Ajuste de estoque");
+  await p.waitForTimeout(1500);
+  if (!(await p.locator(".adjust-form").count())) throw new Error("a tela de ajuste não abriu: o menu leva a um espaço vazio");
+
+  await p.locator(".adjust-form input").first().fill("PASTILHA DE FREIO PARA CONTAR");
+  await p.waitForTimeout(1200);
+  if (!(await p.locator(".adjust-results button").count())) throw new Error("a busca não achou a peça que acabou de ser cadastrada");
+  await p.locator(".adjust-results button").first().click();
+  await p.waitForTimeout(900);
+
+  // Contou 38 numa peça que o sistema achava que tinha 42: faltam 4.
+  await p.locator(".adjust-input").first().fill("38");
+  await p.locator(".adjust-form input").first().click();
+  await p.waitForTimeout(800);
+
+  // O resumo não pode esperar o motivo: quem conta a prateleira precisa ver o
+  // impacto na hora, senão parece que a contagem não entrou.
+  const resumo = (await p.locator(".adjust-resumo").innerText()).replace(/\n/g, " ");
+  if (!/Saindo\s*−?-?4/.test(resumo)) problemas.push(`o resumo não mostrou as 4 unidades saindo: ${JSON.stringify(resumo)}`);
+  if (!/120,00/.test(resumo)) problemas.push(`o impacto de 4 × R$ 30 não apareceu no resumo: ${JSON.stringify(resumo)}`);
+
+  // Sem motivo não grava: ajuste anônimo é indistinguível de erro de digitação.
+  await p.locator("button", { hasText: /Confirmar ajuste/ }).first().click();
+  await p.waitForTimeout(1500);
+  const aviso = await p.locator(".dialog-error-strip").innerText().catch(() => "");
+  if (!/motivo/i.test(aviso)) problemas.push(`gravar sem motivo não foi barrado: ${JSON.stringify(aviso)}`);
+  if ((await banco("stockAdjustments")).length) problemas.push("o ajuste sem motivo foi gravado assim mesmo");
+
+  await p.locator(".adjust-form select").first().selectOption("Perda, quebra ou vencimento");
+  await p.waitForTimeout(600);
+  await p.locator("button", { hasText: /Confirmar ajuste/ }).first().click();
+  await p.waitForTimeout(4500);
+
+  const peca = (await banco("products")).find((item) => item._id === "PRD-800");
+  if (Number(peca?.stock) !== 38) problemas.push(`o saldo ficou ${peca?.stock}, esperado 38`);
+  // O custo é o ponto todo do ajuste: ele NÃO pode se mexer.
+  if (String(peca?.cost) !== "R$ 30,00") problemas.push(`o ajuste mexeu no custo da peça: virou ${JSON.stringify(peca?.cost)}, esperado "R$ 30,00"`);
+
+  const ajustes = await banco("stockAdjustments");
+  if (ajustes.length !== 1) problemas.push(`gravou ${ajustes.length} ajuste(s), esperado 1`);
+  const gravado = ajustes[0] || {};
+  if (gravado.motivo !== "Perda, quebra ou vencimento") problemas.push(`o motivo gravado foi ${JSON.stringify(gravado.motivo)}`);
+  if (Number(gravado.valor) !== -120) problemas.push(`o impacto gravado foi ${gravado.valor}, esperado -120`);
+  if (!gravado.operatorName) problemas.push("o ajuste foi gravado sem dizer quem fez");
+
+  await p.waitForTimeout(1200);
+  const historico = await p.locator(".panel", { hasText: "Ajustes anteriores" }).locator("tbody").innerText();
+  if (!/Perda, quebra ou vencimento/.test(historico)) problemas.push("o ajuste não apareceu no histórico da tela");
+  if (!/120,00/.test(historico)) problemas.push("o histórico não mostra o valor do ajuste");
+  await foto("ajuste-estoque");
+  if (problemas.length) throw new Error("ajuste de estoque:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("o caixa diz de onde veio cada real, e o fechado vira histórico com período", async () => {
+  // O fechamento dizia só "entrou tanto em vendas e OS": uma diferença no
+  // balcão aparecia como diferença do caixa inteiro, sem onde procurar.
+  const problemas = [];
+  const dinheiro = (t) => Number(String(t).replace(/[^\d,-]/g, "").replace(/\./g, "").replace(",", ".")) || 0;
+
+  // O caixa do roteiro já foi fechado no passo 13, então abrimos outro e o
+  // movimentamos, para o extrato por origem ter o que mostrar.
+  await ir("Financeiro");
+  await p.locator(".heading-actions .outline-button", { hasText: /caixa/i }).first().click();
+  await p.waitForTimeout(1800);
+  const jaAberto = await p.locator(".cash-origins").count();
+  if (!jaAberto) {
+    await p.locator(".dialog-layer .field", { hasText: /Fundo de troco/ }).locator("input").fill("100,00");
+    await p.locator(".dialog-footer .primary-button").click();
+    await p.waitForTimeout(4000);
+    await p.locator(".heading-actions .outline-button", { hasText: /caixa/i }).first().click();
+    await p.waitForTimeout(2000);
+  }
+  const extrato = await p.locator(".cash-origins").innerText().catch(() => "");
+  if (!extrato) throw new Error("o caixa aberto não mostra de onde veio o dinheiro da gaveta");
+  // Cada origem tem de ter a própria linha, e nenhuma linha pode vir zerada.
+  for (const linha of extrato.split("\n").slice(2)) {
+    if (/R\$\s*0,00$/.test(linha.trim())) problemas.push(`linha zerada no extrato: ${JSON.stringify(linha.trim())}`);
+  }
+  const cartoes = await p.locator(".dialog-body .module-summary").first().innerText();
+  if (!/no balcão/.test(cartoes)) problemas.push("o cartão de entradas não separa o que veio do balcão");
+  // Erro em vermelho antes de a pessoa digitar ensina a ignorar a tarja.
+  if (await p.locator(".dialog-error-strip").count()) {
+    problemas.push(`o diálogo abriu já acusando erro: ${JSON.stringify(await p.locator(".dialog-error-strip").innerText())}`);
+  }
+
+  // Fecha o caixa, para ele virar histórico.
+  await p.locator(".cash-actions button", { hasText: /Fechar caixa/ }).click();
+  await p.waitForTimeout(900);
+  const esperado = dinheiro(await p.locator(".cash-balance strong").innerText());
+  await p.locator(".dialog-layer .field", { hasText: /Dinheiro contado/ }).locator("input").fill(String(esperado).replace(".", ","));
+  await p.waitForTimeout(600);
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(4500);
+
+  await ir("Histórico de caixas");
+  await p.waitForTimeout(1800);
+  if (!(await p.locator(".caixa-linha").count())) problemas.push("o histórico de caixas abriu sem nenhum fechamento");
+  const cartoesHist = await p.locator(".caixa-mini").innerText();
+  if (!/Caixas fechados/.test(cartoesHist)) problemas.push("o histórico não resume quantos caixas fecharam");
+  // O detalhe abre na própria linha.
+  await p.locator(".caixa-linha").first().click();
+  await p.waitForTimeout(700);
+  if (!(await p.locator(".caixa-detalhe").count())) problemas.push("clicar na linha não abre o detalhe do fechamento");
+
+  // Um período sem caixa nenhum tem de ficar vazio, e não repetir os de hoje.
+  await p.locator(".report-period .filter-pills button", { hasText: /Mês passado/ }).first().click();
+  await p.waitForTimeout(1300);
+  const doMesPassado = await p.locator(".caixa-linha").count();
+  await p.locator(".report-period .filter-pills button", { hasText: /Hoje/ }).first().click();
+  await p.waitForTimeout(1300);
+  const deHoje = await p.locator(".caixa-linha").count();
+  if (!deHoje) problemas.push("o caixa fechado agora não aparece no período de hoje");
+  if (doMesPassado === deHoje && doMesPassado > 0) problemas.push("trocar o período não mudou a lista de caixas");
+
+  const baixando = p.waitForEvent("download", { timeout: 12000 }).catch(() => null);
+  await p.locator("button", { hasText: /Baixar planilha/ }).first().click();
+  const arquivo = await baixando;
+  if (!arquivo) problemas.push("o histórico de caixas não baixou planilha");
+  else if (!/^caixas-.*\.csv$/.test(arquivo.suggestedFilename())) problemas.push(`a planilha saiu como ${arquivo.suggestedFilename()}`);
+  await foto("historico-caixas");
+  if (problemas.length) throw new Error("caixa por origem e histórico:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("contagem pelo leitor: bipar acha a peça, põe o cursor na quantidade e não duplica linha", async () => {
+  // Contar a prateleira peça por peça na busca é o que faz um inventário levar
+  // horas. O leitor é teclado: digita o código e dá Enter.
+  const problemas = [];
+  const texto = (valor) => ({ stringValue: valor });
+  const FS = "http://127.0.0.1:8080/v1/projects/picapau-teste/databases/(default)/documents";
+  await fetch(`${FS}/products/PRD-810`, {
+    method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" },
+    body: JSON.stringify({ fields: {
+      code: texto("PRD-810"), name: texto("VELA PARA BIPAR"), category: texto("Motor"),
+      barcode: texto("7891234567895"), cost: texto("R$ 18,00"), price: texto("R$ 35,00"),
+      status: texto("Em estoque"), stock: { integerValue: "25" }, minimum: { integerValue: "5" },
+      active: { booleanValue: true },
+    } }),
+  });
+  await p.reload();
+  await p.waitForTimeout(4000);
+  await ir("Ajuste de estoque");
+  await p.waitForTimeout(1500);
+
+  const busca = p.locator(".adjust-form input").first();
+  await busca.click();
+  await busca.type("7891234567895", { delay: 10 });
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(1000);
+  if ((await p.locator(".adjust-table tbody tr").count()) !== 1) problemas.push("bipar o código não trouxe a peça para a conferência");
+  const focado = await p.evaluate(() => document.activeElement?.id ?? "");
+  if (focado !== "contado-PRD-810") problemas.push(`depois de bipar, o cursor foi para ${JSON.stringify(focado)} em vez da quantidade`);
+
+  // Digitar já substitui o saldo do sistema: 25 no sistema, 21 na prateleira.
+  await p.keyboard.type("21");
+  await p.waitForTimeout(700);
+  const resumo = (await p.locator(".adjust-resumo").innerText()).replace(/\n/g, " ");
+  if (!/Saindo\s*−?-?4/.test(resumo)) problemas.push(`a contagem digitada não chegou ao resumo: ${JSON.stringify(resumo)}`);
+
+  // Bipar de novo a mesma peça volta para a linha dela, não cria uma segunda.
+  await busca.click();
+  await busca.type("7891234567895", { delay: 10 });
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(900);
+  if ((await p.locator(".adjust-table tbody tr").count()) !== 1) problemas.push("bipar a mesma peça de novo criou uma segunda linha");
+
+  await busca.click();
+  await busca.fill("7899999999999");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(900);
+  const aviso = await p.locator(".dialog-error-strip").innerText().catch(() => "");
+  if (!/Nenhuma peça com o código/.test(aviso)) problemas.push(`código inexistente não avisou: ${JSON.stringify(aviso)}`);
+  // Digitar o começo de um nome não é bipar: avisar aqui ensina a ignorar o aviso.
+  await busca.fill("VEL");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(900);
+  if (await p.locator(".dialog-error-strip").count()) {
+    problemas.push(`digitar o começo de um nome acusou código inexistente: ${JSON.stringify(await p.locator(".dialog-error-strip").innerText())}`);
+  }
+  await foto("bipar");
+  if (problemas.length) throw new Error("contagem pelo leitor:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("conta que se repete: avisa a competência que falta e não lança duas vezes", async () => {
+  // Aluguel, energia e internet eram relançados na mão todo mês, e é o tipo de
+  // conta que se esquece — a que se esquece é a que chega com juros.
+  const problemas = [];
+  await ir("Contas a pagar");
+  await p.waitForTimeout(1500);
+
+  await p.locator(".heading-actions .primary-button", { hasText: /Nova conta/ }).click();
+  await p.waitForTimeout(1800);
+  await p.locator('.dialog-layer input[placeholder*="Compra de peças"]').fill("ENERGIA DA OFICINA");
+  await p.locator(".dialog-layer .field", { hasText: /Valor total/ }).locator("input").fill("480,00");
+  const mesPassado = new Date();
+  mesPassado.setMonth(mesPassado.getMonth() - 1);
+  mesPassado.setDate(12);
+  await p.locator('.dialog-layer input[type="date"]').fill(mesPassado.toISOString().slice(0, 10));
+  await p.locator(".dialog-layer .field", { hasText: /Se repete/ }).locator("select").selectOption("Mensal");
+  await p.waitForTimeout(600);
+  // Recorrência e parcelamento são coisas diferentes e não podem valer juntas.
+  if (!(await p.locator(".dialog-layer .field", { hasText: /Parcelas/ }).locator("select").isDisabled())) {
+    problemas.push("com a conta marcada como recorrente, o parcelamento continuou liberado");
+  }
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(4500);
+
+  const gravada = (await banco("accounts")).find((c) => c.description === "ENERGIA DA OFICINA");
+  if (!gravada) throw new Error("a conta recorrente não foi gravada");
+  if (gravada.recurrence !== "Mensal") problemas.push(`a periodicidade gravada foi ${JSON.stringify(gravada.recurrence)}`);
+  if (Number(gravada.recurrenceDay) !== 12) problemas.push(`o dia original gravado foi ${gravada.recurrenceDay}, esperado 12`);
+
+  await p.waitForTimeout(1500);
+  const painel = await p.locator(".recorrentes").innerText().catch(() => "");
+  if (!/ENERGIA DA OFICINA/.test(painel)) problemas.push("a competência que falta não apareceu no painel de contas que se repetem");
+
+  const antes = (await banco("accounts")).length;
+  await p.locator(".recorrente-lista button", { hasText: /Lançar/ }).first().click();
+  await p.waitForTimeout(4500);
+  const depois = await banco("accounts");
+  if (depois.length !== antes + 1) problemas.push(`lançar criou ${depois.length - antes} conta(s), esperado 1`);
+  const nova = depois.find((c) => c.origin === "Recorrente");
+  if (!nova) problemas.push("a conta lançada não ficou marcada como recorrente");
+  else if (nova.recurrenceId !== gravada.recurrenceId) problemas.push("a conta lançada saiu de outra série");
+
+  // A trava contra duplicar: a mesma competência não pode voltar a aparecer.
+  await p.waitForTimeout(1500);
+  const painelDepois = await p.locator(".recorrentes").innerText().catch(() => "");
+  if (nova && new RegExp(nova.dueDate.replace(/\//g, "\\/")).test(painelDepois)) {
+    problemas.push("a competência lançada continuou aparecendo como pendente: ia duplicar");
+  }
+  await foto("recorrente");
+  if (problemas.length) throw new Error("conta que se repete:\n      - " + problemas.join("\n      - "));
 });
 
 console.log(`\n=== ${falhas} falha(s) ===`);

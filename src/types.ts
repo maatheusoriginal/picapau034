@@ -554,6 +554,19 @@ export type AccountRecord = {
   installments: number;
   /** Liga as parcelas do mesmo lançamento. */
   groupId?: string;
+  /**
+   * Cada quanto a conta se repete: aluguel, energia, internet.
+   *
+   * Diferente de parcelamento: parcela tem fim e valor fixo, e a conta de
+   * energia não tem nem um nem outro. Ver src/recurring.ts.
+   */
+  recurrence?: string;
+  /** Liga as competências da mesma conta recorrente. */
+  recurrenceId?: string;
+  /** O dia do vencimento original, para o dia 31 não virar 28 para sempre. */
+  recurrenceDay?: number;
+  /** Data brasileira em que a série termina, quando tem fim. */
+  recurrenceEndsOn?: string;
 };
 
 export type CartItem = {
@@ -624,6 +637,28 @@ export type SaleRecord = {
 };
 
 /** Uma compra de peças que entrou no estoque. */
+/**
+ * Um ajuste de estoque: a correção de contagem que não é compra nem venda.
+ *
+ * Guarda o antes e o depois de cada peça, não só a diferença: seis meses
+ * depois, "saiu 2" não explica nada, e "de 10 para 8, contagem de prateleira"
+ * explica.
+ */
+export type StockAdjustmentRecord = {
+  id: string;
+  /** Data brasileira, para exibição direta. */
+  date: string;
+  /** ISO 8601, para ordenar e filtrar por período. */
+  adjustedAt: string;
+  motivo: string;
+  observacao?: string;
+  /** Impacto em dinheiro pelo custo da peça: negativo quando o estoque encolhe. */
+  valor: number;
+  items: Array<{ productId: string; name: string; saldoAtual: number; contado: number; diferenca: number; custoUnitario: number }>;
+  operatorUid?: string;
+  operatorName?: string;
+};
+
 export type StockEntryRecord = {
   id: string;
   supplierId?: string;

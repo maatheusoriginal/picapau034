@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsConfig, StockEntryRecord, SupplierConfig } from "../types";
+import type { CategoryConfig, OrderRecord, ProductRecord, SaleRecord, SettingsConfig, StockAdjustmentRecord, StockEntryRecord, SupplierConfig } from "../types";
 import { emMaiusculo } from "../text-case";
 import { QuickAddSelect } from "./QuickAddSelect";
 import { marginOnPrice, maxDiscountPercent, priceWarning } from "../pricing";
@@ -42,6 +42,8 @@ interface ProductFormModalProps {
     stockEntries?: StockEntryRecord[];
     sales?: SaleRecord[];
     orders?: OrderRecord[];
+    /** Conferências de prateleira: é a movimentação que ninguém sabe explicar depois. */
+    adjustments?: StockAdjustmentRecord[];
   };
 }
 
@@ -585,7 +587,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <div className="pdv-params">
                     <h4>Movimentação</h4>
                     <label style={{ cursor: "default" }}><span>Entrou<small>{totals.inboundQuantity} un. · {money(totals.inboundValue)}</small></span></label>
-                    <label style={{ cursor: "default" }}><span>Saiu<small>{totals.outboundQuantity} un. · {money(totals.outboundValue)}</small></span></label>
+                    <label style={{ cursor: "default" }}><span>Saiu<small>{totals.outboundQuantity} un. · {money(totals.outboundValue || 0)}</small></span></label>
                   </div>
                 ) : null}
               </aside>
@@ -597,8 +599,13 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
             <div className="form-section-stack">
               <div className="module-summary">
                 <article><span>Entrou</span><strong>{totals.inboundQuantity} un.</strong><small>{money(totals.inboundValue)} em compras</small></article>
-                <article><span>Saiu</span><strong>{totals.outboundQuantity} un.</strong><small>{money(totals.outboundValue)} em vendas e OS</small></article>
+                <article><span>Saiu</span><strong>{totals.outboundQuantity} un.</strong><small>{money(totals.outboundValue || 0)} em vendas e OS</small></article>
                 <article><span>Em estoque agora</span><strong>{stock} un.</strong><small>Mínimo de {minimum} un.</small></article>
+                {/* Só aparece quando houve conferência: numa peça que nunca foi
+                    ajustada, um "Ajustado 0 un." é ruído. */}
+                {totals.adjustedCount ? (
+                  <article><span>Ajustado</span><strong>{totals.adjustedQuantity > 0 ? `+${totals.adjustedQuantity}` : totals.adjustedQuantity} un.</strong><small>{money(Math.abs(totals.adjustedValue))} em {totals.adjustedCount} conferência(s)</small></article>
+                ) : null}
               </div>
 
               {movements.length ? (
@@ -613,7 +620,9 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                           <td>{movement.date || "—"}</td>
                           <td className="mono"><strong>{movement.quantity > 0 ? `+${movement.quantity}` : movement.quantity}</strong></td>
                           <td className="mono">{money(movement.unitValue)}</td>
-                          <td className="mono">{money(Math.abs(movement.total))}</td>
+                          {/* Com o sinal: a coluna some com ele fazia uma quebra de
+                              R$ 120 parecer igual a uma compra de R$ 120. */}
+                          <td className="mono">{movement.total < 0 ? `− ${money(Math.abs(movement.total))}` : money(movement.total)}</td>
                         </tr>
                       ))}
                     </tbody>

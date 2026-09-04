@@ -20,6 +20,28 @@ export function isPartialNumber(text: string): boolean {
   return /^-?\d*([.,]\d*)?$/.test(text);
 }
 
+/**
+ * O valor colado, quando vem já formatado.
+ *
+ * `isPartialNumber` recusa "2.500,00" — e com razão, porque no meio da
+ * digitação dois separadores não existem. Só que ele também recusa o que a
+ * pessoa COLA: quem copia "R$ 2.500,00" do WhatsApp do fornecedor e cola no
+ * campo de valor vê o campo continuar vazio, sem nenhum aviso, e o
+ * lançamento sair errado ou nem sair.
+ *
+ * Devolve o texto normalizado, ou "" quando não parece um valor formatado —
+ * e aí o campo continua recusando, como antes.
+ */
+export function normalizarColado(text: string): string {
+  const limpo = text.replace(/[R$\s\u00a0]/g, "");
+  if (!limpo) return "";
+  // Brasileiro: ponto separando milhar, vírgula nos centavos.
+  if (/^-?\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(limpo)) return limpo.replace(/\./g, "");
+  // Americano, que aparece em planilha exportada: vírgula no milhar.
+  if (/^-?\d{1,3}(,\d{3})+(\.\d{1,2})?$/.test(limpo)) return limpo.replace(/,/g, "");
+  return "";
+}
+
 /** Lê o número escrito. Devolve null quando ainda não há número nenhum. */
 export function parseTyped(text: string): number | null {
   const clean = text.trim().replace(",", ".");

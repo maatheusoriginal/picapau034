@@ -1,5 +1,5 @@
 import React from "react";
-import { formatTyped, isPartialNumber, parseTyped } from "../number-input";
+import { formatTyped, isPartialNumber, normalizarColado, parseTyped } from "../number-input";
 
 type Props = Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type"> & {
   /** O texto do campo. Estes campos guardam string, não número. */
@@ -32,7 +32,11 @@ export const MoneyField: React.FC<Props> = ({ value, onChange, casas = 2, onBlur
     onChange={(event) => {
       // Barra a letra e deixa passar o número pela metade ("40," enquanto se
       // digita), que é o mesmo critério do NumberField.
-      if (isPartialNumber(event.target.value)) onChange(event.target.value);
+      if (isPartialNumber(event.target.value)) return onChange(event.target.value);
+      // Valor colado já formatado ("R$ 2.500,00"): antes o campo simplesmente
+      // ignorava, e a pessoa não tinha como saber por quê.
+      const colado = normalizarColado(event.target.value);
+      if (colado) onChange(colado);
     }}
     onBlur={(event) => {
       // Devolve o TEXTO já formatado: assim o que quem lê (valorDigitado)

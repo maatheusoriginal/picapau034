@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories, isMechanicUser, orDefault, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { NumberField } from "../src/components/NumberField";
 import { MoneyField } from "../src/components/MoneyField";
@@ -10,6 +10,9 @@ import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
 import { formatPlate, motorcycleIdFor, normalizePlate, platePattern } from "../src/plate";
 import { avisoDeMotoDeFora, buscarMotos, estaNaFrota } from "../src/fleet";
 import { somenteAtivos, type BaseDaOficina } from "../src/removal";
+import { acharPorCodigo, ajusteProblema, diferencaDoAjuste, motivosDeAjuste, pareceCodigo, resumoDoAjuste, valorDoAjuste, type Ajuste, type MotivoDeAjuste } from "../src/stock-adjust";
+import { atalhosDePeriodo, nomeDoArquivo, paraCSV, pecasMaisVendidas, periodoAnterior, periodoDe, periodoEmTexto, porFormaDePagamento, resultadoDoPeriodo, resultadoPorTipo, servicosMaisFeitos, variacao, type AtalhoDePeriodo } from "../src/report";
+import { pendenciasRecorrentes, periodicidades, proximaConta, serieDe, textoDaPendencia, type Periodicidade } from "../src/recurring";
 import { emMaiusculo } from "../src/text-case";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
@@ -18,8 +21,8 @@ import { addToList } from "../src/quick-list";
 import { helpTopic, searchHelp } from "../src/help-topics";
 import { conferirNota, custoUnitario, fatorProblema, lerNfe, quantidadeQueEntra, resumoDaConferencia, type ItemConferido, type NfeNota } from "../src/nfe";
 import { HistoryPanel } from "../src/components/HistoryPanel";
-import { accountOpen, accountStatus, changeFor, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
-import { buildMovement, cashDifference, cashSummary, closedSessions, differenceLabel, drawerEntries, movementProblem, nonDrawerTotal, openSession, sessionIsStale } from "../src/cash";
+import { accountOpen, accountStatus, openAccounts, changeFor, round2, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
+import { buildMovement, cashDifference, cashHistorySummary, cashSummary, closedSessions, differenceLabel, drawerEntries, drawerOrigins, movementProblem, nonDrawerTotal, openSession, sessionIsStale, sessionsInPeriod } from "../src/cash";
 import { mergeParts, priceFromMarkup, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoDoServico } from "../src/mechanic";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
@@ -58,6 +61,7 @@ import {
   openCashSession,
   readAllCollections,
   recordMovement,
+  recordStockAdjustment,
   recordStockEntry,
   saveImportedProducts,
   saveOrderWithStock,
@@ -112,6 +116,7 @@ import type {
   QuickServiceConfig,
   SaleRecord,
   ServiceOrderStatus,
+  StockAdjustmentRecord,
   StockEntryRecord,
   SystemLists,
   ServiceOrderItem,
@@ -176,6 +181,7 @@ const initialSuppliers: SupplierConfig[] = [];
 const initialSales: SaleRecord[] = [];
 
 const initialStockEntries: StockEntryRecord[] = [];
+const initialStockAdjustments: StockAdjustmentRecord[] = [];
 
 const initialAccounts: AccountRecord[] = [];
 const initialCashSessions: CashSession[] = [];
@@ -242,6 +248,7 @@ const navGroups: Array<{
     items: [
       { label: "Produtos e estoque", icon: "box" },
       { label: "Compras e entradas", icon: "file" },
+      { label: "Ajuste de estoque", icon: "check" },
       { label: "Fornecedores", icon: "users" },
     ],
   },
@@ -261,6 +268,7 @@ const navGroups: Array<{
       { label: "Financeiro", icon: "wallet" },
       { label: "Contas a receber", icon: "arrow" },
       { label: "Contas a pagar", icon: "file" },
+      { label: "Histórico de caixas", icon: "wallet" },
       { label: "Relatórios", icon: "chart" },
     ],
   },
@@ -274,6 +282,7 @@ const destinationPermissions: Record<string, FirebasePermission[]> = {
   "Vendas do balcão": ["pos.use"],
   "Produtos e estoque": ["inventory.view"],
   "Compras e entradas": ["inventory.manage"],
+  "Ajuste de estoque": ["inventory.view"],
   "Fornecedores": ["inventory.manage"],
   "Clientes": ["customers.view"],
   "Motocicletas": ["customers.view"],
@@ -281,6 +290,7 @@ const destinationPermissions: Record<string, FirebasePermission[]> = {
   "Financeiro": ["finance.view"],
   "Contas a receber": ["finance.view"],
   "Contas a pagar": ["finance.view"],
+  "Histórico de caixas": ["finance.view"],
   "Relatórios": ["finance.view"],
 };
 
@@ -771,9 +781,13 @@ function AccountsWorkspace({
   openDialog,
   expenses,
   accounts,
+  notify,
+  canManage,
 }: {
   kind: "receber" | "pagar";
   openDialog: OpenDialog;
+  notify: (mensagem: string) => void;
+  canManage: boolean;
   expenses: ExpenseRecord[];
   accounts: AccountRecord[];
 }) {
@@ -795,6 +809,33 @@ function AccountsWorkspace({
   const overdue = useMemo(() => records.filter((record) => record.status === "Atrasado").reduce((sum, record) => sum + record.open, 0), [records]);
   const dueToday = useMemo(() => records.filter((record) => record.status === "Vence hoje").reduce((sum, record) => sum + record.open, 0), [records]);
 
+  /**
+   * As contas recorrentes que ainda não foram lançadas.
+   *
+   * Não é o sistema que grava sozinho: não existe servidor rodando de
+   * madrugada, e um gerador automático sem ninguém olhando é como nasce conta
+   * duplicada — que em contas a pagar some no meio das outras até o dia em que
+   * o saldo não fecha. Aqui é uma lista com um botão.
+   */
+  const [lancando, setLancando] = useState("");
+  const pendentes = useMemo(
+    () => pendenciasRecorrentes(accounts.filter((conta) => conta.kind === kind)),
+    [accounts, kind]);
+
+  const lancarRecorrente = async (pendencia: (typeof pendentes)[number]) => {
+    const prefixo = isReceivable ? "CR" : "CP";
+    setLancando(`${pendencia.serie}-${pendencia.vencimento}`);
+    try {
+      await saveAccounts(prefixo, highestSequence(accounts, prefixo) + 1,
+        [proximaConta(pendencia.base, pendencia.vencimento) as unknown as Record<string, unknown>]);
+      notify(`${pendencia.base.description} lançada para ${pendencia.vencimento}.`);
+    } catch (problema) {
+      notify(problema instanceof Error ? problema.message : "Não foi possível lançar a conta.");
+    } finally {
+      setLancando("");
+    }
+  };
+
   return (
     <>
       <div className="module-heading">
@@ -806,9 +847,624 @@ function AccountsWorkspace({
         <article className={overdue ? "summary-danger" : ""}><span>Vencido</span><strong>{formatBRL(overdue)}</strong><small>{overdue ? "Precisa de atenção" : "Nenhuma conta atrasada"}</small></article>
         <article><span>Vence hoje</span><strong>{formatBRL(dueToday)}</strong><small>{records.filter((record) => record.status === "Vence hoje").length} {records.filter((record) => record.status === "Vence hoje").length === 1 ? "lançamento" : "lançamentos"}</small></article>
       </div>
+      {pendentes.length ? (
+        <section className="panel module-panel recorrentes">
+          <div className="panel-header"><div>
+            <h2>Contas que se repetem</h2>
+            <p>{pendentes.length === 1 ? "1 competência ainda não foi lançada" : `${pendentes.length} competências ainda não foram lançadas`}. Confira o valor antes: energia muda todo mês.</p>
+          </div></div>
+          <ul className="recorrente-lista">
+            {pendentes.map((pendencia) => {
+              const chave = `${pendencia.serie}-${pendencia.vencimento}`;
+              return (
+                <li key={chave} className={pendencia.emDias < 0 ? "atrasada" : ""}>
+                  <div>
+                    <strong>{pendencia.base.description}</strong>
+                    <span>{pendencia.base.person} · {textoDaPendencia(pendencia).split(" · ")[1]}</span>
+                  </div>
+                  <b className="mono">{formatBRL(pendencia.base.amount)}</b>
+                  <button className="outline-button" disabled={!canManage || Boolean(lancando)} onClick={() => void lancarRecorrente(pendencia)}>
+                    {lancando === chave ? "Lançando..." : "Lançar"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="panel module-panel">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder={`Buscar ${isReceivable ? "cliente" : "fornecedor"}, descrição ou código`}/></label><div className="filter-pills">{["Todos", "A vencer", "Vence hoje", "Atrasado"].map((filter) => <button className={accountFilter === filter ? "selected" : ""} key={filter} onClick={() => setAccountFilter(filter)}>{filter}</button>)}</div></div>
         <div className="table-scroll"><table><thead><tr><th>{isReceivable ? "Cliente / Pagador" : "Fornecedor / Favorecido"}</th><th className="col-secondary">Descrição</th><th>Vencimento</th><th className="col-secondary">Valor original</th><th>Saldo</th><th>Status</th><th>Ação</th></tr></thead><tbody>{filteredRecords.length ? filteredRecords.map((record) => <tr key={record.id}><td><strong>{record.person}</strong><span className="mono">{record.id}</span></td><td className="col-secondary"><strong>{record.description}</strong><span>{isReceivable ? "Receita operacional" : "Despesa da oficina"}</span></td><td>{record.dueDate}</td><td className="col-secondary mono">{formatBRL(record.original)}</td><td><strong className="mono">{formatBRL(record.open)}</strong></td><td><span className={`status ${record.status === "Atrasado" ? "red" : record.status === "Vence hoje" ? "amber" : record.status === "Parcial" ? "violet" : record.status === "Quitado" ? "green" : "blue"}`}><i/>{record.status}</span></td><td><button className="account-action" onClick={() => openDialog(isReceivable ? "settleReceivable" : "settlePayable", record.id)}>{isReceivable ? "Receber" : "Pagar"}</button></td></tr>) : <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhuma conta {isReceivable ? "a receber" : "a pagar"} cadastrada no momento.</td></tr>}</tbody></table></div>
+      </section>
+    </>
+  );
+}
+
+/**
+ * Relatórios do período.
+ *
+ * A aba era uma casca: a lista nascia vazia e o botão "Exportar relatório" só
+ * disparava um aviso dizendo "Relatório exportado em formato PDF", sem gerar
+ * arquivo nenhum. Mentir que gerou é pior que não ter o botão.
+ *
+ * O resto do financeiro só sabia responder "hoje" e "acumulado", e nenhuma
+ * pergunta que o dono faz de verdade cabe nesses dois. Aqui tudo é por período,
+ * e a conta é de src/report.ts.
+ */
+function ReportWorkspace({ sales, orders, expenses, movements, accounts, notify }: {
+  sales: SaleRecord[]; orders: OrderRecord[]; expenses: ExpenseRecord[];
+  movements: MovementRecord[]; accounts: AccountRecord[]; notify: (mensagem: string) => void;
+}) {
+  const [atalho, setAtalho] = useState<AtalhoDePeriodo | "Personalizado">("Este mês");
+  const [de, setDe] = useState(() => periodoDe("Este mês").de);
+  const [ate, setAte] = useState(() => periodoDe("Este mês").ate);
+  const periodo = useMemo(() => ({ de, ate }), [de, ate]);
+
+  const escolherAtalho = (novo: AtalhoDePeriodo) => {
+    const calculado = periodoDe(novo);
+    setAtalho(novo); setDe(calculado.de); setAte(calculado.ate);
+  };
+
+  const [comparar, setComparar] = useState(true);
+  const resultado = useMemo(() => resultadoDoPeriodo(periodo, { sales, orders, expenses, movements }),
+    [periodo, sales, orders, expenses, movements]);
+  // O período anterior é calculado sempre; o botão só decide se aparece. Assim
+  // ligar a comparação é instantâneo, e não uma espera de recontar tudo.
+  const anteriorPeriodo = useMemo(() => periodoAnterior(periodo), [periodo]);
+  const anterior = useMemo(() => resultadoDoPeriodo(anteriorPeriodo, { sales, orders, expenses, movements }),
+    [anteriorPeriodo, sales, orders, expenses, movements]);
+  const formas = useMemo(() => porFormaDePagamento(periodo, sales, orders), [periodo, sales, orders]);
+  const tipos = useMemo(() => resultadoPorTipo(periodo, { sales, orders }), [periodo, sales, orders]);
+  const tiposAntes = useMemo(() => resultadoPorTipo(anteriorPeriodo, { sales, orders }), [anteriorPeriodo, sales, orders]);
+  const pecas = useMemo(() => pecasMaisVendidas(periodo, sales, orders), [periodo, sales, orders]);
+  const servicos = useMemo(() => servicosMaisFeitos(periodo, sales, orders), [periodo, sales, orders]);
+  const aReceber = useMemo(() => openAccounts(accounts, "receber").reduce((s, c) => s + accountOpen(c), 0), [accounts]);
+  const aPagar = useMemo(() => openAccounts(accounts, "pagar").reduce((s, c) => s + accountOpen(c), 0), [accounts]);
+
+  /**
+   * O botão entrega um arquivo de verdade.
+   *
+   * CSV e não PDF: é o formato que abre no Excel e no Google Sheets, que o
+   * contador aceita, e que dá para somar por cima. PDF seria bonito e inútil
+   * para o que a oficina faz com isso.
+   */
+  const exportar = () => {
+    const pct = (valor: number) => String(valor).replace(".", ",");
+    // A coluna do período anterior vai junto: quem abre a planilha para montar
+    // o próprio gráfico precisa dos dois lados da comparação, não de um só.
+    const linhas: Array<Array<string | number>> = [
+      ["Resultado", "Período", "Anterior"],
+      ["Faturamento", resultado.faturamento, anterior.faturamento],
+      ["Custo das peças", -resultado.custoDasPecas, -anterior.custoDasPecas],
+      ["Taxas de maquininha", -resultado.taxas, -anterior.taxas],
+      ["Despesas pagas", -resultado.despesas, -anterior.despesas],
+      ["Entradas avulsas", resultado.entradasAvulsas, anterior.entradasAvulsas],
+      ["Saídas avulsas", -resultado.saidasAvulsas, -anterior.saidasAvulsas],
+      ["Lucro do período", resultado.lucro, anterior.lucro],
+      // Porcentagem com vírgula, como o resto da planilha: "28.6%" numa coluna
+      // brasileira é o tipo de detalhe que faz o contador refazer o arquivo.
+      ["Margem", `${pct(resultado.margem)}%`, `${pct(anterior.margem)}%`],
+      ["Atendimentos", resultado.atendimentos, anterior.atendimentos],
+      ["Ticket médio", resultado.ticketMedio, anterior.ticketMedio],
+      ["Desconto concedido", resultado.descontos, anterior.descontos],
+      ["", "", ""],
+      ["Negócio", "Faturamento", "Custo", "Lucro", "Margem"],
+      ["Revenda de peça", tipos.pecas.faturamento, tipos.pecas.custo, tipos.pecas.lucro, `${pct(tipos.pecas.margem)}%`],
+      ["Mão de obra", tipos.maoDeObra.faturamento, "", "", "custo da hora não cadastrado"],
+      ...(tipos.naoClassificado ? [["Sem itens gravados", tipos.naoClassificado, "", "", ""]] : []),
+      ["", "", ""],
+      ["Forma de pagamento", "Atendimentos", "Total", "Taxa", "Líquido"],
+      ...formas.map((linha) => [linha.forma, linha.atendimentos, linha.total, linha.taxa, linha.liquido]),
+      ["", "", ""],
+      ["Peça", "Quantidade", "Faturamento", "Custo", "Lucro"],
+      ...pecas.map((linha) => [linha.nome, linha.quantidade, linha.total, linha.custo, linha.lucro]),
+      ["", "", ""],
+      ["Serviço", "Quantidade", "Faturamento", "", ""],
+      ...servicos.map((linha) => [linha.nome, linha.quantidade, linha.total, "", ""]),
+    ];
+    const csv = paraCSV([`Relatório da oficina — ${periodoEmTexto(periodo)}`, "", `Anterior: ${periodoEmTexto(anteriorPeriodo)}`, "", ""], linhas);
+    // BOM na frente: sem ele o Excel em português abre "ÓLEO" como "Ã“LEO".
+    const arquivo = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(arquivo);
+    const link = document.createElement("a");
+    link.href = url; link.download = nomeDoArquivo("relatorio", periodo);
+    document.body.appendChild(link); link.click(); link.remove();
+    URL.revokeObjectURL(url);
+    notify(`Relatório de ${periodoEmTexto(periodo)} baixado.`);
+  };
+
+  /**
+   * A variação escrita ao lado do número.
+   *
+   * `subirEBom` inverte a cor nas linhas de custo: gastar 20% a mais não é uma
+   * boa notícia pintada de verde só porque o número subiu.
+   */
+  const delta = (atual: number, base: number, subirEBom = true) => {
+    if (!comparar) return null;
+    const troca = variacao(atual, base);
+    if (troca === null) {
+      return <em className="dre-delta neutro">{base === 0 && atual === 0 ? "igual, sem movimento" : "sem base para comparar"}</em>;
+    }
+    if (troca === 0) return <em className="dre-delta neutro">igual ao anterior</em>;
+    const bom = troca > 0 === subirEBom;
+    return (
+      <em className={`dre-delta ${bom ? "melhor" : "pior"}`}>
+        {troca > 0 ? "▲" : "▼"} {Math.abs(troca).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%
+        <b>{formatBRL(base)} antes</b>
+      </em>
+    );
+  };
+
+  const linha = (rotulo: string, valor: number, base: number, tom?: "menos" | "total") => (
+    <div className={`dre-linha ${tom ?? ""}`}>
+      <span>{rotulo}</span>
+      <div className="dre-valor">
+        {/* Zero não leva sinal: "− R$ 0,00" é uma dedução que não existe. */}
+        <strong>{tom === "menos" && valor !== 0 ? `− ${formatBRL(valor)}` : formatBRL(valor)}</strong>
+        {delta(valor, base, tom !== "menos")}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="module-heading">
+        <div><p>Indicadores</p><h1>Relatórios</h1><span>O resultado da oficina no período que você escolher.</span></div>
+        <button className="primary-button" onClick={exportar}><Icon name="file" size={18}/>Baixar planilha</button>
+      </div>
+
+      <div className="report-period panel">
+        <div className="filter-pills">
+          {atalhosDePeriodo.map((nome) => (
+            <button className={atalho === nome ? "selected" : ""} key={nome} onClick={() => escolherAtalho(nome)}>{nome}</button>
+          ))}
+        </div>
+        <label className="field"><span>De</span><input type="date" value={de} onChange={(e) => { setDe(e.target.value); setAtalho("Personalizado"); }}/></label>
+        <label className="field"><span>Até</span><input type="date" value={ate} onChange={(e) => { setAte(e.target.value); setAtalho("Personalizado"); }}/></label>
+        <span className="report-period-label">{periodoEmTexto(periodo)}</span>
+      </div>
+
+      <div className="report-grid">
+        {/* O resultado na ordem em que se lê um DRE: o que entrou, o que saiu,
+            e o que sobrou. O custo das peças entra porque sem ele o "lucro" é
+            fantasia — vender R$ 1.000 de peça que custou R$ 700 não são
+            R$ 1.000 de resultado. */}
+        <section className="panel report-dre">
+          <div className="panel-header">
+            <div><h2>Resultado do período</h2><p>{comparar ? `Comparado com ${periodoEmTexto(anteriorPeriodo)}` : periodoEmTexto(periodo)}</p></div>
+            <button className={`outline-button ${comparar ? "selected" : ""}`} onClick={() => setComparar((antes) => !antes)}>
+              {comparar ? "Esconder comparação" : "Comparar com o anterior"}
+            </button>
+          </div>
+          <div className="dre">
+            {linha("Faturamento", resultado.faturamento, anterior.faturamento)}
+            {linha("Custo das peças vendidas", resultado.custoDasPecas, anterior.custoDasPecas, "menos")}
+            {linha("Taxas de maquininha", resultado.taxas, anterior.taxas, "menos")}
+            {linha("Despesas pagas", resultado.despesas, anterior.despesas, "menos")}
+            {resultado.entradasAvulsas ? linha("Entradas avulsas", resultado.entradasAvulsas, anterior.entradasAvulsas) : null}
+            {resultado.saidasAvulsas ? linha("Saídas avulsas", resultado.saidasAvulsas, anterior.saidasAvulsas, "menos") : null}
+            {linha("Lucro do período", resultado.lucro, anterior.lucro, "total")}
+          </div>
+          <div className="report-mini">
+            <article><span>Margem</span><strong>{resultado.margem.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong>
+              {comparar ? <small>{anterior.margem.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% antes</small> : null}</article>
+            <article><span>Atendimentos</span><strong>{resultado.atendimentos}</strong>
+              {comparar ? <small>{anterior.atendimentos} antes</small> : null}</article>
+            <article><span>Ticket médio</span><strong>{formatBRL(resultado.ticketMedio)}</strong>
+              {comparar ? <small>{formatBRL(anterior.ticketMedio)} antes</small> : null}</article>
+            <article><span>Desconto dado</span><strong>{formatBRL(resultado.descontos)}</strong>
+              {comparar ? <small>{formatBRL(anterior.descontos)} antes</small> : null}</article>
+          </div>
+        </section>
+
+        {/* Revenda e mão de obra são dois negócios dentro da mesma oficina: um
+            vive de comprar e revender, o outro de hora trabalhada. Somados,
+            não dá para saber qual está sustentando o mês — e é isso que decide
+            se vale mexer na margem da peça ou no preço da hora. */}
+        <section className="panel report-tipos">
+          <div className="panel-header"><div><h2>Peça e mão de obra</h2><p>Os dois negócios da oficina, separados</p></div></div>
+          <div className="tipo-grid">
+            <article>
+              <span>Revenda de peça</span>
+              <strong>{formatBRL(tipos.pecas.faturamento)}</strong>
+              <div className="tipo-linha"><span>Custo</span><b>− {formatBRL(tipos.pecas.custo)}</b></div>
+              <div className="tipo-linha"><span>Lucro</span><b className={tipos.pecas.lucro >= 0 ? "lucro-bom" : "lucro-ruim"}>{formatBRL(tipos.pecas.lucro)}</b></div>
+              <div className="tipo-linha"><span>Margem</span><b>{tipos.pecas.margem.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</b></div>
+              {comparar ? <small>{formatBRL(tiposAntes.pecas.faturamento)} no período anterior</small> : null}
+            </article>
+            <article>
+              <span>Mão de obra</span>
+              <strong>{formatBRL(tipos.maoDeObra.faturamento)}</strong>
+              {/* Sem margem de propósito: o sistema não sabe quanto custa a hora
+                  do mecânico, e "margem de 100%" no serviço seria mentira. */}
+              <div className="tipo-linha"><span>Participação</span><b>{tipos.pecas.faturamento + tipos.maoDeObra.faturamento > 0 ? `${Math.round((tipos.maoDeObra.faturamento / (tipos.pecas.faturamento + tipos.maoDeObra.faturamento)) * 1000) / 10}`.replace(".", ",") : "0"}%</b></div>
+              <div className="tipo-linha nota"><span>O custo da hora não é cadastrado, então aqui não há margem para mostrar.</span></div>
+              {comparar ? <small>{formatBRL(tiposAntes.maoDeObra.faturamento)} no período anterior</small> : null}
+            </article>
+          </div>
+          {tipos.naoClassificado ? (
+            <div className="info-strip"><Icon name="alert" size={18}/><span>{formatBRL(tipos.naoClassificado)} não deu para separar: são atendimentos gravados sem a lista de itens. O valor está no faturamento, só não entra em nenhum dos dois lados.</span></div>
+          ) : null}
+        </section>
+
+        <section className="panel">
+          <div className="panel-header"><div><h2>Como entrou o dinheiro</h2><p>A taxa da maquininha ao lado do total, não diluída no mês</p></div></div>
+          <div className="table-scroll"><table><thead><tr><th>Forma</th><th className="num">Atend.</th><th className="num">Total</th><th className="num">Taxa</th><th className="num">Líquido</th></tr></thead>
+            <tbody>{formas.length ? formas.map((l) => (
+              <tr key={l.forma}><td><strong>{l.forma}</strong></td><td className="num">{l.atendimentos}</td><td className="num mono">{formatBRL(l.total)}</td>
+                <td className="num mono">{l.taxa ? `− ${formatBRL(l.taxa)}` : "—"}</td><td className="num mono"><strong>{formatBRL(l.liquido)}</strong></td></tr>
+            )) : <tr><td colSpan={5} className="report-vazio">Nenhuma entrada neste período.</td></tr>}</tbody></table></div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header"><div><h2>Peças que mais saíram</h2><p>Ordenado pelo que faturou, com o lucro de cada uma</p></div></div>
+          <div className="table-scroll"><table><thead><tr><th>Peça</th><th className="num">Qtd.</th><th className="num">Faturou</th><th className="num">Lucro</th></tr></thead>
+            <tbody>{pecas.length ? pecas.map((l) => (
+              <tr key={l.nome}><td><strong>{l.nome}</strong></td><td className="num">{l.quantidade}</td><td className="num mono">{formatBRL(l.total)}</td>
+                <td className="num mono"><strong className={l.lucro >= 0 ? "lucro-bom" : "lucro-ruim"}>{formatBRL(l.lucro)}</strong></td></tr>
+            )) : <tr><td colSpan={4} className="report-vazio">Nenhuma peça vendida neste período.</td></tr>}</tbody></table></div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-header"><div><h2>Serviços mais feitos</h2><p>A mão de obra que sustenta a oficina</p></div></div>
+          <div className="table-scroll"><table><thead><tr><th>Serviço</th><th className="num">Qtd.</th><th className="num">Faturou</th></tr></thead>
+            <tbody>{servicos.length ? servicos.map((l) => (
+              <tr key={l.nome}><td><strong>{l.nome}</strong></td><td className="num">{l.quantidade}</td><td className="num mono">{formatBRL(l.total)}</td></tr>
+            )) : <tr><td colSpan={3} className="report-vazio">Nenhum serviço neste período.</td></tr>}</tbody></table></div>
+        </section>
+
+        {/* Em aberto não é do período: é o que está de pé hoje, e é a conta que
+            decide se dá para comprar peça esta semana. */}
+        <section className="panel report-aberto">
+          <div className="panel-header"><div><h2>Em aberto hoje</h2><p>Independe do período escolhido</p></div></div>
+          <div className="report-mini">
+            <article><span>A receber</span><strong className="lucro-bom">{formatBRL(aReceber)}</strong></article>
+            <article><span>A pagar</span><strong className="lucro-ruim">{formatBRL(aPagar)}</strong></article>
+            <article><span>Diferença</span><strong>{formatBRL(aReceber - aPagar)}</strong></article>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Ajuste de estoque.
+ *
+ * O estoque só se mexia por compra, venda, OS, planilha ou XML. Quem precisava
+ * corrigir uma contagem — peça quebrada na bancada, óleo usado na moto da
+ * própria oficina, item lançado em dobro, ou o saldo do dia em que se começou a
+ * usar o sistema — inventava uma compra que não existiu. Aí o custo médio da
+ * peça mudava, aparecia um fornecedor que ninguém reconhece, e o relatório de
+ * compras do mês passava a mentir.
+ *
+ * A conta e as travas são de src/stock-adjust.ts. Aqui é só a tela.
+ */
+/**
+ * Histórico de caixas fechados.
+ *
+ * O histórico existia só dentro do diálogo de abrir o caixa, cortado nos cinco
+ * últimos. Quem precisava achar o fechamento de terça passada — porque o
+ * dinheiro não bateu e alguém quer entender onde — não tinha por onde começar.
+ */
+function CashHistoryWorkspace({ cashSessions, notify }: {
+  cashSessions: CashSession[]; notify: (mensagem: string) => void;
+}) {
+  const [atalho, setAtalho] = useState<AtalhoDePeriodo | "Personalizado">("Este mês");
+  const [de, setDe] = useState(() => periodoDe("Este mês").de);
+  const [ate, setAte] = useState(() => periodoDe("Este mês").ate);
+  const [busca, setBusca] = useState("");
+  const [aberto, setAberto] = useState("");
+  const periodo = useMemo(() => ({ de, ate }), [de, ate]);
+
+  const escolherAtalho = (novo: AtalhoDePeriodo) => {
+    const calculado = periodoDe(novo);
+    setAtalho(novo); setDe(calculado.de); setAte(calculado.ate);
+  };
+
+  const noPeriodo = useMemo(() => sessionsInPeriod(cashSessions, periodo), [cashSessions, periodo]);
+  const listados = useMemo(() => {
+    const texto = busca.trim().toLowerCase();
+    if (!texto) return noPeriodo;
+    return noPeriodo.filter((sessao) =>
+      `${sessao.id} ${sessao.openedByName ?? ""} ${sessao.closedByName ?? ""} ${sessao.closingNotes ?? ""}`.toLowerCase().includes(texto));
+  }, [noPeriodo, busca]);
+  const resumo = useMemo(() => cashHistorySummary(listados), [listados]);
+
+  const exportar = () => {
+    const linhas: Array<Array<string | number>> = listados.map((sessao) => [
+      sessao.id, sessao.openedDate, sessao.closedDate ?? "", sessao.openedByName ?? "", sessao.closedByName ?? "",
+      sessao.openingAmount, sessao.expectedAmount ?? 0, sessao.countedAmount ?? 0,
+      sessao.difference ?? 0, differenceLabel(sessao.difference ?? 0), sessao.closingNotes ?? "",
+    ]);
+    const csv = paraCSV(
+      ["Caixa", "Aberto em", "Fechado em", "Abriu", "Fechou", "Fundo de troco", "Esperado", "Contado", "Diferença", "Conferência", "Observação"],
+      linhas);
+    const arquivo = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(arquivo);
+    const link = document.createElement("a");
+    link.href = url; link.download = nomeDoArquivo("caixas", periodo);
+    document.body.appendChild(link); link.click(); link.remove();
+    URL.revokeObjectURL(url);
+    notify(`${listados.length} caixa(s) de ${periodoEmTexto(periodo)} baixado(s).`);
+  };
+
+  return (
+    <>
+      <div className="module-heading">
+        <div><p>Gestão</p><h1>Histórico de caixas</h1><span>Todo fechamento já feito, com a conferência de cada dia.</span></div>
+        <button className="primary-button" onClick={exportar} disabled={!listados.length}><Icon name="file" size={18}/>Baixar planilha</button>
+      </div>
+
+      <div className="report-period panel">
+        <div className="filter-pills">
+          {atalhosDePeriodo.map((nome) => (
+            <button className={atalho === nome ? "selected" : ""} key={nome} onClick={() => escolherAtalho(nome)}>{nome}</button>
+          ))}
+        </div>
+        <label className="field"><span>De</span><input type="date" value={de} onChange={(e) => { setDe(e.target.value); setAtalho("Personalizado"); }}/></label>
+        <label className="field"><span>Até</span><input type="date" value={ate} onChange={(e) => { setAte(e.target.value); setAtalho("Personalizado"); }}/></label>
+        <span className="report-period-label">{periodoEmTexto(periodo)}</span>
+      </div>
+
+      <div className="report-mini caixa-mini">
+        <article><span>Caixas fechados</span><strong>{resumo.caixas}</strong></article>
+        <article><span>Esperado no período</span><strong>{formatBRL(resumo.esperado)}</strong></article>
+        <article><span>Contado no período</span><strong>{formatBRL(resumo.contado)}</strong></article>
+        <article><span>Diferença somada</span><strong className={resumo.diferenca < 0 ? "lucro-ruim" : resumo.diferenca > 0 ? "lucro-bom" : ""}>{formatBRL(resumo.diferenca)}</strong></article>
+      </div>
+
+      {/* A soma das diferenças mente quando uma falta e uma sobra do mesmo
+          tamanho caem no mesmo período: fecha em zero, e foram dois erros.
+          Por isso o aviso conta os dias, e não o saldo. */}
+      {resumo.faltas ? (
+        <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>
+          {resumo.faltas === 1 ? "1 caixa fechou com falta" : `${resumo.faltas} caixas fecharam com falta`} neste período
+          {resumo.maiorFalta ? `, a maior de ${formatBRL(resumo.maiorFalta)} no ${resumo.maiorFaltaEm}` : ""}.
+          {resumo.sobras ? (resumo.sobras === 1 ? " Outro fechou com sobra — sobra também é erro de conferência." : ` Outros ${resumo.sobras} fecharam com sobra — sobra também é erro de conferência.`) : ""}
+        </span></div>
+      ) : null}
+
+      <section className="panel module-panel">
+        <div className="panel-header">
+          <div><h2>Fechamentos</h2><p>{resumo.conferem} conferiram · {resumo.faltas} com falta · {resumo.sobras} com sobra</p></div>
+          <div className="mini-search"><Icon name="search" size={16}/><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Caixa, quem abriu ou observação"/></div>
+        </div>
+        <div className="table-scroll">
+          <table>
+            <thead><tr><th>Caixa</th><th>Fechado em</th><th className="num">Fundo</th><th className="num">Esperado</th><th className="num">Contado</th><th>Conferência</th></tr></thead>
+            <tbody>{listados.length ? listados.map((sessao) => {
+              const gap = sessao.difference ?? round2((sessao.countedAmount ?? 0) - (sessao.expectedAmount ?? 0));
+              const rotulo = differenceLabel(gap);
+              const escolhido = aberto === sessao.id;
+              return (
+                <Fragment key={sessao.id}>
+                  <tr className="caixa-linha" onClick={() => setAberto(escolhido ? "" : sessao.id)}>
+                    <td><strong className="order-id">{sessao.id}</strong><span>Aberto {sessao.openedDate} por {sessao.openedByName || "—"}</span></td>
+                    <td>{sessao.closedDate || "—"}<span>{sessao.closedByName || "—"}</span></td>
+                    <td className="num mono">{formatBRL(sessao.openingAmount)}</td>
+                    <td className="num mono">{formatBRL(sessao.expectedAmount ?? 0)}</td>
+                    <td className="num mono">{formatBRL(sessao.countedAmount ?? 0)}</td>
+                    <td><span className={`status ${rotulo === "Confere" ? "green" : rotulo === "Sobra" ? "blue" : "red"}`}><i/>{rotulo === "Confere" ? "Confere" : `${rotulo} de ${formatBRL(Math.abs(gap))}`}</span></td>
+                  </tr>
+                  {escolhido ? (
+                    <tr className="caixa-detalhe"><td colSpan={6}>
+                      <div>
+                        <span>Fundo de troco<b>{formatBRL(sessao.openingAmount)}</b></span>
+                        <span>Esperado<b>{formatBRL(sessao.expectedAmount ?? 0)}</b></span>
+                        <span>Contado<b>{formatBRL(sessao.countedAmount ?? 0)}</b></span>
+                        <span>Diferença<b className={gap < 0 ? "lucro-ruim" : gap > 0 ? "lucro-bom" : ""}>{formatBRL(gap)}</b></span>
+                      </div>
+                      <p>{sessao.closingNotes ? sessao.closingNotes : "Fechado sem observação."}</p>
+                    </td></tr>
+                  ) : null}
+                </Fragment>
+              );
+            }) : <tr><td colSpan={6} className="report-vazio">{busca.trim() ? `Nenhum caixa com "${busca.trim()}" neste período.` : "Nenhum caixa fechado neste período."}</td></tr>}</tbody>
+          </table>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function StockAdjustWorkspace({ products, adjustments, currentUser, notify, canManage }: {
+  products: ProductRecord[]; adjustments: StockAdjustmentRecord[];
+  currentUser: FirebaseUserSummary | null; notify: (mensagem: string) => void; canManage: boolean;
+}) {
+  const [linhas, setLinhas] = useState<Ajuste[]>([]);
+  const [busca, setBusca] = useState("");
+  const [motivo, setMotivo] = useState<MotivoDeAjuste | "">("");
+  const [observacao, setObservacao] = useState("");
+  const [gravando, setGravando] = useState(false);
+  const [erro, setErro] = useState("");
+  // A peça que acabou de ser bipada: o efeito abaixo põe o cursor na
+  // quantidade dela, para a contagem ser bipar → digitar → bipar.
+  const [focar, setFocar] = useState("");
+
+  const ativos = useMemo(() => somenteAtivos(products), [products]);
+  const achados = useMemo(() => {
+    const texto = busca.trim().toLowerCase();
+    if (!texto) return [];
+    return ativos.filter((peca) => `${peca.name} ${peca.code} ${peca.barcode ?? ""}`.toLowerCase().includes(texto))
+      .filter((peca) => !linhas.some((linha) => linha.productId === peca.id)).slice(0, 8);
+  }, [ativos, busca, linhas]);
+
+  // O motivo e a observação valem para o lote inteiro: uma contagem de
+  // prateleira é uma contagem só, ainda que corrija doze peças.
+  const comMotivo = useMemo(() => linhas.map((linha) => ({ ...linha, motivo, observacao })), [linhas, motivo, observacao]);
+  const resumo = useMemo(() => resumoDoAjuste(comMotivo), [comMotivo]);
+  const primeiroProblema = comMotivo.map((linha) => ajusteProblema(linha)).find(Boolean) ?? "";
+
+  const acrescentar = (peca: ProductRecord) => {
+    setLinhas((atual) => [...atual, {
+      productId: peca.id, nome: peca.name, saldoAtual: peca.stock ?? 0, contado: peca.stock ?? 0,
+      motivo: "", custoUnitario: parseBRL(peca.cost),
+    }]);
+    setBusca("");
+  };
+  const mexer = (id: string, contado: number) =>
+    setLinhas((atual) => atual.map((linha) => linha.productId === id ? { ...linha, contado } : linha));
+  const tirar = (id: string) => setLinhas((atual) => atual.filter((linha) => linha.productId !== id));
+
+  /**
+   * Enter no campo de busca: é o que o leitor de código de barras faz.
+   *
+   * Contar a prateleira peça por peça na busca é o que faz um inventário levar
+   * horas. Com o leitor, cada bipada já traz a peça e deixa o cursor na
+   * quantidade — e bipar de novo a mesma peça volta para a linha dela em vez
+   * de criar uma segunda.
+   */
+  const bipar = () => {
+    const codigo = busca.trim();
+    if (!codigo) return;
+    const achada = acharPorCodigo(codigo, ativos);
+    if (!achada) {
+      // Só reclama quando o que foi digitado parece um código. Avisar a cada
+      // letra de quem procura "OLE" ensina a ignorar o aviso.
+      if (pareceCodigo(codigo)) setErro(`Nenhuma peça com o código ${codigo}.`);
+      return;
+    }
+    setErro("");
+    if (!linhas.some((linha) => linha.productId === achada.id)) acrescentar(achada);
+    else setBusca("");
+    setFocar(achada.id);
+  };
+
+  // O cursor vai para a quantidade da peça bipada, com o número selecionado:
+  // digitar já substitui o saldo do sistema pelo que está na prateleira.
+  useEffect(() => {
+    if (!focar) return;
+    const campo = document.getElementById(`contado-${focar}`) as HTMLInputElement | null;
+    campo?.focus();
+    campo?.select();
+    setFocar("");
+  }, [focar, linhas]);
+
+  const confirmar = async () => {
+    if (!canManage) return setErro("Seu perfil pode consultar o estoque, mas não ajustar.");
+    if (!linhas.length) return setErro("Acrescente pelo menos uma peça.");
+    if (primeiroProblema) return setErro(primeiroProblema);
+    setGravando(true); setErro("");
+    try {
+      const id = `AJU-${String(highestSequence(adjustments, "AJU") + 1).padStart(4, "0")}`;
+      await recordStockAdjustment(id, {
+        id,
+        date: new Date().toLocaleDateString("pt-BR"),
+        adjustedAt: new Date().toISOString(),
+        motivo, observacao: observacao.trim(), valor: resumo.valor,
+        items: comMotivo.map((linha) => ({
+          productId: linha.productId, name: linha.nome, saldoAtual: linha.saldoAtual,
+          contado: linha.contado, diferenca: diferencaDoAjuste(linha), custoUnitario: linha.custoUnitario ?? 0,
+        })),
+        operatorUid: currentUser?.uid ?? "", operatorName: currentUser?.displayName ?? "",
+      }, comMotivo.map((linha) => ({ productId: linha.productId, contado: linha.contado })));
+      setLinhas([]); setMotivo(""); setObservacao("");
+      notify(`Ajuste ${id} gravado: ${resumo.itens} peça(s), ${resumo.entram > 0 ? `+${resumo.entram}` : "0"} entrando e ${resumo.saem} saindo.`);
+    } catch (problema) {
+      setErro(problema instanceof Error ? problema.message : "Não foi possível gravar o ajuste.");
+    } finally {
+      setGravando(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="module-heading">
+        <div><p>Estoque</p><h1>Ajuste de estoque</h1><span>Corrija o saldo contado na prateleira, sem inventar uma compra.</span></div>
+        <span className="system-healthy"><i/><b>{adjustments.length} ajuste(s) no histórico</b></span>
+      </div>
+
+      <section className="panel module-panel adjust-panel">
+        <div className="panel-header"><div><h2>Nova conferência</h2><p>Procure a peça, digite o que existe de verdade e diga o motivo</p></div></div>
+
+        <div className="adjust-form">
+          <label className="field field-full"><span>Peça</span>
+            {/* Mexer na busca limpa o aviso: senão "Nenhuma peça com o código
+                789..." ficava na tela enquanto a pessoa já digitava um nome. */}
+            <input value={busca} onChange={(e) => { setBusca(e.target.value); if (erro) setErro(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); bipar(); } }}
+              placeholder="Bipe o código de barras ou digite o nome"/>
+            <small className="field-hint">O leitor de código de barras funciona aqui: bipe a peça e digite o que tem na prateleira.</small>
+          </label>
+          {achados.length ? (
+            <div className="adjust-results">
+              {achados.map((peca) => (
+                <button key={peca.id} onClick={() => acrescentar(peca)}>
+                  <span className="catalog-code">{peca.code.slice(-2)}</span>
+                  <div><strong>{peca.name}</strong><small>{peca.code} · {peca.stock} em estoque</small></div>
+                  <i>+</i>
+                </button>
+              ))}
+            </div>
+          ) : busca.trim() ? <div className="os-search-hint"><Icon name="box" size={17}/><span>Nenhuma peça com "{busca.trim()}".</span></div> : null}
+
+          {linhas.length ? (
+            <div className="table-scroll adjust-table">
+              <table><thead><tr><th>Peça</th><th className="num">Sistema</th><th className="num">Contado</th><th className="num">Diferença</th><th className="num">Em dinheiro</th><th></th></tr></thead>
+                <tbody>{comMotivo.map((linha) => {
+                  const diferenca = diferencaDoAjuste(linha);
+                  return (
+                    <tr key={linha.productId}>
+                      <td><strong>{linha.nome}</strong></td>
+                      <td className="num mono">{linha.saldoAtual}</td>
+                      <td className="num"><NumberField id={`contado-${linha.productId}`} min={0} fallback={linha.saldoAtual} value={linha.contado} onChange={(valor) => mexer(linha.productId, valor)} className="adjust-input"/></td>
+                      <td className="num mono"><strong className={diferenca > 0 ? "lucro-bom" : diferenca < 0 ? "lucro-ruim" : ""}>{diferenca > 0 ? `+${diferenca}` : diferenca}</strong></td>
+                      <td className="num mono">{formatBRL(valorDoAjuste(linha))}</td>
+                      <td><button className="remove-item" onClick={() => tirar(linha.productId)} aria-label="Tirar da lista">×</button></td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
+          ) : <div className="pdv-empty"><span><Icon name="box" size={20}/></span><strong>Nenhuma peça na conferência</strong><p>Procure a peça acima para começar.</p></div>}
+
+          {/* O motivo é obrigatório de propósito: ajuste sem motivo é
+              indistinguível de erro, e um estoque cheio de correções anônimas é
+              um estoque em que ninguém confia. */}
+          <label className="field"><span>Motivo <b className="req">*</b></span>
+            <select value={motivo} onChange={(e) => setMotivo(e.target.value as MotivoDeAjuste)}>
+              <option value="">Escolha o motivo</option>
+              {motivosDeAjuste.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+            </select>
+          </label>
+          <label className="field"><span>Observação{motivo === "Correção de lançamento" ? <b className="req"> *</b> : null}</span>
+            <input value={observacao} onChange={(e) => setObservacao(emMaiusculo(e.target.value))} placeholder="Ex.: ENTRADA ENT-0003 LANÇADA EM DOBRO"/>
+          </label>
+        </div>
+
+        {erro ? <div className="dialog-error-strip" role="alert"><b>!</b><span>{erro}</span></div> : null}
+
+        <div className="adjust-footer">
+          <div className="adjust-resumo">
+            <span>Peças<b>{resumo.itens}</b></span>
+            <span>Entrando<b className="lucro-bom">+{resumo.entram}</b></span>
+            <span>Saindo<b className="lucro-ruim">−{resumo.saem}</b></span>
+            <span>Impacto<b>{formatBRL(resumo.valor)}</b></span>
+          </div>
+          <button className="primary-button" disabled={gravando || !linhas.length} onClick={() => void confirmar()}>
+            {gravando ? "Gravando..." : "Confirmar ajuste"}
+          </button>
+        </div>
+      </section>
+
+      <section className="panel module-panel">
+        <div className="summary-title"><span>Ajustes anteriores</span><b>{adjustments.length} NO HISTÓRICO</b></div>
+        <div className="table-scroll">
+          <table><thead><tr><th>Ajuste</th><th>Data</th><th>Motivo</th><th className="num">Peças</th><th className="num">Em dinheiro</th><th>Quem fez</th></tr></thead>
+            <tbody>{adjustments.length ? [...adjustments].sort((a, b) => String(b.adjustedAt).localeCompare(String(a.adjustedAt))).map((ajuste) => (
+              <tr key={ajuste.id}>
+                <td><strong className="order-id">{ajuste.id}</strong>{ajuste.observacao ? <span>{ajuste.observacao}</span> : null}</td>
+                <td>{ajuste.date}</td>
+                <td>{ajuste.motivo}</td>
+                <td className="num mono">{(ajuste.items ?? []).length}</td>
+                <td className="num mono"><strong className={ajuste.valor >= 0 ? "lucro-bom" : "lucro-ruim"}>{formatBRL(ajuste.valor)}</strong></td>
+                <td>{ajuste.operatorName || "—"}</td>
+              </tr>
+            )) : <tr><td colSpan={6} className="report-vazio">Nenhum ajuste registrado ainda.</td></tr>}</tbody>
+          </table>
+        </div>
       </section>
     </>
   );
@@ -1590,6 +2246,7 @@ function AdminWorkspace({
 }
 
 export function ModuleWorkspace({
+  stockAdjustments,
   active,
   canOperate,
   canCreateOrders,
@@ -1633,6 +2290,7 @@ export function ModuleWorkspace({
   settings,
   motorcycles,
 }: {
+  stockAdjustments: StockAdjustmentRecord[];
   active: string;
   canOperate: boolean;
   canCreateOrders: boolean;
@@ -1698,8 +2356,11 @@ export function ModuleWorkspace({
   if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} discount={discount} setDiscount={setDiscount} products={products} clients={clients} blockZeroStockSale={settings?.blockZeroStockSale !== false} />;
   if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
-  if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
-  if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
+  if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts} notify={notify} canManage={canOperate}/>;
+  if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts} notify={notify} canManage={canOperate}/>;
+  if (active === "Histórico de caixas") return <CashHistoryWorkspace cashSessions={cashSessions} notify={notify}/>;
+  if (active === "Ajuste de estoque") return <StockAdjustWorkspace products={products} adjustments={stockAdjustments} currentUser={currentFirebaseUser} notify={notify} canManage={canOperate}/>;
+  if (active === "Relatórios") return <ReportWorkspace sales={sales} orders={orders} expenses={expenses} movements={movements} accounts={accounts} notify={notify}/>;
   if (active === "Funcionários") return <TeamWorkspace users={users} setUsers={setUsers} openDialog={openDialog} notify={notify} orders={orders} sales={sales} expenses={expenses} canManageTeam={canOperate}/>;
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} setEmployees={setUsers} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
   if (active === "Configurações") return (
@@ -2093,6 +2754,7 @@ export function AppDialog({
   setDiscount,
   sales,
   stockEntries,
+  stockAdjustments,
   accounts,
   cashSessions,
   movements,
@@ -2130,6 +2792,7 @@ export function AppDialog({
   setDiscount: (value: number) => void;
   sales: SaleRecord[];
   stockEntries: StockEntryRecord[];
+  stockAdjustments: StockAdjustmentRecord[];
   accounts: AccountRecord[];
   cashSessions: CashSession[];
   movements: MovementRecord[];
@@ -2171,6 +2834,10 @@ export function AppDialog({
   const [accountCategory, setAccountCategory] = useState("");
   const [accountInstallments, setAccountInstallments] = useState(1);
   const [accountNotes, setAccountNotes] = useState("");
+  // Recorrência: aluguel, energia e internet voltam todo mês. É diferente de
+  // parcelamento — parcela tem fim e valor fixo, e a conta de luz não tem nem
+  // um nem outro —, por isso as duas escolhas não podem valer juntas.
+  const [accountRecurrence, setAccountRecurrence] = useState<Periodicidade | "">("");
   // Baixa de conta.
   const [settleAmount, setSettleAmount] = useState("");
   const [settleDate, setSettleDate] = useState(() => new Date().toISOString().split("T")[0]);
@@ -2461,7 +3128,7 @@ export function AppDialog({
           onCreateCategory={criarCategoriaDeProduto}
           onCreatePartBrand={(nome) => criarItemDeLista("partBrands", nome)}
           settings={settings}
-          movementSources={{ stockEntries, sales, orders }}
+          movementSources={{ stockEntries, sales, orders, adjustments: stockAdjustments }}
           removal={exclusao(canOperate)}
         />
       </Suspense></ErrorBoundary>
@@ -3566,14 +4233,24 @@ export function AppDialog({
           installment: parcela.installment,
           installments: parcelas.length,
           ...(parcelas.length > 1 ? { groupId } : {}),
+          // O dia original vai gravado: sem ele, um aluguel que vence dia 31
+          // encolhe para 28 em fevereiro e fica no 28 para sempre.
+          ...(accountRecurrence ? {
+            recurrence: accountRecurrence,
+            recurrenceId: `${prefix}-R${Date.now()}`,
+            recurrenceDay: Number(accountDueDate.split("-")[2]) || 1,
+          } : {}),
         })));
         setAccountDescriptionText("");
         setAccountAmount("");
         setAccountNotes("");
         setAccountInstallments(1);
-        return finish(parcelas.length > 1
-          ? `${parcelas.length} parcelas lançadas em contas a ${kind}.`
-          : `Conta a ${kind} lançada com sucesso.`);
+        setAccountRecurrence("");
+        return finish(accountRecurrence
+          ? `Conta a ${kind} lançada. Ela se repete ${accountRecurrence.toLowerCase()}: o sistema avisa quando a próxima precisar ser lançada.`
+          : parcelas.length > 1
+            ? `${parcelas.length} parcelas lançadas em contas a ${kind}.`
+            : `Conta a ${kind} lançada com sucesso.`);
       } catch (error) {
         return setDialogError(error instanceof Error ? error.message : "Não foi possível lançar a conta.");
       } finally {
@@ -4551,7 +5228,14 @@ export function AppDialog({
               <label className="field field-full"><span>{dialog === "receivable" ? "Cliente ou pagador" : "Fornecedor ou favorecido"}</span><select value={accountPerson} onChange={(event) => setAccountPerson(event.target.value)}>{(dialog === "receivable" ? clients.map((client) => client.name) : activeSuppliers.map((supplier) => supplier.name)).map((name) => <option key={name}>{name}</option>)}<option>Cadastro avulso</option></select></label>
               <label className="field field-full"><span>Descrição</span><input value={accountDescriptionText} onChange={(event) => setAccountDescriptionText(event.target.value)} placeholder={dialog === "receivable" ? "Ex.: Parcela de peças e serviço" : "Ex.: Compra de peças"}/></label>
               <label className="field"><span>Valor total</span><MoneyField value={accountAmount} onChange={setAccountAmount} placeholder="0,00"/></label><label className="field"><span>{accountInstallments > 1 ? "Primeiro vencimento" : "Vencimento"}</span><input type="date" value={accountDueDate} onChange={(event) => setAccountDueDate(event.target.value)}/></label>
-              <label className="field"><span>Categoria</span><select value={accountCategory} onChange={(event) => setAccountCategory(event.target.value)}>{accountCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="field"><span>Parcelas</span><select value={accountInstallments} onChange={(event) => setAccountInstallments(Number(event.target.value) || 1)}>{[1, 2, 3, 4, 5, 6, 10, 12].map((count) => <option value={count} key={count}>{count === 1 ? "Parcela única" : `${count} parcelas`}</option>)}</select></label>
+              <label className="field"><span>Categoria</span><select value={accountCategory} onChange={(event) => setAccountCategory(event.target.value)}>{accountCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="field"><span>Parcelas</span><select value={accountInstallments} disabled={Boolean(accountRecurrence)} onChange={(event) => setAccountInstallments(Number(event.target.value) || 1)}>{[1, 2, 3, 4, 5, 6, 10, 12].map((count) => <option value={count} key={count}>{count === 1 ? "Parcela única" : `${count} parcelas`}</option>)}</select></label>
+              <label className="field field-full"><span>Se repete</span>
+                <select value={accountRecurrence} onChange={(event) => { const escolha = event.target.value as Periodicidade | ""; setAccountRecurrence(escolha); if (escolha) setAccountInstallments(1); }}>
+                  <option value="">Não se repete</option>
+                  {periodicidades.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                </select>
+                <small className="field-hint">Aluguel, energia, internet e contador. O sistema avisa quando a próxima competência precisa ser lançada — e não lança sozinho, para não duplicar.</small>
+              </label>
               <label className="field field-full"><span>Observações</span><textarea value={accountNotes} onChange={(event) => setAccountNotes(event.target.value)} placeholder="Informações opcionais sobre cobrança ou pagamento"/></label>
             </div>
             {accountInstallments > 1 && valorDigitado(accountAmount) > 0 ? (
@@ -4634,8 +5318,24 @@ export function AppDialog({
 
             <div className="module-summary">
               <article><span>Fundo de troco</span><strong>{formatBRL(drawer.opening)}</strong><small>Abertura do caixa</small></article>
-              <article><span>Entrou em dinheiro</span><strong>{formatBRL(drawer.sales + drawer.received + drawer.supplies)}</strong><small>{formatBRL(drawer.sales)} em vendas e OS</small></article>
-              <article><span>Saiu em dinheiro</span><strong>{formatBRL(drawer.withdrawals + drawer.expenses)}</strong><small>{formatBRL(drawer.withdrawals)} em sangrias</small></article>
+              <article><span>Entrou em dinheiro</span><strong>{formatBRL(drawer.incoming)}</strong><small>{formatBRL(drawer.counter + drawer.quick)} no balcão</small></article>
+              <article><span>Saiu em dinheiro</span><strong>{formatBRL(drawer.outgoing)}</strong><small>{formatBRL(drawer.withdrawals)} em sangrias</small></article>
+            </div>
+
+            {/* Cada origem na sua linha. Somadas num número só, uma diferença
+                no balcão aparecia como diferença do caixa inteiro, e quem
+                fecha a gaveta no fim do dia não tinha onde procurar. */}
+            <div className="cash-origins">
+              <div className="cash-origins-head"><strong>De onde veio o dinheiro da gaveta</strong><span>{formatBRL(drawer.incoming)} desde a abertura</span></div>
+              <ul>
+                {drawerOrigins(drawer).map((linha) => (
+                  <li key={linha.origem}><span>{linha.origem}</span><b className="mono">{formatBRL(linha.total)}</b></li>
+                ))}
+                {drawer.withdrawals ? <li className="saiu"><span>Sangria</span><b className="mono">− {formatBRL(drawer.withdrawals)}</b></li> : null}
+                {drawer.expenses ? <li className="saiu"><span>Gasto pago pela gaveta</span><b className="mono">− {formatBRL(drawer.expenses)}</b></li> : null}
+                {drawer.manualOut ? <li className="saiu"><span>Saída avulsa</span><b className="mono">− {formatBRL(drawer.manualOut)}</b></li> : null}
+                {!drawerOrigins(drawer).length && !drawer.outgoing ? <li className="cash-origins-vazio"><span>Nada passou pela gaveta ainda além do fundo de troco.</span></li> : null}
+              </ul>
             </div>
 
             <div className="cash-actions">{[{name:"Suprimento", detail:"Adicionar dinheiro", icon:"plus" as IconName},{name:"Sangria", detail:"Retirar dinheiro", icon:"arrow" as IconName},{name:"Fechar caixa", detail:"Conferir o dia", icon:"check" as IconName}].map((action) => <button className={cashAction === action.name ? "selected" : ""} key={action.name} onClick={() => { setCashAction(action.name); setDialogError(""); }}><Icon name={action.icon}/><strong>{action.name}</strong><small>{action.detail}</small></button>)}</div>
@@ -4665,7 +5365,12 @@ export function AppDialog({
               </div>
             )}
 
-            {cashProblem ? <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>{cashProblem}</span></div> : null}
+            {/* Só depois de escrever alguma coisa. Com o campo em branco o
+                diálogo abria já acusando "informe um valor maior que zero",
+                e um erro que aparece antes de a pessoa fazer nada ensina a
+                ignorar a tarja vermelha — inclusive quando ela é de verdade.
+                A validação em si continua no confirmar. */}
+            {cashProblem && cashAmount.trim() ? <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>{cashProblem}</span></div> : null}
 
             {drawerMoves.length ? (
               <div className="table-scroll">
@@ -5155,6 +5860,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [paymentMethods, setPaymentMethods] = useFirebaseSyncedCollection("paymentMethods", initialPaymentMethods, firebaseEnabled && (canSeeFinance || canUsePdv), canManageSettings, firebaseSession.reportSyncError);
   const [sales] = useFirebaseSyncedCollection<SaleRecord>("sales", initialSales, firebaseEnabled && (canSeeFinance || canUsePdv || canUseQuickService), false, firebaseSession.reportSyncError);
   const [stockEntries] = useFirebaseSyncedCollection<StockEntryRecord>("stockEntries", initialStockEntries, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
+  const [stockAdjustments] = useFirebaseSyncedCollection<StockAdjustmentRecord>("stockAdjustments", initialStockAdjustments, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
   const [accounts] = useFirebaseSyncedCollection<AccountRecord>("accounts", initialAccounts, firebaseEnabled && canSeeFinance, false, firebaseSession.reportSyncError);
   const [cashSessions] = useFirebaseSyncedCollection<CashSession>("cashSessions", initialCashSessions, firebaseEnabled && (canSeeFinance || canUsePdv), false, firebaseSession.reportSyncError);
   const [movements] = useFirebaseSyncedCollection<MovementRecord>("movements", initialMovements, firebaseEnabled && canSeeFinance, false, firebaseSession.reportSyncError);
@@ -5485,11 +6191,11 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           </div>
           </>
           ) : (
-            <ModuleWorkspace active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
+            <ModuleWorkspace stockAdjustments={stockAdjustments} active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {helpOpen ? (
         <div className="dialog-layer" role="presentation" onMouseDown={(evento) => evento.target === evento.currentTarget && setHelpOpen(false)}>
           <section className="dialog dialog-wide help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">
