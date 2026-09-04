@@ -998,6 +998,29 @@ passa de 60px, que o campo não passa de 34px e que a linha de peça não passa 
 42px — e confere que "Problema relatado", "Mecânicos responsáveis", "Adicionar
 peças" e "Adicionar mão de obra" continuam todos na tela.
 
+### A nova OS entrou na mesma régua
+
+Compactar não bastava: a OS continuava com o **rótulo em cima do campo**,
+enquanto os quatro cadastros já tinham passado para o rótulo à esquerda. Duas
+telas do mesmo sistema pedindo a mesma coisa de dois jeitos é o que faz quem
+atende hesitar meio segundo em cada campo.
+
+Agora a OS usa a mesma régua, com uma diferença: a coluna do rótulo é de
+**104px** e não 122px, porque a OS já divide a tela em duas colunas e dentro de
+cada uma o campo precisa do espaço que sobra.
+
+Uma exceção de propósito: o **formulário da moto nova** tem três colunas de
+campo curto (placa, marca, modelo, versão, ano, cor). Ali a régua não cabe — o
+campo ficaria com 60px — e o rótulo continua em cima. No celular a régua toda
+volta a empilhar, como nos outros cadastros.
+
+Os rótulos encolheram junto: "Problema relatado pelo cliente" virou "Problema
+relatado", "Preço cobrado da peça" virou "Preço da peça".
+
+O diálogo desceu de 859px para **799px** de altura com isso, e o passo 38 do
+roteiro passou a cobrar também a régua — que o rótulo está ao lado do campo e
+alinhado à direita, além do que já media.
+
 ## A lista de peças
 
 Era um cartão por peça, com o nome e pouco mais: para conferir o código, a

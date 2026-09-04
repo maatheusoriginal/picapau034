@@ -1952,6 +1952,17 @@ await passo("a nova OS cabe numa tela só, sem rolar atrás do problema e dos me
       cabecalho: cabecalho ? Math.round(cabecalho.getBoundingClientRect().height) : 0,
       campo: campo ? Math.round(campo.getBoundingClientRect().height) : 0,
       peca: peca ? Math.round(peca.getBoundingClientRect().height) : 0,
+      // A régua: rótulo à esquerda do campo, alinhado à direita, como no
+      // cadastro de peça e no sistema que a oficina usa todo dia.
+      regua: (() => {
+        const linha = document.querySelector(".dialog-os .form-grid > .field");
+        const rotulo = linha?.querySelector("span");
+        const dele = linha?.querySelector("input, select, textarea");
+        if (!rotulo || !dele) return null;
+        return Math.abs(rotulo.getBoundingClientRect().top - dele.getBoundingClientRect().top) < 14
+          && rotulo.getBoundingClientRect().right <= dele.getBoundingClientRect().left + 1
+          && getComputedStyle(rotulo).textAlign === "right";
+      })(),
       // Os campos que ficavam abaixo da dobra.
       textoTodo: corpo.innerText,
     };
@@ -1963,6 +1974,7 @@ await passo("a nova OS cabe numa tela só, sem rolar atrás do problema e dos me
   if (medida.cabecalho > 60) problemas.push(`o cabeçalho da OS voltou a ${medida.cabecalho}px (era 150px em três linhas)`);
   if (medida.campo > 34) problemas.push(`o campo da OS está com ${medida.campo}px, esperado no máximo 34`);
   if (medida.peca && medida.peca > 42) problemas.push(`a linha de peça está com ${medida.peca}px, esperado no máximo 42`);
+  if (medida.regua !== true) problemas.push("o rótulo da OS voltou a ficar em cima do campo, fora do formato dos cadastros");
   for (const pedaco of ["Problema relatado", "Mecânicos responsáveis", "Adicionar peças", "Adicionar mão de obra"]) {
     if (!medida.textoTodo.includes(pedaco)) problemas.push(`"${pedaco}" sumiu da tela única`);
   }

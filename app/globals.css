@@ -528,6 +528,20 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
 .dialog-os .form-grid { gap: 8px; }
 .dialog-os .os-inline-form { gap: 8px; }
 
+/* A régua também na nova OS: rótulo à esquerda do campo, alinhado à direita,
+   como no cadastro de peça e no sistema que a oficina usa. Aqui a coluna do
+   rótulo é mais estreita (104px) porque a OS já divide a tela em duas colunas,
+   e dentro de cada uma o campo precisa do espaço que sobra. */
+.dialog-os .field { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 9px; }
+.dialog-os .field > span { text-align: right; line-height: 1.3; }
+.dialog-os .field > .field-help, .dialog-os .field > small { grid-column: 2 / -1; margin-top: -1px; }
+.dialog-os .field:has(textarea) { align-items: start; }
+.dialog-os .field:has(textarea) > span { padding-top: 7px; }
+/* O formulário da moto nova tem três colunas de campo curto: ali a régua não
+   cabe, e o rótulo volta para cima. */
+.dialog-os .os-inline-form .field { display: flex; flex-direction: column; gap: 3px; }
+.dialog-os .os-inline-form .field > span { text-align: left; }
+
 .dialog-os .os-party-switch { gap: 7px; margin-bottom: 8px; }
 .dialog-os .os-party-switch > button { height: 36px; font-size: 10px; }
 .dialog-os .mini-search { height: 32px; }
@@ -1741,6 +1755,9 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 9px; }
      próxima — que é exatamente o que ele abriu a tela para ver. */
   /* A nova OS fica compacta no computador (ver .dialog-os), mas 32px de campo
      é medida de mouse: no celular o dedo precisa dos 40px de volta. */
+  .dialog-os .field { display: flex; flex-direction: column; gap: 3px; }
+  .dialog-os .field > span { text-align: left; }
+  .dialog-os .field:has(textarea) > span { padding-top: 0; }
   .dialog-os .field input, .dialog-os .field select { min-height: 40px; font-size: 10px; }
   .dialog-os .os-party-switch > button { height: 44px; }
   .dialog-os .primary-button, .dialog-os .outline-button, .dialog-os .ghost-button { height: 40px; }
