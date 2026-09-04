@@ -554,6 +554,19 @@ export type AccountRecord = {
   installments: number;
   /** Liga as parcelas do mesmo lançamento. */
   groupId?: string;
+  /**
+   * Cada quanto a conta se repete: aluguel, energia, internet.
+   *
+   * Diferente de parcelamento: parcela tem fim e valor fixo, e a conta de
+   * energia não tem nem um nem outro. Ver src/recurring.ts.
+   */
+  recurrence?: string;
+  /** Liga as competências da mesma conta recorrente. */
+  recurrenceId?: string;
+  /** O dia do vencimento original, para o dia 31 não virar 28 para sempre. */
+  recurrenceDay?: number;
+  /** Data brasileira em que a série termina, quando tem fim. */
+  recurrenceEndsOn?: string;
 };
 
 export type CartItem = {

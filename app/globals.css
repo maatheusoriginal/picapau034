@@ -438,6 +438,19 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 11.5px; }
    empurrar o botão de fechar para fora da vista. */
 /* Histórico de caixas: a linha inteira é clicável para abrir o detalhe, então
    ela precisa parecer clicável. */
+/* Contas que se repetem: uma lista curta com o botão de lançar, e o que já
+   venceu marcado — é a conta esquecida que chega com juros. */
+.recorrentes { border-color: #e6ddd3; }
+.recorrente-lista { margin: 0; padding: 4px 0 8px; list-style: none; }
+.recorrente-lista li { display: flex; align-items: center; gap: 12px; padding: 9px 15px; border-top: 1px solid #f2f0ed; }
+.recorrente-lista li:first-child { border-top: 0; }
+.recorrente-lista li > div { flex: 1; min-width: 0; }
+.recorrente-lista strong { display: block; color: #35363a; font-size: 12.5px; }
+.recorrente-lista span { display: block; margin-top: 2px; color: #929296; font-size: 11px; }
+.recorrente-lista b { color: #35363a; font-size: 13px; }
+.recorrente-lista li.atrasada b { color: #9a5c5c; }
+.recorrente-lista li.atrasada span { color: #9a5c5c; }
+.recorrente-lista .outline-button { height: 30px; padding: 0 13px; font-size: 12px; }
 .caixa-mini { margin: 14px 0 0; border-radius: 10px; }
 .caixa-linha { cursor: pointer; }
 .caixa-linha:hover { background: #faf9f7; }
@@ -501,6 +514,31 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: 11.5px; }
 
 /* O resultado na ordem em que se lê um DRE: o que entrou, o que saiu, o que
    sobrou. A linha do total é a única com peso, para o olho parar nela. */
+/* A comparação com o período anterior fica embaixo do número, não ao lado:
+   ao lado ela empurraria o valor para a esquerda e a coluna de dinheiro
+   deixaria de alinhar, que é o que faz um DRE ser lido de relance. */
+/* Peça e mão de obra lado a lado: duas colunas iguais, para a comparação ser
+   visual antes de ser numérica. */
+.report-tipos { grid-column: 1 / -1; }
+.tipo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0 15px 13px; border: 1px solid #eceae7; border-radius: 10px; overflow: hidden; background: #eceae7; }
+.tipo-grid article { padding: 12px 14px; background: #faf9f7; }
+.tipo-grid > article > span { display: block; color: #8a8b8f; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.tipo-grid > article > strong { display: block; margin: 5px 0 9px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 19px; }
+.tipo-linha { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.tipo-linha span { color: #77787c; font-size: 11.5px; }
+.tipo-linha b { color: #35363a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.tipo-linha.nota { padding-top: 7px; }
+.tipo-linha.nota span { color: #9a9a9e; font-size: 10.5px; line-height: 1.45; }
+.tipo-grid article small { display: block; margin-top: 8px; color: #9a9a9e; font-size: 10.5px; }
+@media (max-width: 900px) { .tipo-grid { grid-template-columns: 1fr; } }
+.dre-valor { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.dre-delta { display: flex; align-items: baseline; gap: 7px; font-size: 10.5px; font-style: normal; font-weight: 700; }
+.dre-delta b { color: #9a9a9e; font-weight: 500; }
+.dre-delta.melhor { color: #2f7a55; }
+.dre-delta.pior { color: #9a5c5c; }
+.dre-delta.neutro { color: #9a9a9e; font-weight: 500; }
+.report-mini article small { display: block; margin-top: 3px; color: #9a9a9e; font-size: 10px; }
+.report-dre .panel-header .outline-button.selected { border-color: #cf9692; color: var(--red); }
 .dre { display: grid; gap: 2px; padding: 4px 15px 13px; }
 .dre-linha { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 7px 0; border-bottom: 1px solid #f2f0ed; }
 .dre-linha:last-child { border-bottom: 0; }

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { arredondar, clamp, displayValue, isPartialNumber, parseTyped, settleOnBlur } from "../number-input";
+import { arredondar, clamp, displayValue, isPartialNumber, normalizarColado, parseTyped, settleOnBlur } from "../number-input";
 
 type Props = Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "min" | "max"> & {
   value: number;
@@ -56,7 +56,12 @@ export const NumberField: React.FC<Props> = ({ value, onChange, fallback = 0, bl
     // Um input[type=number] entrega "" para o que ele não consegue ler; num
     // campo de texto (com casas) é este teste que barra a letra. Ele aceita o
     // número pela metade — "1," e "-" são estados normais de quem digita.
-    if (!isPartialNumber(raw)) return;
+    if (!isPartialNumber(raw)) {
+      // Valor colado já formatado: sem isto o campo ignorava a colagem calado.
+      const colado = normalizarColado(raw);
+      if (!colado) return;
+      raw = colado;
+    }
     setText(raw);
     const typed = parseTyped(raw);
     if (typed === null) return;

@@ -10,8 +10,9 @@ import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
 import { formatPlate, motorcycleIdFor, normalizePlate, platePattern } from "../src/plate";
 import { avisoDeMotoDeFora, buscarMotos, estaNaFrota } from "../src/fleet";
 import { somenteAtivos, type BaseDaOficina } from "../src/removal";
-import { ajusteProblema, diferencaDoAjuste, motivosDeAjuste, resumoDoAjuste, valorDoAjuste, type Ajuste, type MotivoDeAjuste } from "../src/stock-adjust";
-import { atalhosDePeriodo, nomeDoArquivo, paraCSV, pecasMaisVendidas, periodoDe, periodoEmTexto, porFormaDePagamento, resultadoDoPeriodo, servicosMaisFeitos, type AtalhoDePeriodo } from "../src/report";
+import { acharPorCodigo, ajusteProblema, diferencaDoAjuste, motivosDeAjuste, pareceCodigo, resumoDoAjuste, valorDoAjuste, type Ajuste, type MotivoDeAjuste } from "../src/stock-adjust";
+import { atalhosDePeriodo, nomeDoArquivo, paraCSV, pecasMaisVendidas, periodoAnterior, periodoDe, periodoEmTexto, porFormaDePagamento, resultadoDoPeriodo, resultadoPorTipo, servicosMaisFeitos, variacao, type AtalhoDePeriodo } from "../src/report";
+import { pendenciasRecorrentes, periodicidades, proximaConta, serieDe, textoDaPendencia, type Periodicidade } from "../src/recurring";
 import { emMaiusculo } from "../src/text-case";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
@@ -780,9 +781,13 @@ function AccountsWorkspace({
   openDialog,
   expenses,
   accounts,
+  notify,
+  canManage,
 }: {
   kind: "receber" | "pagar";
   openDialog: OpenDialog;
+  notify: (mensagem: string) => void;
+  canManage: boolean;
   expenses: ExpenseRecord[];
   accounts: AccountRecord[];
 }) {
@@ -804,6 +809,33 @@ function AccountsWorkspace({
   const overdue = useMemo(() => records.filter((record) => record.status === "Atrasado").reduce((sum, record) => sum + record.open, 0), [records]);
   const dueToday = useMemo(() => records.filter((record) => record.status === "Vence hoje").reduce((sum, record) => sum + record.open, 0), [records]);
 
+  /**
+   * As contas recorrentes que ainda não foram lançadas.
+   *
+   * Não é o sistema que grava sozinho: não existe servidor rodando de
+   * madrugada, e um gerador automático sem ninguém olhando é como nasce conta
+   * duplicada — que em contas a pagar some no meio das outras até o dia em que
+   * o saldo não fecha. Aqui é uma lista com um botão.
+   */
+  const [lancando, setLancando] = useState("");
+  const pendentes = useMemo(
+    () => pendenciasRecorrentes(accounts.filter((conta) => conta.kind === kind)),
+    [accounts, kind]);
+
+  const lancarRecorrente = async (pendencia: (typeof pendentes)[number]) => {
+    const prefixo = isReceivable ? "CR" : "CP";
+    setLancando(`${pendencia.serie}-${pendencia.vencimento}`);
+    try {
+      await saveAccounts(prefixo, highestSequence(accounts, prefixo) + 1,
+        [proximaConta(pendencia.base, pendencia.vencimento) as unknown as Record<string, unknown>]);
+      notify(`${pendencia.base.description} lançada para ${pendencia.vencimento}.`);
+    } catch (problema) {
+      notify(problema instanceof Error ? problema.message : "Não foi possível lançar a conta.");
+    } finally {
+      setLancando("");
+    }
+  };
+
   return (
     <>
       <div className="module-heading">
@@ -815,6 +847,32 @@ function AccountsWorkspace({
         <article className={overdue ? "summary-danger" : ""}><span>Vencido</span><strong>{formatBRL(overdue)}</strong><small>{overdue ? "Precisa de atenção" : "Nenhuma conta atrasada"}</small></article>
         <article><span>Vence hoje</span><strong>{formatBRL(dueToday)}</strong><small>{records.filter((record) => record.status === "Vence hoje").length} {records.filter((record) => record.status === "Vence hoje").length === 1 ? "lançamento" : "lançamentos"}</small></article>
       </div>
+      {pendentes.length ? (
+        <section className="panel module-panel recorrentes">
+          <div className="panel-header"><div>
+            <h2>Contas que se repetem</h2>
+            <p>{pendentes.length === 1 ? "1 competência ainda não foi lançada" : `${pendentes.length} competências ainda não foram lançadas`}. Confira o valor antes: energia muda todo mês.</p>
+          </div></div>
+          <ul className="recorrente-lista">
+            {pendentes.map((pendencia) => {
+              const chave = `${pendencia.serie}-${pendencia.vencimento}`;
+              return (
+                <li key={chave} className={pendencia.emDias < 0 ? "atrasada" : ""}>
+                  <div>
+                    <strong>{pendencia.base.description}</strong>
+                    <span>{pendencia.base.person} · {textoDaPendencia(pendencia).split(" · ")[1]}</span>
+                  </div>
+                  <b className="mono">{formatBRL(pendencia.base.amount)}</b>
+                  <button className="outline-button" disabled={!canManage || Boolean(lancando)} onClick={() => void lancarRecorrente(pendencia)}>
+                    {lancando === chave ? "Lançando..." : "Lançar"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="panel module-panel">
         <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={accountSearch} onChange={(event) => setAccountSearch(event.target.value)} placeholder={`Buscar ${isReceivable ? "cliente" : "fornecedor"}, descrição ou código`}/></label><div className="filter-pills">{["Todos", "A vencer", "Vence hoje", "Atrasado"].map((filter) => <button className={accountFilter === filter ? "selected" : ""} key={filter} onClick={() => setAccountFilter(filter)}>{filter}</button>)}</div></div>
         <div className="table-scroll"><table><thead><tr><th>{isReceivable ? "Cliente / Pagador" : "Fornecedor / Favorecido"}</th><th className="col-secondary">Descrição</th><th>Vencimento</th><th className="col-secondary">Valor original</th><th>Saldo</th><th>Status</th><th>Ação</th></tr></thead><tbody>{filteredRecords.length ? filteredRecords.map((record) => <tr key={record.id}><td><strong>{record.person}</strong><span className="mono">{record.id}</span></td><td className="col-secondary"><strong>{record.description}</strong><span>{isReceivable ? "Receita operacional" : "Despesa da oficina"}</span></td><td>{record.dueDate}</td><td className="col-secondary mono">{formatBRL(record.original)}</td><td><strong className="mono">{formatBRL(record.open)}</strong></td><td><span className={`status ${record.status === "Atrasado" ? "red" : record.status === "Vence hoje" ? "amber" : record.status === "Parcial" ? "violet" : record.status === "Quitado" ? "green" : "blue"}`}><i/>{record.status}</span></td><td><button className="account-action" onClick={() => openDialog(isReceivable ? "settleReceivable" : "settlePayable", record.id)}>{isReceivable ? "Receber" : "Pagar"}</button></td></tr>) : <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>Nenhuma conta {isReceivable ? "a receber" : "a pagar"} cadastrada no momento.</td></tr>}</tbody></table></div>
@@ -848,9 +906,17 @@ function ReportWorkspace({ sales, orders, expenses, movements, accounts, notify 
     setAtalho(novo); setDe(calculado.de); setAte(calculado.ate);
   };
 
+  const [comparar, setComparar] = useState(true);
   const resultado = useMemo(() => resultadoDoPeriodo(periodo, { sales, orders, expenses, movements }),
     [periodo, sales, orders, expenses, movements]);
+  // O período anterior é calculado sempre; o botão só decide se aparece. Assim
+  // ligar a comparação é instantâneo, e não uma espera de recontar tudo.
+  const anteriorPeriodo = useMemo(() => periodoAnterior(periodo), [periodo]);
+  const anterior = useMemo(() => resultadoDoPeriodo(anteriorPeriodo, { sales, orders, expenses, movements }),
+    [anteriorPeriodo, sales, orders, expenses, movements]);
   const formas = useMemo(() => porFormaDePagamento(periodo, sales, orders), [periodo, sales, orders]);
+  const tipos = useMemo(() => resultadoPorTipo(periodo, { sales, orders }), [periodo, sales, orders]);
+  const tiposAntes = useMemo(() => resultadoPorTipo(anteriorPeriodo, { sales, orders }), [anteriorPeriodo, sales, orders]);
   const pecas = useMemo(() => pecasMaisVendidas(periodo, sales, orders), [periodo, sales, orders]);
   const servicos = useMemo(() => servicosMaisFeitos(periodo, sales, orders), [periodo, sales, orders]);
   const aReceber = useMemo(() => openAccounts(accounts, "receber").reduce((s, c) => s + accountOpen(c), 0), [accounts]);
@@ -864,18 +930,29 @@ function ReportWorkspace({ sales, orders, expenses, movements, accounts, notify 
    * para o que a oficina faz com isso.
    */
   const exportar = () => {
+    const pct = (valor: number) => String(valor).replace(".", ",");
+    // A coluna do período anterior vai junto: quem abre a planilha para montar
+    // o próprio gráfico precisa dos dois lados da comparação, não de um só.
     const linhas: Array<Array<string | number>> = [
-      ["Resultado", "", ""],
-      ["Faturamento", resultado.faturamento, ""],
-      ["Custo das peças", -resultado.custoDasPecas, ""],
-      ["Taxas de maquininha", -resultado.taxas, ""],
-      ["Despesas pagas", -resultado.despesas, ""],
-      ["Entradas avulsas", resultado.entradasAvulsas, ""],
-      ["Saídas avulsas", -resultado.saidasAvulsas, ""],
-      ["Lucro do período", resultado.lucro, `${resultado.margem}%`],
-      ["Atendimentos", resultado.atendimentos, ""],
-      ["Ticket médio", resultado.ticketMedio, ""],
-      ["Desconto concedido", resultado.descontos, ""],
+      ["Resultado", "Período", "Anterior"],
+      ["Faturamento", resultado.faturamento, anterior.faturamento],
+      ["Custo das peças", -resultado.custoDasPecas, -anterior.custoDasPecas],
+      ["Taxas de maquininha", -resultado.taxas, -anterior.taxas],
+      ["Despesas pagas", -resultado.despesas, -anterior.despesas],
+      ["Entradas avulsas", resultado.entradasAvulsas, anterior.entradasAvulsas],
+      ["Saídas avulsas", -resultado.saidasAvulsas, -anterior.saidasAvulsas],
+      ["Lucro do período", resultado.lucro, anterior.lucro],
+      // Porcentagem com vírgula, como o resto da planilha: "28.6%" numa coluna
+      // brasileira é o tipo de detalhe que faz o contador refazer o arquivo.
+      ["Margem", `${pct(resultado.margem)}%`, `${pct(anterior.margem)}%`],
+      ["Atendimentos", resultado.atendimentos, anterior.atendimentos],
+      ["Ticket médio", resultado.ticketMedio, anterior.ticketMedio],
+      ["Desconto concedido", resultado.descontos, anterior.descontos],
+      ["", "", ""],
+      ["Negócio", "Faturamento", "Custo", "Lucro", "Margem"],
+      ["Revenda de peça", tipos.pecas.faturamento, tipos.pecas.custo, tipos.pecas.lucro, `${pct(tipos.pecas.margem)}%`],
+      ["Mão de obra", tipos.maoDeObra.faturamento, "", "", "custo da hora não cadastrado"],
+      ...(tipos.naoClassificado ? [["Sem itens gravados", tipos.naoClassificado, "", "", ""]] : []),
       ["", "", ""],
       ["Forma de pagamento", "Atendimentos", "Total", "Taxa", "Líquido"],
       ...formas.map((linha) => [linha.forma, linha.atendimentos, linha.total, linha.taxa, linha.liquido]),
@@ -886,7 +963,7 @@ function ReportWorkspace({ sales, orders, expenses, movements, accounts, notify 
       ["Serviço", "Quantidade", "Faturamento", "", ""],
       ...servicos.map((linha) => [linha.nome, linha.quantidade, linha.total, "", ""]),
     ];
-    const csv = paraCSV([`Relatório da oficina — ${periodoEmTexto(periodo)}`, "", "", "", ""], linhas);
+    const csv = paraCSV([`Relatório da oficina — ${periodoEmTexto(periodo)}`, "", `Anterior: ${periodoEmTexto(anteriorPeriodo)}`, "", ""], linhas);
     // BOM na frente: sem ele o Excel em português abre "ÓLEO" como "Ã“LEO".
     const arquivo = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(arquivo);
@@ -897,8 +974,37 @@ function ReportWorkspace({ sales, orders, expenses, movements, accounts, notify 
     notify(`Relatório de ${periodoEmTexto(periodo)} baixado.`);
   };
 
-  const linha = (rotulo: string, valor: number, tom?: "menos" | "total") => (
-    <div className={`dre-linha ${tom ?? ""}`}><span>{rotulo}</span><strong>{tom === "menos" ? `− ${formatBRL(valor)}` : formatBRL(valor)}</strong></div>
+  /**
+   * A variação escrita ao lado do número.
+   *
+   * `subirEBom` inverte a cor nas linhas de custo: gastar 20% a mais não é uma
+   * boa notícia pintada de verde só porque o número subiu.
+   */
+  const delta = (atual: number, base: number, subirEBom = true) => {
+    if (!comparar) return null;
+    const troca = variacao(atual, base);
+    if (troca === null) {
+      return <em className="dre-delta neutro">{base === 0 && atual === 0 ? "igual, sem movimento" : "sem base para comparar"}</em>;
+    }
+    if (troca === 0) return <em className="dre-delta neutro">igual ao anterior</em>;
+    const bom = troca > 0 === subirEBom;
+    return (
+      <em className={`dre-delta ${bom ? "melhor" : "pior"}`}>
+        {troca > 0 ? "▲" : "▼"} {Math.abs(troca).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%
+        <b>{formatBRL(base)} antes</b>
+      </em>
+    );
+  };
+
+  const linha = (rotulo: string, valor: number, base: number, tom?: "menos" | "total") => (
+    <div className={`dre-linha ${tom ?? ""}`}>
+      <span>{rotulo}</span>
+      <div className="dre-valor">
+        {/* Zero não leva sinal: "− R$ 0,00" é uma dedução que não existe. */}
+        <strong>{tom === "menos" && valor !== 0 ? `− ${formatBRL(valor)}` : formatBRL(valor)}</strong>
+        {delta(valor, base, tom !== "menos")}
+      </div>
+    </div>
   );
 
   return (
@@ -925,22 +1031,61 @@ function ReportWorkspace({ sales, orders, expenses, movements, accounts, notify 
             fantasia — vender R$ 1.000 de peça que custou R$ 700 não são
             R$ 1.000 de resultado. */}
         <section className="panel report-dre">
-          <div className="panel-header"><div><h2>Resultado do período</h2><p>{periodoEmTexto(periodo)}</p></div></div>
+          <div className="panel-header">
+            <div><h2>Resultado do período</h2><p>{comparar ? `Comparado com ${periodoEmTexto(anteriorPeriodo)}` : periodoEmTexto(periodo)}</p></div>
+            <button className={`outline-button ${comparar ? "selected" : ""}`} onClick={() => setComparar((antes) => !antes)}>
+              {comparar ? "Esconder comparação" : "Comparar com o anterior"}
+            </button>
+          </div>
           <div className="dre">
-            {linha("Faturamento", resultado.faturamento)}
-            {linha("Custo das peças vendidas", resultado.custoDasPecas, "menos")}
-            {linha("Taxas de maquininha", resultado.taxas, "menos")}
-            {linha("Despesas pagas", resultado.despesas, "menos")}
-            {resultado.entradasAvulsas ? linha("Entradas avulsas", resultado.entradasAvulsas) : null}
-            {resultado.saidasAvulsas ? linha("Saídas avulsas", resultado.saidasAvulsas, "menos") : null}
-            {linha("Lucro do período", resultado.lucro, "total")}
+            {linha("Faturamento", resultado.faturamento, anterior.faturamento)}
+            {linha("Custo das peças vendidas", resultado.custoDasPecas, anterior.custoDasPecas, "menos")}
+            {linha("Taxas de maquininha", resultado.taxas, anterior.taxas, "menos")}
+            {linha("Despesas pagas", resultado.despesas, anterior.despesas, "menos")}
+            {resultado.entradasAvulsas ? linha("Entradas avulsas", resultado.entradasAvulsas, anterior.entradasAvulsas) : null}
+            {resultado.saidasAvulsas ? linha("Saídas avulsas", resultado.saidasAvulsas, anterior.saidasAvulsas, "menos") : null}
+            {linha("Lucro do período", resultado.lucro, anterior.lucro, "total")}
           </div>
           <div className="report-mini">
-            <article><span>Margem</span><strong>{resultado.margem.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong></article>
-            <article><span>Atendimentos</span><strong>{resultado.atendimentos}</strong></article>
-            <article><span>Ticket médio</span><strong>{formatBRL(resultado.ticketMedio)}</strong></article>
-            <article><span>Desconto dado</span><strong>{formatBRL(resultado.descontos)}</strong></article>
+            <article><span>Margem</span><strong>{resultado.margem.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong>
+              {comparar ? <small>{anterior.margem.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% antes</small> : null}</article>
+            <article><span>Atendimentos</span><strong>{resultado.atendimentos}</strong>
+              {comparar ? <small>{anterior.atendimentos} antes</small> : null}</article>
+            <article><span>Ticket médio</span><strong>{formatBRL(resultado.ticketMedio)}</strong>
+              {comparar ? <small>{formatBRL(anterior.ticketMedio)} antes</small> : null}</article>
+            <article><span>Desconto dado</span><strong>{formatBRL(resultado.descontos)}</strong>
+              {comparar ? <small>{formatBRL(anterior.descontos)} antes</small> : null}</article>
           </div>
+        </section>
+
+        {/* Revenda e mão de obra são dois negócios dentro da mesma oficina: um
+            vive de comprar e revender, o outro de hora trabalhada. Somados,
+            não dá para saber qual está sustentando o mês — e é isso que decide
+            se vale mexer na margem da peça ou no preço da hora. */}
+        <section className="panel report-tipos">
+          <div className="panel-header"><div><h2>Peça e mão de obra</h2><p>Os dois negócios da oficina, separados</p></div></div>
+          <div className="tipo-grid">
+            <article>
+              <span>Revenda de peça</span>
+              <strong>{formatBRL(tipos.pecas.faturamento)}</strong>
+              <div className="tipo-linha"><span>Custo</span><b>− {formatBRL(tipos.pecas.custo)}</b></div>
+              <div className="tipo-linha"><span>Lucro</span><b className={tipos.pecas.lucro >= 0 ? "lucro-bom" : "lucro-ruim"}>{formatBRL(tipos.pecas.lucro)}</b></div>
+              <div className="tipo-linha"><span>Margem</span><b>{tipos.pecas.margem.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</b></div>
+              {comparar ? <small>{formatBRL(tiposAntes.pecas.faturamento)} no período anterior</small> : null}
+            </article>
+            <article>
+              <span>Mão de obra</span>
+              <strong>{formatBRL(tipos.maoDeObra.faturamento)}</strong>
+              {/* Sem margem de propósito: o sistema não sabe quanto custa a hora
+                  do mecânico, e "margem de 100%" no serviço seria mentira. */}
+              <div className="tipo-linha"><span>Participação</span><b>{tipos.pecas.faturamento + tipos.maoDeObra.faturamento > 0 ? `${Math.round((tipos.maoDeObra.faturamento / (tipos.pecas.faturamento + tipos.maoDeObra.faturamento)) * 1000) / 10}`.replace(".", ",") : "0"}%</b></div>
+              <div className="tipo-linha nota"><span>O custo da hora não é cadastrado, então aqui não há margem para mostrar.</span></div>
+              {comparar ? <small>{formatBRL(tiposAntes.maoDeObra.faturamento)} no período anterior</small> : null}
+            </article>
+          </div>
+          {tipos.naoClassificado ? (
+            <div className="info-strip"><Icon name="alert" size={18}/><span>{formatBRL(tipos.naoClassificado)} não deu para separar: são atendimentos gravados sem a lista de itens. O valor está no faturamento, só não entra em nenhum dos dois lados.</span></div>
+          ) : null}
         </section>
 
         <section className="panel">
@@ -1134,6 +1279,9 @@ function StockAdjustWorkspace({ products, adjustments, currentUser, notify, canM
   const [observacao, setObservacao] = useState("");
   const [gravando, setGravando] = useState(false);
   const [erro, setErro] = useState("");
+  // A peça que acabou de ser bipada: o efeito abaixo põe o cursor na
+  // quantidade dela, para a contagem ser bipar → digitar → bipar.
+  const [focar, setFocar] = useState("");
 
   const ativos = useMemo(() => somenteAtivos(products), [products]);
   const achados = useMemo(() => {
@@ -1159,6 +1307,40 @@ function StockAdjustWorkspace({ products, adjustments, currentUser, notify, canM
   const mexer = (id: string, contado: number) =>
     setLinhas((atual) => atual.map((linha) => linha.productId === id ? { ...linha, contado } : linha));
   const tirar = (id: string) => setLinhas((atual) => atual.filter((linha) => linha.productId !== id));
+
+  /**
+   * Enter no campo de busca: é o que o leitor de código de barras faz.
+   *
+   * Contar a prateleira peça por peça na busca é o que faz um inventário levar
+   * horas. Com o leitor, cada bipada já traz a peça e deixa o cursor na
+   * quantidade — e bipar de novo a mesma peça volta para a linha dela em vez
+   * de criar uma segunda.
+   */
+  const bipar = () => {
+    const codigo = busca.trim();
+    if (!codigo) return;
+    const achada = acharPorCodigo(codigo, ativos);
+    if (!achada) {
+      // Só reclama quando o que foi digitado parece um código. Avisar a cada
+      // letra de quem procura "OLE" ensina a ignorar o aviso.
+      if (pareceCodigo(codigo)) setErro(`Nenhuma peça com o código ${codigo}.`);
+      return;
+    }
+    setErro("");
+    if (!linhas.some((linha) => linha.productId === achada.id)) acrescentar(achada);
+    else setBusca("");
+    setFocar(achada.id);
+  };
+
+  // O cursor vai para a quantidade da peça bipada, com o número selecionado:
+  // digitar já substitui o saldo do sistema pelo que está na prateleira.
+  useEffect(() => {
+    if (!focar) return;
+    const campo = document.getElementById(`contado-${focar}`) as HTMLInputElement | null;
+    campo?.focus();
+    campo?.select();
+    setFocar("");
+  }, [focar, linhas]);
 
   const confirmar = async () => {
     if (!canManage) return setErro("Seu perfil pode consultar o estoque, mas não ajustar.");
@@ -1199,7 +1381,12 @@ function StockAdjustWorkspace({ products, adjustments, currentUser, notify, canM
 
         <div className="adjust-form">
           <label className="field field-full"><span>Peça</span>
-            <input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Nome, código ou código de barras"/>
+            {/* Mexer na busca limpa o aviso: senão "Nenhuma peça com o código
+                789..." ficava na tela enquanto a pessoa já digitava um nome. */}
+            <input value={busca} onChange={(e) => { setBusca(e.target.value); if (erro) setErro(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); bipar(); } }}
+              placeholder="Bipe o código de barras ou digite o nome"/>
+            <small className="field-hint">O leitor de código de barras funciona aqui: bipe a peça e digite o que tem na prateleira.</small>
           </label>
           {achados.length ? (
             <div className="adjust-results">
@@ -1222,7 +1409,7 @@ function StockAdjustWorkspace({ products, adjustments, currentUser, notify, canM
                     <tr key={linha.productId}>
                       <td><strong>{linha.nome}</strong></td>
                       <td className="num mono">{linha.saldoAtual}</td>
-                      <td className="num"><NumberField min={0} fallback={linha.saldoAtual} value={linha.contado} onChange={(valor) => mexer(linha.productId, valor)} className="adjust-input"/></td>
+                      <td className="num"><NumberField id={`contado-${linha.productId}`} min={0} fallback={linha.saldoAtual} value={linha.contado} onChange={(valor) => mexer(linha.productId, valor)} className="adjust-input"/></td>
                       <td className="num mono"><strong className={diferenca > 0 ? "lucro-bom" : diferenca < 0 ? "lucro-ruim" : ""}>{diferenca > 0 ? `+${diferenca}` : diferenca}</strong></td>
                       <td className="num mono">{formatBRL(valorDoAjuste(linha))}</td>
                       <td><button className="remove-item" onClick={() => tirar(linha.productId)} aria-label="Tirar da lista">×</button></td>
@@ -2169,8 +2356,8 @@ export function ModuleWorkspace({
   if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} discount={discount} setDiscount={setDiscount} products={products} clients={clients} blockZeroStockSale={settings?.blockZeroStockSale !== false} />;
   if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
-  if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
-  if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts}/>;
+  if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts} notify={notify} canManage={canOperate}/>;
+  if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts} notify={notify} canManage={canOperate}/>;
   if (active === "Histórico de caixas") return <CashHistoryWorkspace cashSessions={cashSessions} notify={notify}/>;
   if (active === "Ajuste de estoque") return <StockAdjustWorkspace products={products} adjustments={stockAdjustments} currentUser={currentFirebaseUser} notify={notify} canManage={canOperate}/>;
   if (active === "Relatórios") return <ReportWorkspace sales={sales} orders={orders} expenses={expenses} movements={movements} accounts={accounts} notify={notify}/>;
@@ -2647,6 +2834,10 @@ export function AppDialog({
   const [accountCategory, setAccountCategory] = useState("");
   const [accountInstallments, setAccountInstallments] = useState(1);
   const [accountNotes, setAccountNotes] = useState("");
+  // Recorrência: aluguel, energia e internet voltam todo mês. É diferente de
+  // parcelamento — parcela tem fim e valor fixo, e a conta de luz não tem nem
+  // um nem outro —, por isso as duas escolhas não podem valer juntas.
+  const [accountRecurrence, setAccountRecurrence] = useState<Periodicidade | "">("");
   // Baixa de conta.
   const [settleAmount, setSettleAmount] = useState("");
   const [settleDate, setSettleDate] = useState(() => new Date().toISOString().split("T")[0]);
@@ -4042,14 +4233,24 @@ export function AppDialog({
           installment: parcela.installment,
           installments: parcelas.length,
           ...(parcelas.length > 1 ? { groupId } : {}),
+          // O dia original vai gravado: sem ele, um aluguel que vence dia 31
+          // encolhe para 28 em fevereiro e fica no 28 para sempre.
+          ...(accountRecurrence ? {
+            recurrence: accountRecurrence,
+            recurrenceId: `${prefix}-R${Date.now()}`,
+            recurrenceDay: Number(accountDueDate.split("-")[2]) || 1,
+          } : {}),
         })));
         setAccountDescriptionText("");
         setAccountAmount("");
         setAccountNotes("");
         setAccountInstallments(1);
-        return finish(parcelas.length > 1
-          ? `${parcelas.length} parcelas lançadas em contas a ${kind}.`
-          : `Conta a ${kind} lançada com sucesso.`);
+        setAccountRecurrence("");
+        return finish(accountRecurrence
+          ? `Conta a ${kind} lançada. Ela se repete ${accountRecurrence.toLowerCase()}: o sistema avisa quando a próxima precisar ser lançada.`
+          : parcelas.length > 1
+            ? `${parcelas.length} parcelas lançadas em contas a ${kind}.`
+            : `Conta a ${kind} lançada com sucesso.`);
       } catch (error) {
         return setDialogError(error instanceof Error ? error.message : "Não foi possível lançar a conta.");
       } finally {
@@ -5027,7 +5228,14 @@ export function AppDialog({
               <label className="field field-full"><span>{dialog === "receivable" ? "Cliente ou pagador" : "Fornecedor ou favorecido"}</span><select value={accountPerson} onChange={(event) => setAccountPerson(event.target.value)}>{(dialog === "receivable" ? clients.map((client) => client.name) : activeSuppliers.map((supplier) => supplier.name)).map((name) => <option key={name}>{name}</option>)}<option>Cadastro avulso</option></select></label>
               <label className="field field-full"><span>Descrição</span><input value={accountDescriptionText} onChange={(event) => setAccountDescriptionText(event.target.value)} placeholder={dialog === "receivable" ? "Ex.: Parcela de peças e serviço" : "Ex.: Compra de peças"}/></label>
               <label className="field"><span>Valor total</span><MoneyField value={accountAmount} onChange={setAccountAmount} placeholder="0,00"/></label><label className="field"><span>{accountInstallments > 1 ? "Primeiro vencimento" : "Vencimento"}</span><input type="date" value={accountDueDate} onChange={(event) => setAccountDueDate(event.target.value)}/></label>
-              <label className="field"><span>Categoria</span><select value={accountCategory} onChange={(event) => setAccountCategory(event.target.value)}>{accountCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="field"><span>Parcelas</span><select value={accountInstallments} onChange={(event) => setAccountInstallments(Number(event.target.value) || 1)}>{[1, 2, 3, 4, 5, 6, 10, 12].map((count) => <option value={count} key={count}>{count === 1 ? "Parcela única" : `${count} parcelas`}</option>)}</select></label>
+              <label className="field"><span>Categoria</span><select value={accountCategory} onChange={(event) => setAccountCategory(event.target.value)}>{accountCategoryOptions.map((category) => <option key={category}>{category}</option>)}</select></label><label className="field"><span>Parcelas</span><select value={accountInstallments} disabled={Boolean(accountRecurrence)} onChange={(event) => setAccountInstallments(Number(event.target.value) || 1)}>{[1, 2, 3, 4, 5, 6, 10, 12].map((count) => <option value={count} key={count}>{count === 1 ? "Parcela única" : `${count} parcelas`}</option>)}</select></label>
+              <label className="field field-full"><span>Se repete</span>
+                <select value={accountRecurrence} onChange={(event) => { const escolha = event.target.value as Periodicidade | ""; setAccountRecurrence(escolha); if (escolha) setAccountInstallments(1); }}>
+                  <option value="">Não se repete</option>
+                  {periodicidades.map((nome) => <option key={nome} value={nome}>{nome}</option>)}
+                </select>
+                <small className="field-hint">Aluguel, energia, internet e contador. O sistema avisa quando a próxima competência precisa ser lançada — e não lança sozinho, para não duplicar.</small>
+              </label>
               <label className="field field-full"><span>Observações</span><textarea value={accountNotes} onChange={(event) => setAccountNotes(event.target.value)} placeholder="Informações opcionais sobre cobrança ou pagamento"/></label>
             </div>
             {accountInstallments > 1 && valorDigitado(accountAmount) > 0 ? (

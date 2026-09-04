@@ -9,13 +9,21 @@
  *
  * Rode com: npm run check:stock-adjust
  */
-import { ajusteProblema, diferencaDoAjuste, resumoDoAjuste, saldosDoAjuste, textoDoAjuste, valorDoAjuste, type Ajuste } from "../src/stock-adjust";
+import { ajusteProblema, diferencaDoAjuste, resumoDoAjuste, saldosDoAjuste, textoDoAjuste, valorDoAjuste, type Ajuste , acharPorCodigo, pareceCodigo } from "../src/stock-adjust";
 
 const json = (value: unknown) => JSON.stringify(value);
 const base = (extra: Partial<Ajuste> = {}): Ajuste => ({
   productId: "PRD-001", nome: "ÓLEO 20W50", saldoAtual: 10, contado: 8,
   motivo: "Contagem de prateleira", custoUnitario: 25, ...extra,
 });
+
+// A prateleira, do jeito que o leitor enxerga: EAN de fábrica, EAN interno
+// gerado pelo sistema, e uma peça sem código de barras nenhum.
+const prateleira = [
+  { code: "PRD-001", barcode: "7891234567895", name: "OLEO 20W50" },
+  { code: "PRD-002", barcode: "2000000000015", name: "PASTILHA DE FREIO" },
+  { code: "PRD-003", name: "RELACAO SEM GTIN" },
+];
 
 const casos: Array<[string, unknown, unknown]> = [
   // --- A diferença ---
@@ -73,6 +81,31 @@ const casos: Array<[string, unknown, unknown]> = [
     ajusteProblema(base({ motivo: "Correção de lançamento" })),
     "Diga qual lançamento está sendo corrigido."],
   ["e nada de inválido chega ao banco", saldosDoAjuste([base({ motivo: "" })]).length, 0],
+
+  // --- Contagem pelo leitor de código de barras ---
+  // Leitor é teclado: digita o código e dá Enter. A comparação é exata porque
+  // uma busca "parecida" acertaria a peça errada numa contagem de prateleira.
+  ["o código bipado acha a peça", acharPorCodigo("7891234567895", prateleira)?.code, "PRD-001"],
+  ["o EAN interno também acha", acharPorCodigo("2000000000015", prateleira)?.code, "PRD-002"],
+  ["o leitor manda espaço e quebra de linha sobrando", acharPorCodigo(" 7891234567895\n", prateleira)?.code, "PRD-001"],
+  ["quem digita à mão pode usar o código da peça", acharPorCodigo("PRD-003", prateleira)?.code, "PRD-003"],
+  ["e não precisa acertar a caixa", acharPorCodigo("prd-003", prateleira)?.code, "PRD-003"],
+  ["código que não existe não acha nada", acharPorCodigo("7899999999999", prateleira), null],
+  // O pedaço de um código não pode virar a peça: bipar 789 e receber o óleo é
+  // como uma contagem inteira fica errada sem ninguém perceber.
+  ["pedaço de código não vale", acharPorCodigo("789123", prateleira), null],
+  ["campo vazio não acha nada", acharPorCodigo("   ", prateleira), null],
+  ["o código de barras ganha do código da peça",
+    acharPorCodigo("7891234567895", [{ code: "7891234567895", barcode: "111" }, ...prateleira])?.code, "PRD-001"],
+
+  ["um EAN de 13 dígitos parece código", pareceCodigo("7891234567895"), true],
+  ["um EAN de 8 dígitos também", pareceCodigo("78912345"), true],
+  ["o código interno da peça também", pareceCodigo("PRD-001"), true],
+  // Digitar "OLE" procurando óleo não é bipar: avisar "código não encontrado"
+  // a cada letra ensinaria a ignorar o aviso.
+  ["o começo de um nome não parece código", pareceCodigo("OLE"), false],
+  ["nem um nome inteiro", pareceCodigo("PASTILHA DE FREIO"), false],
+  ["nem o campo vazio", pareceCodigo(""), false],
 
   // --- O que vai para o banco ---
   ["os saldos saem no formato do estoque",

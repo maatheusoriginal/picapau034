@@ -44,6 +44,41 @@ export type Ajuste = {
   custoUnitario?: number;
 };
 
+/**
+ * A peça que o leitor de código de barras acabou de bipar.
+ *
+ * Leitor é teclado: ele digita o código e dá Enter, às vezes com espaço ou
+ * quebra de linha sobrando. Por isso a comparação é exata (depois de aparar):
+ * uma busca "parecida" acertaria a peça errada numa contagem de prateleira, e
+ * ninguém confere de novo o que o sistema disse que achou.
+ *
+ * O código de barras vem primeiro porque é o que o leitor manda; o código
+ * interno da peça vale como segunda chance, para quem digita à mão.
+ */
+export function acharPorCodigo<T extends { code: string; barcode?: string }>(
+  codigo: string,
+  pecas: T[],
+): T | null {
+  const alvo = codigo.trim().toLocaleUpperCase("pt-BR");
+  if (!alvo) return null;
+  const igual = (valor: string | undefined) => (valor ?? "").trim().toLocaleUpperCase("pt-BR") === alvo;
+  return pecas.find((peca) => igual(peca.barcode)) ?? pecas.find((peca) => igual(peca.code)) ?? null;
+}
+
+/**
+ * Parece um código bipado, e não alguém procurando pelo nome?
+ *
+ * Um leitor manda um EAN de 8 ou 13 dígitos, ou o código interno da peça.
+ * Serve para a tela decidir se, ao apertar Enter sem achar nada, avisa
+ * "nenhuma peça com este código" — que é o que interessa numa contagem — ou
+ * fica calada, porque a pessoa só estava digitando o começo de um nome.
+ */
+export function pareceCodigo(texto: string): boolean {
+  const limpo = texto.trim();
+  if (limpo.length < 4) return false;
+  return /^[0-9]{4,}$/.test(limpo) || /^[A-Za-z]{2,4}-?[0-9]{3,}$/.test(limpo);
+}
+
 /** Quanto entra (positivo) ou sai (negativo) do estoque. */
 export function diferencaDoAjuste(ajuste: Pick<Ajuste, "saldoAtual" | "contado">): number {
   return Math.round(ajuste.contado - ajuste.saldoAtual);

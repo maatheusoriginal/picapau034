@@ -12,7 +12,7 @@
  */
 import {
   dentroDoPeriodo, nomeDoArquivo, paraCSV, pecasMaisVendidas, periodoDe, periodoEmTexto,
-  porFormaDePagamento, resultadoDoPeriodo, servicosMaisFeitos,
+  periodoAnterior, porFormaDePagamento, resultadoDoPeriodo, resultadoPorTipo, servicosMaisFeitos, variacao,
 } from "../src/report";
 import type { ExpenseRecord, MovementRecord, OrderRecord, SaleRecord } from "../src/types";
 
@@ -53,7 +53,107 @@ const mesPassado = periodoDe("Mês passado", BASE);
 const resultado = resultadoDoPeriodo(esteMes, { sales, orders, expenses, movements });
 const doMesPassado = resultadoDoPeriodo(mesPassado, { sales, orders, expenses, movements });
 
+const par = (p: { de: string; ate: string }) => `${p.de} a ${p.ate}`;
+
+// Peça e mão de obra são dois negócios dentro da mesma oficina. No cenário:
+// VEN-0001 (200 de peça) + VEN-0002 (300 de peça) + OS-0001 (150 de peça e
+// 300 de serviço) = 650 de peça e 300 de serviço.
+const porTipo = resultadoPorTipo(esteMes, { sales, orders });
+
+// Uma OS recebida pela metade: o recebido tem de ser repartido na proporção
+// dos itens, e não jogado inteiro num dos lados.
+const meioPago = resultadoPorTipo({ de: "2026-04-01", ate: "2026-04-30" }, {
+  orders: [{ id: "OS-0100", closed: true, closedAt: "10/04/2026", total: 1000,
+    paymentMethod: "Dinheiro",
+    payments: [{ method: "Dinheiro", amount: 500 }, { method: "Nota a prazo", amount: 500 }],
+    items: [{ id: "p", type: "Peça", name: "PECA", price: 600, quantity: 1, cost: 400 },
+            { id: "m", type: "Mão de obra", name: "SERVICO", price: 400 }] }] as unknown as OrderRecord[],
+});
+
+// Serviço rápido sem item gravado: é mão de obra por natureza.
+const rapidoSemItem = resultadoPorTipo({ de: "2026-04-01", ate: "2026-04-30" }, {
+  sales: [{ id: "VEN-0100", origin: "Serviço rápido", date: "10/04/2026", total: 80,
+    paymentMethod: "Dinheiro", items: [] }] as unknown as SaleRecord[],
+});
+
+// Venda sem item nenhum e sem origem de serviço: fica declarada, não chutada.
+const semItem = resultadoPorTipo({ de: "2026-04-01", ate: "2026-04-30" }, {
+  orders: [{ id: "OS-0200", closed: true, closedAt: "10/04/2026", total: 250,
+    paymentMethod: "Dinheiro", items: [] }] as unknown as OrderRecord[],
+});
+
 const casos: Array<[string, unknown, unknown]> = [
+  // --- Peça e mão de obra, separadas ---
+  // Com o faturamento somado não dá para saber qual dos dois sustenta o mês —
+  // e é isso que decide se vale mexer na margem da peça ou no preço da hora.
+  ["a revenda de peça tem o próprio faturamento", porTipo.pecas.faturamento, 650],
+  ["a mão de obra tem o dela", porTipo.maoDeObra.faturamento, 300],
+  ["e as duas somam o faturamento do período",
+    Math.round((porTipo.pecas.faturamento + porTipo.maoDeObra.faturamento + porTipo.naoClassificado) * 100) / 100,
+    resultado.faturamento],
+  ["o custo é todo da peça", porTipo.pecas.custo, 390],
+  ["o lucro da peça desconta o custo", porTipo.pecas.lucro, 260],
+  ["e a margem da peça sai da conta dela", porTipo.pecas.margem, 40],
+  // O sistema não sabe quanto custa a hora do mecânico. Mostrar margem de 100%
+  // no serviço seria mentira confortável.
+  ["o custo da mão de obra fica zerado, porque o sistema não sabe", porTipo.maoDeObra.custo, 0],
+
+  // O recebido pela metade é repartido na proporção dos itens.
+  ["OS recebida pela metade divide a peça na proporção", meioPago.pecas.faturamento, 300],
+  ["e o serviço também", meioPago.maoDeObra.faturamento, 200],
+  ["sem inventar faturamento",
+    meioPago.pecas.faturamento + meioPago.maoDeObra.faturamento, 500],
+
+  ["serviço rápido sem item é mão de obra", rapidoSemItem.maoDeObra.faturamento, 80],
+  ["e não vira peça", rapidoSemItem.pecas.faturamento, 0],
+  // Empurrar para um dos lados faria a revenda parecer menor, ou a oficina
+  // parecer loja de peças. Fica declarado.
+  ["o que não dá para separar fica declarado", semItem.naoClassificado, 250],
+  ["e não é chutado para a peça", semItem.pecas.faturamento, 0],
+  ["nem para a mão de obra", semItem.maoDeObra.faturamento, 0],
+  ["período sem movimento dá tudo zerado",
+    json(resultadoPorTipo({ de: "2020-01-01", ate: "2020-01-31" }, { sales, orders })),
+    json({ pecas: { faturamento: 0, custo: 0, lucro: 0, margem: 0 },
+           maoDeObra: { faturamento: 0, custo: 0, lucro: 0, margem: 0 }, naoClassificado: 0 })],
+
+  // --- O período anterior, para comparar ---
+  // Comparar 1 a 4 de setembro com 28 a 31 de agosto responderia a pergunta
+  // errada: quem olha o mês corrente quer o mesmo trecho do mês passado.
+  ["mês corrente compara com os mesmos dias do mês passado",
+    par(periodoAnterior({ de: "2026-09-01", ate: "2026-09-04" })), "2026-08-01 a 2026-08-04"],
+  ["mês inteiro compara com o mês inteiro anterior",
+    par(periodoAnterior({ de: "2026-08-01", ate: "2026-08-31" })), "2026-07-01 a 2026-07-31"],
+  // Fevereiro é mais curto: 1 a 31 de março para no dia 28.
+  ["mês mais curto atrás para no último dia que ele tem",
+    par(periodoAnterior({ de: "2026-03-01", ate: "2026-03-31" })), "2026-02-01 a 2026-02-28"],
+  ["e o mesmo vale para o mês corrente",
+    par(periodoAnterior({ de: "2026-03-01", ate: "2026-03-30" })), "2026-02-01 a 2026-02-28"],
+  ["janeiro compara com dezembro do ano anterior",
+    par(periodoAnterior({ de: "2026-01-01", ate: "2026-01-15" })), "2025-12-01 a 2025-12-15"],
+  ["o ano até hoje compara com o mesmo trecho do ano passado",
+    par(periodoAnterior({ de: "2026-01-01", ate: "2026-09-04" })), "2025-01-01 a 2025-09-04"],
+  ["29 de fevereiro compara com o dia 28 do ano que não é bissexto",
+    par(periodoAnterior({ de: "2024-01-01", ate: "2024-02-29" })), "2023-01-01 a 2023-02-28"],
+  ["hoje compara com ontem",
+    par(periodoAnterior({ de: "2026-09-04", ate: "2026-09-04" })), "2026-09-03 a 2026-09-03"],
+  ["sete dias comparam com os sete anteriores",
+    par(periodoAnterior({ de: "2026-08-29", ate: "2026-09-04" })), "2026-08-22 a 2026-08-28"],
+  ["um período qualquer volta o mesmo tanto de dias",
+    par(periodoAnterior({ de: "2026-05-10", ate: "2026-05-14" })), "2026-05-05 a 2026-05-09"],
+  ["e atravessa a virada do mês sem se perder",
+    par(periodoAnterior({ de: "2026-03-02", ate: "2026-03-04" })), "2026-02-27 a 2026-03-01"],
+
+  // --- A variação ---
+  ["subir de 100 para 150 é mais 50%", variacao(150, 100), 50],
+  ["cair de 200 para 150 é menos 25%", variacao(150, 200), -25],
+  ["ficar igual é zero", variacao(100, 100), 0],
+  ["a casa decimal é arredondada", variacao(1234, 1000), 23.4],
+  // "Subiu 100%" a partir de zero não quer dizer nada, e como número faz o mês
+  // parecer melhor do que foi.
+  ["não dá para comparar com zero", variacao(500, 0), null],
+  ["nem zero com zero", variacao(0, 0), null],
+  ["mas cair para zero é menos 100%", variacao(0, 400), -100],
+
   // --- Os períodos ---
   ["hoje é um dia só", json(periodoDe("Hoje", BASE)), json({ de: "2026-03-15", ate: "2026-03-15" })],
   // Sete dias contando hoje: de segunda a domingo dá sete, não oito.

@@ -25,6 +25,7 @@
     "check:removal": "tsx scripts/check-removal.ts",
     "check:report": "tsx scripts/check-report.ts",
     "check:stock-adjust": "tsx scripts/check-stock-adjust.ts",
+    "check:recurring": "tsx scripts/check-recurring.ts",
     "check:backup": "tsx scripts/check-backup.ts",
     "check:hooks": "tsx scripts/check-hooks.ts",
     "check:firestore-data": "tsx scripts/check-firestore-data.ts",

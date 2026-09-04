@@ -59,6 +59,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:plate` | Confere as regras de placa (padrão antigo, Mercosul e comparação) |
 | `npm run check:report` | Confere o relatório do período: DRE, formas de pagamento, ranking e CSV |
 | `npm run check:stock-adjust` | Confere o ajuste de estoque: diferença, motivo obrigatório e impacto em dinheiro |
+| `npm run check:recurring` | Confere as contas que se repetem: próximo vencimento, o dia que não anda para trás e a trava contra duplicar |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -1893,6 +1894,188 @@ saindo e os R$ 120 antes de escolher o motivo, tenta gravar sem motivo e confere
 que **nada** foi para o banco, grava com motivo, e então confere no Firestore que
 o saldo virou 38, que **o custo continuou R$ 30,00** e que o ajuste ficou
 registrado com o nome de quem fez.
+
+## O caixa diz de onde veio cada real
+
+O fechamento dizia só **"entrou tanto em vendas e OS"**. Quem confere a gaveta
+do balcão no fim do dia não tinha como separar o que passou pela mão dele do
+que veio da bancada: uma diferença no balcão só aparecia como diferença do
+caixa inteiro, e não havia onde procurar.
+
+Agora o diálogo do caixa mostra **De onde veio o dinheiro da gaveta**, uma
+linha por origem: venda no balcão, serviço rápido, ordem de serviço, conta a
+receber quitada, entrada avulsa e suprimento — e as saídas (sangria, gasto pago
+pela gaveta, saída avulsa) logo abaixo. Linha zerada não aparece: uma oficina
+que não fez serviço rápido hoje não precisa ler "Serviço rápido R$ 0,00".
+
+Três decisões que valem registro:
+
+- **Venda antiga entra como balcão.** As vendas gravadas antes de a origem
+  existir não têm como ser classificadas — mas somem do esperado se forem
+  ignoradas, e aí o caixa fecharia com falta todo dia.
+- **A movimentação avulsa saiu de dentro do "recebido".** Somada ali, um achado
+  de R$ 200 na gaveta virava recebimento de cliente no fechamento.
+- **O erro só aparece depois de escrever.** O diálogo abria já com a tarja
+  vermelha "informe um valor maior que zero", antes de a pessoa fazer nada — e
+  erro que aparece sem motivo ensina a ignorar a tarja vermelha, inclusive
+  quando ela é de verdade. A validação continua no confirmar.
+
+`npm run check:cash` cobre a separação com um cenário próprio, e o passo 42 do
+roteiro ponta a ponta confere no navegador que nenhuma linha vem zerada e que o
+diálogo não abre acusando erro.
+
+## Histórico de caixas
+
+O histórico existia só **dentro do diálogo de abrir o caixa, cortado nos cinco
+últimos**. Achar o fechamento de terça passada — porque o dinheiro não bateu e
+alguém quer entender onde — era impossível.
+
+**Gestão → Histórico de caixas** é tela própria, com os mesmos períodos do
+relatório, busca por caixa/por quem abriu/pela observação, planilha CSV, e o
+detalhe do fechamento abrindo ao clicar na linha.
+
+O aviso do topo **conta os dias, não o saldo**. Uma falta de R$ 50 numa terça e
+uma sobra de R$ 50 numa quinta fecham o mês em zero: olhar só o total diria que
+está tudo bem, e foram dois erros. Por isso a tarja diz quantos caixas fecharam
+com falta, quantos com sobra, e qual foi a maior falta — com o caixa em que
+aconteceu.
+
+Caixa antigo, fechado antes de o sistema gravar a diferença, tem a conta refeita
+do contado menos o esperado, em vez de sumir do resumo.
+
+## O ajuste de estoque no histórico da peça
+
+O saldo mudava de 42 para 38 e o cadastro do produto **não dizia por quê**.
+Agora a conferência aparece na aba Movimentação da peça, com o motivo e a
+observação, valendo o custo.
+
+O ajuste fica **fora do "entrou" e do "saiu"**: aqueles dois números respondem
+quanto se comprou e quanto se vendeu desta peça, e uma quebra somada nas vendas
+transformaria perda em faturamento. Ele tem o próprio cartão — "Ajustado −4 un."
+—, que só aparece em peça que já foi ajustada.
+
+A coluna Total mostrava o valor **sem sinal**, o que fazia uma quebra de R$ 120
+parecer igual a uma compra de R$ 120. Agora saída sai com o sinal, como no
+extrato do caixa.
+
+## Contar a prateleira com o leitor de código de barras
+
+Contar peça por peça na busca é o que faz um inventário levar horas. O leitor de
+código de barras é um teclado: ele digita o código e dá Enter.
+
+Em **Estoque → Ajuste de estoque**, bipar a peça:
+
+1. traz a peça para a conferência;
+2. põe o cursor na quantidade, com o número selecionado — digitar já substitui o
+   saldo do sistema pelo que está na prateleira;
+3. bipar a mesma peça de novo **volta para a linha dela**, em vez de criar uma
+   segunda.
+
+A comparação é **exata** (depois de aparar espaço e quebra de linha, que alguns
+leitores mandam junto): uma busca "parecida" acertaria a peça errada numa
+contagem, e ninguém confere de novo o que o sistema disse que achou. O código de
+barras vem primeiro porque é o que o leitor manda; o código interno da peça vale
+como segunda chance, para quem digita à mão.
+
+Código que não existe avisa. Mas o aviso só aparece quando o que foi digitado
+**parece um código** — um EAN de 8 ou 13 dígitos, ou o código da peça: reclamar
+a cada letra de quem procura "OLE" ensina a ignorar o aviso.
+
+## O relatório compara com o período anterior
+
+Ver "este mês" é bom; ver contra o mês passado é o que faz decidir preço. Cada
+linha do DRE traz a variação e o valor de antes, e os quatro cartões trazem o
+número anterior embaixo. O botão **Comparar com o anterior** liga e desliga.
+
+"O anterior" não é sempre a mesma conta — comparar 1 a 4 de setembro com 28 a 31
+de agosto responderia a pergunta errada. As regras, na ordem:
+
+1. **Mês inteiro** (dia 1 ao último) → o mês inteiro anterior.
+2. **Mês corrente até hoje** → os mesmos dias do mês passado. Se o mês anterior
+   for mais curto, para no último dia que ele tem: 1 a 31 de março compara com
+   1 a 28 de fevereiro. E o dia original volta no mês que alcança, para a conta
+   não andar para trás sozinha.
+3. **Ano até hoje** → o mesmo trecho do ano passado.
+4. **Qualquer outro** → a mesma quantidade de dias, terminando na véspera.
+
+A cor da variação inverte nas linhas de custo: gastar 20% a mais não é uma boa
+notícia pintada de verde só porque o número subiu. E **não existe "subiu 100%" a
+partir de zero**: quando não havia base, a tela diz "sem base para comparar" em
+vez de mostrar um número que faz o mês parecer melhor do que foi.
+
+A planilha leva a coluna do período anterior junto, para quem monta o próprio
+gráfico ter os dois lados.
+
+## Contas que se repetem
+
+Aluguel, energia, internet e contador eram relançados na mão todo mês. É
+exatamente o tipo de conta que se esquece — e a que se esquece é a que chega com
+juros. Dava para lançar 12 parcelas de uma vez, mas **parcelamento é outra
+coisa**: parcela tem fim e valor fixo, e a conta de energia não tem nem um nem
+outro.
+
+No lançamento da conta há o campo **Se repete** (mensal, bimestral, trimestral,
+semestral ou anual). Marcar a recorrência trava o parcelamento: as duas coisas
+não podem valer juntas.
+
+**O sistema não lança sozinho.** Não existe servidor rodando de madrugada, e um
+gerador automático sem ninguém olhando é como nasce conta duplicada — que em
+contas a pagar some no meio das outras até o dia em que o saldo não fecha. Em
+vez disso, **Contas a pagar** ganha um painel com as competências que estão
+faltando e um botão de lançar cada uma. O aviso pede para conferir o valor
+antes, porque energia muda todo mês.
+
+Detalhes que a conta exige:
+
+- **O dia original é gravado.** Um aluguel que vence dia 31 vence dia 28 em
+  fevereiro e **volta para 31 em março** — e não vira dia 3 de março (que é o que
+  dá somar um mês sem olhar), nem fica no 28 para sempre.
+- **Uma série pode estar atrasada em várias competências.** Quem ficou dois meses
+  sem abrir o sistema vê as duas que faltam, da mais antiga para a mais nova.
+- **Só até 10 dias à frente.** Lançar o aluguel de dezembro em março encheria a
+  tela de contas que ninguém vai pagar tão cedo e faria o total a pagar do mês
+  parecer três vezes maior do que é.
+- **A trava contra duplicar** compara pela série e pela data, não pelo valor: a
+  conta de luz do mês que vem vai ter outro valor e continua sendo a mesma.
+
+A decisão inteira é de `src/recurring.ts` (`npm run check:recurring`, 42 casos).
+
+## Peça e mão de obra, separadas
+
+São **dois negócios dentro da mesma oficina**: um vive de comprar e revender, o
+outro de hora trabalhada. Com o faturamento somado, não dá para saber qual dos
+dois está sustentando o mês — e é isso que decide se vale mexer na margem da
+peça ou no preço da hora.
+
+O relatório ganhou o painel **Peça e mão de obra**: a revenda com faturamento,
+custo, lucro e margem; a mão de obra com faturamento e participação no total.
+
+Três decisões:
+
+- **A mão de obra não mostra margem.** O sistema não sabe quanto custa a hora do
+  mecânico. "Margem de 100% no serviço" seria uma mentira confortável, então a
+  tela diz que o custo da hora não é cadastrado.
+- **Venda paga pela metade é repartida na proporção dos itens.** Uma OS de
+  R$ 1.000 (600 de peça, 400 de serviço) que recebeu R$ 500 entra com 300 e 200.
+  Chutar tudo para um lado inventaria faturamento onde não houve.
+- **O que não dá para separar fica declarado.** Atendimento gravado sem lista de
+  itens aparece como "não deu para separar", e não é empurrado para um dos lados:
+  empurrar para o serviço faria a revenda parecer menor do que é, e o contrário
+  faria a oficina parecer uma loja de peças. Serviço rápido sem item é a única
+  exceção — ele é mão de obra por natureza.
+
+## Colar um valor já formatado
+
+Achado durante os testes: quem copiava **"R$ 2.500,00"** do WhatsApp do
+fornecedor e colava no campo de valor via o campo continuar **vazio**, sem
+nenhum aviso. A regra que aceita o que se digita (`isPartialNumber`) recusa dois
+separadores — com razão, porque no meio da digitação eles não existem —, e a
+colagem sumia em silêncio.
+
+Agora o campo aceita o valor colado no formato brasileiro (`2.500,00`, com ou
+sem `R$`, com espaço normal ou o não separável que vem do Excel) e no americano
+(`2,500.00`, que aparece em planilha exportada). O que não é valor nenhum
+continua sendo recusado, como antes.
 
 ## Cópia de segurança
 

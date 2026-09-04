@@ -7,9 +7,27 @@
  *
  * Rode com: npm run check:number-input
  */
-import { arredondar, clamp, displayValue, formatTyped, isPartialNumber, parseTyped, settleOnBlur } from "../src/number-input";
+import { arredondar, clamp, displayValue, formatTyped, isPartialNumber, parseTyped, settleOnBlur , normalizarColado } from "../src/number-input";
 
 const casos: Array<[string, unknown, unknown]> = [
+  // --- Valor colado já formatado ---
+  // Quem copia "R$ 2.500,00" do WhatsApp do fornecedor e cola vê o campo
+  // continuar vazio: isPartialNumber recusa dois separadores, com razão para
+  // quem digita, e a colagem sumia sem nenhum aviso.
+  ["colar no formato brasileiro funciona", normalizarColado("2.500,00"), "2500,00"],
+  ["com o R$ junto também", normalizarColado("R$ 2.500,00"), "2500,00"],
+  ["e com espaço não separável do Excel", normalizarColado("R$\u00a01.234,56"), "1234,56"],
+  ["milhão colado", normalizarColado("1.234.567,89"), "1234567,89"],
+  ["sem centavos também", normalizarColado("2.500"), "2500"],
+  ["planilha em inglês vira número limpo", normalizarColado("2,500.00"), "2500.00"],
+  ["valor negativo colado", normalizarColado("-1.200,50"), "-1200,50"],
+  // O que já passa na digitação não precisa de conserto aqui, e o que não é
+  // valor nenhum continua sendo recusado.
+  ["número simples não é caso de colagem", normalizarColado("2500,00"), ""],
+  ["texto qualquer não vira número", normalizarColado("mil reais"), ""],
+  ["agrupamento errado não é aceito", normalizarColado("2.50,00"), ""],
+  ["campo vazio não vira nada", normalizarColado("   "), ""],
+
   // O campo pode ficar vazio enquanto se digita — é isto que conserta o "020".
   ["campo vazio é estado válido", isPartialNumber(""), true],
   ["número terminado em vírgula é estado válido", isPartialNumber("1,"), true],
