@@ -1650,6 +1650,52 @@ selecionada, em vez de encerrar a errada em silêncio. O roteiro ponta a ponta
 confere que a OS do passo 6 continua com os seus R$ 150 em dinheiro depois de a
 OS da parceira ser encerrada.
 
+## O tamanho da letra
+
+A oficina estava dando **zoom no navegador** para conseguir ler o sistema. A
+causa era minha: ao compactar as telas para o formato do sistema de balcão, eu
+encolhi a letra junto — e densidade se faz com **espaçamento apertado, não com
+letra microscópica**.
+
+A folha de estilo tinha 364 declarações de `font-size` em 9px ou menos:
+
+| Tamanho | Quantas | Onde ficava |
+| --- | --- | --- |
+| 6px | 12 | Legendas de cartão |
+| 7px | 98 | Sublinha de lista, código da peça, dica de campo |
+| 8px | 141 | Rótulo pequeno, descrição de bloco, valor secundário |
+| 9px | 113 | Rótulo de campo, texto de tabela |
+
+7px é metade do tamanho que um sistema desktop usa para texto de apoio. Não é
+"compacto", é ilegível.
+
+A escala inteira subiu, preservando a hierarquia — 6→10, 7→10,5, 8→11,5, 9→12,
+10→13, 11→14, e assim por diante até os títulos. Nada abaixo de **10px**, e o
+texto que se lê o dia todo (rótulo de campo, linha de tabela) ficou em **12 a
+13px**.
+
+O espaçamento **não** mudou: as telas continuam com o mesmo aperto que ganharam
+no formato do balcão. O que mudou foi só o tamanho do que está escrito dentro
+delas.
+
+### O que precisou de ajuste junto
+
+Com o texto 30% maior, três coisas encostaram:
+
+- **A coluna de rótulos da régua** passou de 122px para 150px nos cadastros e de
+  104px para 126px na OS — rótulos de duas palavras estavam quebrando em duas
+  linhas.
+- **O cadastro de peça** ficou 100px mais largo (940 → 1040px), porque as três
+  colunas de números apertavam "Margem s/ custo (%)" contra a caixa do valor.
+- **O cartão da oficina no painel administrativo**, no celular, quebrava o nome
+  em três linhas ("Pica / Pau / Motos"): o botão "Editar dados" disputava a
+  linha com o texto. Agora o texto fica com a largura toda e o botão vai para
+  baixo.
+
+Conferido a 1440×900 e a 390×844: nenhuma rolagem lateral, nenhum botão ou
+rótulo cortado, nenhum rótulo em duas linhas nas telas da régua, e a nova OS e o
+cadastro de peça continuam cabendo inteiros sem rolar.
+
 ## Responsividade
 
 O que foi conferido, renderizando cada tela em 360, 768 e 1440px: **18 telas e

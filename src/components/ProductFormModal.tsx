@@ -329,7 +329,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
     <div className="dialog-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       {/* Mais largo que os outros formulários: são a régua de campos, as três
           colunas de números e o painel de parâmetros lado a lado. */}
-      <div className="dialog-window large-dialog" style={{ width: "min(940px, 100%)", maxWidth: "940px" }}>
+      <div className="dialog-window large-dialog" style={{ width: "min(1040px, 100%)", maxWidth: "1040px" }}>
         {/* Barra de título de uma linha só, como a da referência: o nome da
             peça já está no primeiro campo, repeti-lo aqui gastava uma linha. */}
         <div className="dialog-head pdv-head">
