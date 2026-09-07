@@ -1,5 +1,6 @@
 import { accountDescription, drawerTotal, isCashPayment, parseBRDate, paymentsOf } from "./finance";
 import type { AccountRecord, CashMovement, CashSession, ExpenseRecord, MovementRecord, OrderRecord, SaleRecord } from "./types";
+import { dentroDoPeriodo, type Periodo } from "./report";
 
 /**
  * O caixa da oficina: o dinheiro que está de verdade dentro da gaveta.
@@ -44,6 +45,14 @@ export type DrawerEntry = {
   at: string;
   /** Positivo entra na gaveta, negativo sai. */
   amount: number;
+  /**
+   * De onde o dinheiro veio, quando a linha é uma venda.
+   *
+   * Sem isso o fechamento só conseguia dizer "entrou tanto em vendas e OS", e
+   * quem confere a gaveta do balcão no fim do dia não tinha como separar o que
+   * é dele do que é da bancada.
+   */
+  origin?: SaleRecord["origin"];
 };
 
 /** Está dentro da sessão? Vale do instante da abertura até o fechamento (ou até agora). */
@@ -111,6 +120,7 @@ export function drawerEntries(session: CashSession | null, sources: DrawerSource
       at: sale.soldAt,
       // Taxa de maquininha não existe em pagamento em espécie.
       amount: emEspecie,
+      origin: sale.origin,
     });
   });
 
@@ -187,48 +197,104 @@ export function drawerEntries(session: CashSession | null, sources: DrawerSource
 export type CashSummary = {
   /** Fundo de troco da abertura. */
   opening: number;
-  /** Vendas e OS recebidas em dinheiro. */
-  sales: number;
+  /** Vendas do PDV recebidas em dinheiro. */
+  counter: number;
+  /** Serviços rápidos recebidos em dinheiro. */
+  quick: number;
+  /** OS encerradas e recebidas em dinheiro. */
+  orders: number;
   /** Baixas de contas a receber pagas em dinheiro. */
   received: number;
+  /** Entradas avulsas lançadas à mão, em dinheiro. */
+  manualIn: number;
   supplies: number;
   withdrawals: number;
   /** Gastos pagos em dinheiro pela gaveta. */
   expenses: number;
+  /** Saídas avulsas lançadas à mão, em dinheiro. */
+  manualOut: number;
+  /** Tudo que entrou, fundo de troco à parte. */
+  incoming: number;
+  /** Tudo que saiu. */
+  outgoing: number;
   /** Quanto deveria haver na gaveta agora. */
   expected: number;
   /** Quantidade de movimentações, sem contar a abertura. */
   count: number;
 };
 
+/**
+ * O resumo da gaveta, com cada origem na sua linha.
+ *
+ * Antes venda de balcão e OS entravam somadas num campo só. Quem fecha o
+ * balcão no fim do dia precisa saber o que passou pela mão dele: com os dois
+ * juntos, uma diferença no balcão só aparecia como uma diferença do caixa
+ * inteiro, e ninguém sabia onde procurar.
+ */
 export function cashSummary(session: CashSession | null, sources: DrawerSources = {}): CashSummary {
   const entries = drawerEntries(session, sources);
   const total = (kinds: DrawerEntry["kind"][]) => entries
     .filter((entry) => kinds.includes(entry.kind))
     .reduce((sum, entry) => sum + entry.amount, 0);
+  const vendasDe = (origin: SaleRecord["origin"]) => entries
+    .filter((entry) => entry.kind === "Venda" && entry.origin === origin)
+    .reduce((sum, entry) => sum + entry.amount, 0);
 
   const opening = total(["Abertura"]);
-  const sales = total(["Venda", "Ordem de serviço"]);
-  // A movimentação manual entra junto do recebimento quando é entrada, e junto
-  // do gasto quando é saída. Somar o líquido das duas daria o mesmo esperado no
-  // fim, mas mostraria "entrou" e "saiu" errados nos cartões da tela.
+  const counter = vendasDe("PDV");
+  const quick = vendasDe("Serviço rápido");
+  // Venda antiga, gravada antes de a origem existir, não pode sumir do
+  // esperado: ela entra como balcão, que é de onde as vendas do sistema saíam.
+  const semOrigem = entries
+    .filter((entry) => entry.kind === "Venda" && entry.origin !== "PDV" && entry.origin !== "Serviço rápido")
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const orders = total(["Ordem de serviço"]);
+  const received = total(["Recebimento"]);
+  // A movimentação manual fica na própria linha: somada ao recebimento, um
+  // "achado" de R$ 200 na gaveta viraria recebimento de cliente no fechamento.
   const manualIn = entries.filter((entry) => entry.kind === "Movimentação" && entry.amount > 0).reduce((sum, entry) => sum + entry.amount, 0);
   const manualOut = entries.filter((entry) => entry.kind === "Movimentação" && entry.amount < 0).reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
-  const received = total(["Recebimento"]) + manualIn;
   const supplies = total(["Suprimento"]);
   const withdrawals = Math.abs(total(["Sangria"]));
-  const expenses = Math.abs(total(["Gasto"])) + manualOut;
+  const expenses = Math.abs(total(["Gasto"]));
+
+  const incoming = round2(counter + semOrigem + quick + orders + received + manualIn + supplies);
+  const outgoing = round2(withdrawals + expenses + manualOut);
 
   return {
     opening,
-    sales,
+    counter: round2(counter + semOrigem),
+    quick,
+    orders,
     received,
+    manualIn,
     supplies,
     withdrawals,
     expenses,
-    expected: round2(opening + sales + received + supplies - withdrawals - expenses),
+    manualOut,
+    incoming,
+    outgoing,
+    expected: round2(opening + incoming - outgoing),
     count: entries.length - 1,
   };
+}
+
+/**
+ * As origens do dinheiro da gaveta, cada uma na sua linha, na ordem em que a
+ * oficina confere: primeiro o balcão, depois a bancada, depois o resto.
+ *
+ * Linhas zeradas ficam de fora: uma oficina que não fez serviço rápido hoje
+ * não precisa ler "Serviço rápido R$ 0,00" no fechamento.
+ */
+export function drawerOrigins(summary: CashSummary): Array<{ origem: string; total: number }> {
+  return [
+    { origem: "Venda no balcão", total: summary.counter },
+    { origem: "Serviço rápido", total: summary.quick },
+    { origem: "Ordem de serviço", total: summary.orders },
+    { origem: "Conta a receber quitada", total: summary.received },
+    { origem: "Entrada avulsa", total: summary.manualIn },
+    { origem: "Suprimento", total: summary.supplies },
+  ].filter((linha) => linha.total !== 0);
 }
 
 /**
@@ -328,4 +394,76 @@ function money(value: number): string {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+// ---------------------------------------------------------------------------
+// Histórico de caixas fechados
+// ---------------------------------------------------------------------------
+
+/**
+ * Os caixas fechados dentro de um período, do mais recente para o mais antigo.
+ *
+ * O histórico só existia dentro do diálogo de abrir o caixa, cortado nos cinco
+ * últimos. Quem precisava achar o fechamento de terça passada — porque o
+ * dinheiro não bateu e alguém quer entender onde — não tinha por onde começar.
+ */
+export function sessionsInPeriod(sessions: CashSession[], periodo: Periodo): CashSession[] {
+  return closedSessions(sessions).filter((session) => dentroDoPeriodo(session.closedDate, periodo));
+}
+
+export type CashHistorySummary = {
+  /** Quantos caixas foram fechados no período. */
+  caixas: number;
+  /** Soma do que o sistema esperava encontrar. */
+  esperado: number;
+  /** Soma do que foi contado de verdade. */
+  contado: number;
+  /** Contado menos esperado no período inteiro. */
+  diferenca: number;
+  /** Quantos fecharam certinho, quantos com falta e quantos com sobra. */
+  conferem: number;
+  faltas: number;
+  sobras: number;
+  /** A maior falta de um único dia, em módulo. Zero quando não houve falta. */
+  maiorFalta: number;
+  /** O caixa da maior falta, para não ter que procurar na tabela. */
+  maiorFaltaEm: string;
+};
+
+/**
+ * O resumo do período.
+ *
+ * A soma das diferenças é reportada junto do número de faltas de propósito: um
+ * mês em que faltaram R$ 50 numa terça e sobraram R$ 50 numa quinta fecha em
+ * zero, e olhar só o total diria que está tudo bem. São dois erros, não nenhum.
+ */
+export function cashHistorySummary(sessions: CashSession[]): CashHistorySummary {
+  const diferencaDe = (session: CashSession) =>
+    session.difference ?? round2((session.countedAmount ?? 0) - (session.expectedAmount ?? 0));
+
+  let esperado = 0, contado = 0, diferenca = 0;
+  let conferem = 0, faltas = 0, sobras = 0, maiorFalta = 0, maiorFaltaEm = "";
+
+  sessions.forEach((session) => {
+    const gap = diferencaDe(session);
+    esperado += session.expectedAmount ?? 0;
+    contado += session.countedAmount ?? 0;
+    diferenca += gap;
+    const rotulo = differenceLabel(gap);
+    if (rotulo === "Confere") conferem += 1;
+    else if (rotulo === "Falta") {
+      faltas += 1;
+      if (Math.abs(gap) > maiorFalta) { maiorFalta = Math.abs(gap); maiorFaltaEm = session.id; }
+    } else sobras += 1;
+  });
+
+  return {
+    caixas: sessions.length,
+    esperado: round2(esperado),
+    contado: round2(contado),
+    diferenca: round2(diferenca),
+    conferem, faltas, sobras,
+    maiorFalta: round2(maiorFalta),
+    maiorFaltaEm,
+  };
 }

@@ -34,6 +34,16 @@ const fontes = {
       deductedItems: [],
       items: [{ productId: "PRD-001", quantity: 1, price: 60 }] },
   ],
+  adjustments: [
+    // Conferência de prateleira: faltaram 4 unidades de R$ 40.
+    { id: "AJU-0001", date: "08/03/2026", adjustedAt: "2026-03-08T18:00:00.000Z",
+      motivo: "Perda, quebra ou vencimento", observacao: "CAIU DA BANCADA",
+      items: [{ productId: "PRD-001", diferenca: -4, custoUnitario: 40 },
+              { productId: "PRD-002", diferenca: 2, custoUnitario: 10 }] },
+    // Conferência que não mudou nada nesta peça: não é movimentação.
+    { id: "AJU-0002", date: "09/03/2026", adjustedAt: "2026-03-09T18:00:00.000Z", motivo: "Contagem de prateleira",
+      items: [{ productId: "PRD-001", diferenca: 0, custoUnitario: 40 }] },
+  ],
 };
 const mov = productMovements("PRD-001", fontes);
 const totais = movementTotals(mov);
@@ -87,8 +97,8 @@ const casos: Array<[string, unknown, unknown]> = [
   ["com a trava ligada, entrega segue reservada", shouldReserveStock("Entrega", true, st), true],
   ["com a trava desligada, a recepção já reserva", shouldReserveStock("Recepção", false, st), true],
   // --- Histórico de movimentação da peça ---
-  ["a peça mostra entradas e saídas", mov.length, 3],
-  ["a mais recente vem primeiro", mov[0]!.documentId, "VEN-0002"],
+  ["a peça mostra entradas, saídas e conferências", mov.length, 4],
+  ["a mais recente vem primeiro", mov[0]!.documentId, "AJU-0001"],
   ["a compra entra com quantidade positiva", mov.find((m) => m.documentId === "ENT-0001")!.quantity, 10],
   ["a venda sai com quantidade negativa", mov.find((m) => m.documentId === "VEN-0002")!.quantity, -2],
   ["a OS aparece pelo que baixou de verdade", mov.find((m) => m.documentId === "OS-0001")!.quantity, -3],
@@ -99,6 +109,22 @@ const casos: Array<[string, unknown, unknown]> = [
   ["total que entrou", totais.inboundQuantity, 10],
   ["total que saiu", totais.outboundQuantity, 5],
   ["valor comprado", totais.inboundValue, 400],
+
+  // --- O ajuste de estoque no histórico da peça ---
+  // O saldo mudava de 42 para 38 e o cadastro do produto não dizia por quê.
+  ["a conferência aparece no histórico da peça", mov.some((m) => m.kind === "Ajuste de estoque"), true],
+  ["com a quantidade que faltou", mov.find((m) => m.documentId === "AJU-0001")!.quantity, -4],
+  ["e o motivo escrito junto", mov.find((m) => m.documentId === "AJU-0001")!.detail, "Perda, quebra ou vencimento · CAIU DA BANCADA"],
+  ["valendo o custo da peça", mov.find((m) => m.documentId === "AJU-0001")!.total, -160],
+  ["conferência de outra peça não entra", mov.some((m) => m.documentId === "AJU-0001" && m.quantity === 2), false],
+  ["conferência que não mudou nada não vira linha", mov.some((m) => m.documentId === "AJU-0002"), false],
+  // O "saiu" responde quanto se vendeu desta peça: uma quebra somada ali
+  // transformaria perda em faturamento.
+  ["a quebra não entra no que saiu em vendas", totais.outboundQuantity, 5],
+  ["nem no valor vendido", totais.outboundValue, 300],
+  ["ela tem o próprio saldo", totais.adjustedQuantity, -4],
+  ["e o próprio valor", totais.adjustedValue, -160],
+  ["contando quantas conferências mexeram nesta peça", totais.adjustedCount, 1],
 ];
 
 let falhas = 0;

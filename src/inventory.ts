@@ -119,7 +119,7 @@ export function shouldReserveStock(status: string, deductOnlyWhenStarted: boolea
 export type ProductMovement = {
   /** Documento que gerou a movimentação: entrada, venda ou OS. */
   documentId: string;
-  kind: "Entrada" | "Venda do balcão" | "Serviço rápido" | "Ordem de serviço";
+  kind: "Entrada" | "Venda do balcão" | "Serviço rápido" | "Ordem de serviço" | "Ajuste de estoque";
   date: string;
   /** ISO 8601, usado para ordenar. */
   at: string;
@@ -143,6 +143,11 @@ type MovementSources = {
     id: string; customer: string; closedAt?: string; time?: string;
     deductedItems?: Array<{ productId: string; quantity: number }>;
     items?: Array<{ productId?: string; quantity?: number; price: number }>;
+  }>;
+  /** Conferências de prateleira: corrigem o saldo sem compra nem venda. */
+  adjustments?: Array<{
+    id: string; date: string; adjustedAt?: string; motivo: string; observacao?: string;
+    items?: Array<{ productId: string; diferenca: number; custoUnitario?: number }>;
   }>;
 };
 
@@ -211,6 +216,27 @@ export function productMovements(productId: string, sources: MovementSources): P
       });
   });
 
+  // O ajuste de estoque também é movimentação da peça — é justamente a que
+  // ninguém consegue explicar depois. Sem ela aqui, o saldo mudava de 42 para
+  // 38 e o histórico do produto não dizia por quê.
+  (sources.adjustments ?? []).forEach((ajuste) => {
+    (ajuste.items ?? [])
+      .filter((item) => item.productId === productId && item.diferenca !== 0)
+      .forEach((item) => {
+        const custo = item.custoUnitario ?? 0;
+        movements.push({
+          documentId: ajuste.id,
+          kind: "Ajuste de estoque",
+          date: ajuste.date,
+          at: ajuste.adjustedAt ?? "",
+          detail: `${ajuste.motivo}${(ajuste.observacao ?? "").trim() ? ` · ${ajuste.observacao!.trim()}` : ""}`,
+          quantity: item.diferenca,
+          unitValue: custo,
+          total: round2(item.diferenca * custo),
+        });
+      });
+  });
+
   // Mais recentes primeiro. Registros antigos podem não ter o carimbo ISO, e aí
   // a data brasileira decide.
   return movements.sort((a, b) => {
@@ -228,13 +254,22 @@ function brToSortable(value: string): string {
 
 /** Totais de entrada e saída de uma peça, para o resumo do histórico. */
 export function movementTotals(movements: ProductMovement[]) {
-  const inbound = movements.filter((movement) => movement.quantity > 0);
-  const outbound = movements.filter((movement) => movement.quantity < 0);
+  // O ajuste fica fora do "entrou" e do "saiu" de propósito: aqueles dois
+  // números respondem "quanto comprei e quanto vendi desta peça", e uma perda
+  // de quatro unidades somada nas vendas transformaria quebra em faturamento.
+  const comerciais = movements.filter((movement) => movement.kind !== "Ajuste de estoque");
+  const ajustes = movements.filter((movement) => movement.kind === "Ajuste de estoque");
+  const inbound = comerciais.filter((movement) => movement.quantity > 0);
+  const outbound = comerciais.filter((movement) => movement.quantity < 0);
   return {
     inboundQuantity: inbound.reduce((total, movement) => total + movement.quantity, 0),
     outboundQuantity: -outbound.reduce((total, movement) => total + movement.quantity, 0),
     inboundValue: inbound.reduce((total, movement) => total + movement.total, 0),
     outboundValue: -outbound.reduce((total, movement) => total + movement.total, 0),
+    /** Saldo líquido das conferências: negativo quando a peça sumiu da prateleira. */
+    adjustedQuantity: ajustes.reduce((total, movement) => total + movement.quantity, 0),
+    adjustedValue: round2(ajustes.reduce((total, movement) => total + movement.total, 0)),
+    adjustedCount: ajustes.length,
   };
 }
 

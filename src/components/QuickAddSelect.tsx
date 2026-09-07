@@ -13,6 +13,7 @@
 import { useState } from "react";
 import { emMaiusculo } from "../text-case";
 import { quickAddProblem } from "../quick-list";
+import { mensagemDoErro } from "../firebase-errors";
 
 export function QuickAddSelect({
   value,
@@ -24,6 +25,8 @@ export function QuickAddSelect({
   className,
   disabled,
   createTitle,
+  podeCriar = true,
+  acao,
 }: {
   value: string;
   onChange: (valor: string) => void;
@@ -36,6 +39,16 @@ export function QuickAddSelect({
   className?: string;
   disabled?: boolean;
   createTitle?: string;
+  /**
+   * O perfil de quem está logado pode criar item novo aqui?
+   *
+   * Sem isto o "+" aparecia para todo mundo e só falhava no banco, depois de a
+   * pessoa digitar o nome — oferecer um botão que sempre nega é pior do que
+   * não ter o botão.
+   */
+  podeCriar?: boolean;
+  /** O que está sendo criado, para o erro citar: "criar a categoria". */
+  acao?: string;
 }) {
   const [criando, setCriando] = useState(false);
   const [nome, setNome] = useState("");
@@ -54,7 +67,9 @@ export function QuickAddSelect({
       setNome("");
       setErro("");
     } catch (falha) {
-      setErro(falha instanceof Error ? falha.message : "Não foi possível criar agora.");
+      // Nunca a mensagem crua: a recusa do Firestore carrega o uid e o e-mail
+      // de quem está logado, e isso ia para a tarja do formulário.
+      setErro(mensagemDoErro(falha, { acao: acao ?? "criar o item", temPermissao: podeCriar }));
     } finally {
       setSalvando(false);
     }
@@ -105,16 +120,18 @@ export function QuickAddSelect({
               sozinha ao salvar. */}
           {value && !options.includes(value) ? <option value={value}>{value} (fora da lista)</option> : null}
         </select>
-        <button
-          type="button"
-          className="quick-add-open"
-          onClick={() => setCriando(true)}
-          disabled={disabled}
-          title={createTitle ?? "Criar um item novo sem sair daqui"}
-          aria-label={createTitle ?? "Criar um item novo sem sair daqui"}
-        >
-          +
-        </button>
+        {podeCriar ? (
+          <button
+            type="button"
+            className="quick-add-open"
+            onClick={() => setCriando(true)}
+            disabled={disabled}
+            title={createTitle ?? "Criar um item novo sem sair daqui"}
+            aria-label={createTitle ?? "Criar um item novo sem sair daqui"}
+          >
+            +
+          </button>
+        ) : null}
       </div>
     </div>
   );
