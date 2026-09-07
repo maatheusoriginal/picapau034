@@ -60,6 +60,7 @@ npm run dev             # http://localhost:3000
 | `npm run check:report` | Confere o relatório do período: DRE, formas de pagamento, ranking e CSV |
 | `npm run check:stock-adjust` | Confere o ajuste de estoque: diferença, motivo obrigatório e impacto em dinheiro |
 | `npm run check:recurring` | Confere as contas que se repetem: próximo vencimento, o dia que não anda para trás e a trava contra duplicar |
+| `npm run check:firebase-errors` | Confere que o erro do Firebase sai em português e sem o uid, o e-mail nem o JSON cru |
 | `npm run build` | Gera o pacote de produção em `dist/` |
 | `npm start` | Sobe o servidor de produção servindo `dist/` (exige `npm run build` antes) |
 
@@ -2076,6 +2077,79 @@ Agora o campo aceita o valor colado no formato brasileiro (`2.500,00`, com ou
 sem `R$`, com espaço normal ou o não separável que vem do Excel) e no americano
 (`2,500.00`, que aparece em planilha exportada). O que não é valor nenhum
 continua sendo recusado, como antes.
+
+## Erro do Firebase não é para ser lido pelo cliente
+
+A recusa de permissão do Firestore chega assim, e isto ia **para a tela**, na
+tarja do formulário:
+
+```
+{"error":"Missing or insufficient permissions.","authInfo":{"userId":
+"fknR9hs3uXgKBR3LVQ7c7WGk3Qe2","email":"rayane@picapau.com", ...
+```
+
+Duas coisas erradas de uma vez. A pessoa não entende o que aconteceu nem o que
+fazer, e o sistema publica o **uid e o e-mail de quem está logado** — que é o
+tipo de coisa que acaba num print no grupo do WhatsApp.
+
+`src/firebase-errors.ts` traduz o erro antes de ele chegar na tela, e nunca
+devolve a mensagem crua: quando o código não é conhecido, sai uma frase
+genérica com o código entre parênteses, que serve para procurar sem expor o
+conteúdo.
+
+A parte que mais economiza tempo é distinguir os **dois motivos** de uma
+recusa, porque eles pedem coisas opostas de quem lê:
+
+- **A pessoa não tem a permissão** → quem resolve é o administrador, em
+  Usuários e acessos.
+- **A pessoa TEM a permissão marcada e o banco recusou assim mesmo** → quem
+  resolve é quem publica as regras. Regra editada no código não vale nada até
+  ser publicada no Firebase (`firebase deploy --only firestore:rules`), e
+  enquanto isso o sistema deixa clicar no que o banco vai negar.
+
+Sem essa distinção, as duas situações aparecem como "sem permissão" e o dono
+passa a tarde mexendo nas permissões de alguém que já tinha todas.
+
+`npm run check:firebase-errors` (24 casos) garante que o uid, o e-mail, o JSON
+e o caminho do documento não aparecem em mensagem nenhuma.
+
+## Criar categoria e marca é trabalho de balcão
+
+O "+" ao lado de Grupo e Marca aparecia para todo mundo e só falhava no banco,
+**depois** de a pessoa digitar o nome. Oferecer um botão que sempre nega é pior
+do que não ter o botão: agora ele só aparece para quem pode criar.
+
+E a marca não dava para criar nem para quem podia. Categoria mora em
+`categories` (liberada para quem gerencia estoque); marca mora em
+`settings/lists`, junto com **conta de caixa, prioridade de OS e motivo de
+movimentação** — coisas que não são do balcão. A regra exigia
+`settings.manage` para o documento inteiro, então quem atende não conseguia
+acrescentar uma marca sem virar administrador da oficina.
+
+A liberação é **por chave**: quem gerencia estoque mexe em `partBrands`,
+`motorcycleBrands` e `units`, e em mais nada do mesmo documento.
+
+```
+allow update: if can('settings.manage')
+  || (documentId == 'lists'
+      && can('inventory.manage')
+      && changesOnly(['partBrands', 'motorcycleBrands', 'units', 'updatedAt']));
+```
+
+Dois detalhes que só apareceram testando contra as regras de verdade:
+
+- **`updatedAt` entra na lista.** Toda escrita do sistema carrega esse carimbo;
+  sem ele na regra, a gravação era recusada por causa de um campo que a própria
+  tela acrescenta sozinha.
+- **A primeira marca é um `create`, não um `update`.** Numa oficina que nunca
+  mexeu nas Configurações o documento `settings/lists` ainda não existe, e a
+  regra de update não é nem consultada.
+
+O passo 45 do roteiro ponta a ponta entra com dois logins de verdade — um
+perfil de balcão e um que só consulta — e confere no Firestore que a categoria
+e a marca foram gravadas, que a conta de caixa e as configurações gerais
+continuam barradas para o balcão, que quem só consulta não vê o "+", e que o
+uid não aparece em lugar nenhum da tela.
 
 ## Cópia de segurança
 

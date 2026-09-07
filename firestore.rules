@@ -207,7 +207,27 @@ service cloud.firestore {
 
     match /settings/{documentId} {
       allow read: if signedIn();
-      allow create, update, delete: if can('settings.manage');
+      allow delete: if can('settings.manage');
+      // Na primeira vez a lista ainda não existe, então gravar uma marca é um
+      // CREATE, e não um update. Sem este caminho o balcão só conseguia
+      // acrescentar marca em oficina que já tivesse mexido nas Configurações.
+      allow create: if can('settings.manage')
+        || (documentId == 'lists'
+            && can('inventory.manage')
+            // 'updatedAt' entra na lista porque toda escrita do sistema carrega
+            // esse carimbo: sem ele aqui, a regra reprovaria por causa de um
+            // campo que a própria tela acrescenta sozinha.
+            && request.resource.data.keys().hasOnly(['partBrands', 'motorcycleBrands', 'units', 'updatedAt']));
+      // Marca de peça e unidade são cadastro de rotina do balcão, igual à
+      // categoria: quem gerencia estoque cria do lado do campo, sem virar
+      // administrador. Só que elas moram em settings/lists junto com coisas
+      // que NÃO são do balcão — conta de caixa, prioridade de OS, motivo de
+      // movimentação. Por isso a liberação é por chave: quem gerencia estoque
+      // mexe nessas três e em mais nada.
+      allow update: if can('settings.manage')
+        || (documentId == 'lists'
+            && can('inventory.manage')
+            && changesOnly(['partBrands', 'motorcycleBrands', 'units', 'updatedAt']));
     }
 
     match /auditLogs/{documentId} {

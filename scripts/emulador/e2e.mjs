@@ -2462,6 +2462,151 @@ await passo("conta que se repete: avisa a competência que falta e não lança d
   if (problemas.length) throw new Error("conta que se repete:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("quem toca o balcão cria categoria e marca da peça, e quem só consulta não vê o '+'", async () => {
+  // O caso que a oficina encontrou: a Rayane, do balcão, abriu "Nova peça",
+  // clicou no "+" do Grupo e recebeu na tela o erro CRU do Firestore — com o
+  // uid e o e-mail dela dentro, num print que foi parar no WhatsApp.
+  //
+  // Eram três defeitos de uma vez: o "+" aparecia para quem não podia criar, a
+  // marca exigia permissão de Configurações (que o balcão não tem), e a
+  // mensagem de erro despejava a tripa do SDK.
+  const problemas = [];
+  const AUTH = "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1";
+  const FS = "http://127.0.0.1:8080/v1/projects/picapau-teste/databases/(default)/documents";
+  const texto = (valor) => ({ stringValue: valor });
+  const permissoes = (lista) => ({ arrayValue: { values: lista.map(texto) } });
+
+  const conta = async (email) => {
+    for (const rota of ["accounts:signUp", "accounts:signInWithPassword"]) {
+      const r = await fetch(`${AUTH}/${rota}?key=fake-api-key`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password: "teste123", returnSecureToken: true }),
+      });
+      const d = await r.json();
+      if (d.localId) return d.localId;
+    }
+    return "";
+  };
+  const perfilar = async (uid, nome, email, role, lista) => {
+    const dados = { uid: texto(uid), name: texto(nome), email: texto(email), role: texto(role),
+      active: { booleanValue: true }, mustChangePassword: { booleanValue: false }, permissions: permissoes(lista) };
+    for (const colecao of ["userAccess", "users"]) {
+      await fetch(`${FS}/${colecao}/${uid}`, { method: "PATCH",
+        headers: { "content-type": "application/json", Authorization: "Bearer owner" },
+        body: JSON.stringify({ fields: dados }) });
+    }
+  };
+
+  // Balcão: gerencia estoque, mas NÃO mexe nas Configurações. É o perfil de
+  // quem atende, e é exatamente onde o defeito aparecia.
+  const uidBalcao = await conta("balcao@picapau.test");
+  if (!uidBalcao) throw new Error("não foi possível criar a conta do balcão no Auth");
+  await perfilar(uidBalcao, "RAYANE DO BALCAO", "balcao@picapau.test", "Balcão",
+    ["orders.view", "orders.create", "orders.update", "budgets.view", "pos.use", "quickService.use",
+     "inventory.view", "inventory.manage", "customers.view", "customers.manage",
+     "finance.view", "finance.manage", "settings.view"]);
+  // Consulta: vê o estoque e mais nada.
+  const uidConsulta = await conta("consulta@picapau.test");
+  await perfilar(uidConsulta, "SO CONSULTA", "consulta@picapau.test", "Mecânico",
+    ["orders.view", "inventory.view", "customers.view"]);
+
+  const entrarComo = async (email) => {
+    const contexto = await b.newContext({ viewport: { width: 1440, height: 1000 } });
+    const pag = await contexto.newPage();
+    const vistos = [];
+    pag.on("console", (m) => { if (m.type() === "error") vistos.push(m.text()); });
+    await pag.goto(process.env.URL_TESTE ?? "http://127.0.0.1:5199/");
+    await pag.waitForTimeout(1800);
+    await pag.getByPlaceholder(/e-mail|email/i).first().fill(email);
+    await pag.locator('input[type="password"]').first().fill("teste123");
+    await pag.getByRole("button", { name: /^Entrar$/ }).click();
+    await pag.waitForTimeout(6500);
+    return { contexto, pag, vistos };
+  };
+  const irAoEstoque = async (pag) => {
+    const alvo = pag.locator(".nav-subitem", { hasText: "Produtos e estoque" }).first();
+    if (!(await alvo.isVisible().catch(() => false))) {
+      await pag.locator(".nav-group-trigger", { hasText: "Estoque" }).first().click();
+      await pag.waitForTimeout(700);
+    }
+    await alvo.click();
+    await pag.waitForTimeout(2400);
+  };
+
+  // 1. Quem só consulta não pode nem ver o "+".
+  const consulta = await entrarComo("consulta@picapau.test");
+  try {
+    await irAoEstoque(consulta.pag);
+    if (await consulta.pag.locator("button", { hasText: /Adicionar produto/i }).count()) {
+      problemas.push("quem só consulta o estoque está vendo o botão de adicionar produto");
+    }
+    if (await consulta.pag.locator(".quick-add-open").count()) {
+      problemas.push("quem só consulta está vendo o '+' de criar item");
+    }
+  } finally { await consulta.contexto.close(); }
+
+  // 2. O balcão cria categoria e marca sem sair do cadastro.
+  const balcao = await entrarComo("balcao@picapau.test");
+  try {
+    await irAoEstoque(balcao.pag);
+    const abrir = balcao.pag.locator("button", { hasText: /Adicionar produto/i }).first();
+    if (!(await abrir.count())) throw new Error("o balcão não tem o botão de adicionar produto");
+    await abrir.click();
+    await balcao.pag.waitForTimeout(2500);
+    const mais = await balcao.pag.locator(".quick-add-open").count();
+    if (mais !== 2) problemas.push(`o balcão vê ${mais} botão(ões) '+', esperado 2 (grupo e marca)`);
+
+    const criar = async (rotulo, nome) => {
+      const bloco = balcao.pag.locator(".pdv-row").filter({ hasText: rotulo }).first();
+      await bloco.locator(".quick-add-open").click();
+      await balcao.pag.waitForTimeout(700);
+      await bloco.locator("input").fill(nome);
+      await bloco.locator(".quick-add-confirm").click();
+      await balcao.pag.waitForTimeout(4000);
+      return await bloco.locator(".quick-add-error").innerText().catch(() => "");
+    };
+
+    const erroGrupo = await criar("Grupo", "CAPACETE E ACESSORIO");
+    if (erroGrupo) problemas.push(`criar a categoria falhou: ${JSON.stringify(erroGrupo)}`);
+    const erroMarca = await criar("Marca", "MARCA NOVA DO BALCAO");
+    if (erroMarca) problemas.push(`criar a marca falhou: ${JSON.stringify(erroMarca)}`);
+
+    // A conferência é no banco: a tela pode dizer o que quiser.
+    const categorias = (await banco("categories")).map((c) => c.name);
+    if (!categorias.includes("CAPACETE E ACESSORIO")) problemas.push("a categoria não chegou ao Firestore");
+    const listas = await (await fetch(`${FS}/settings/lists`, { headers: { Authorization: "Bearer owner" } })).json();
+    const marcas = (listas.fields?.partBrands?.arrayValue?.values || []).map((v) => v.stringValue);
+    if (!marcas.includes("MARCA NOVA DO BALCAO")) problemas.push("a marca não chegou ao Firestore");
+
+    // 3. E o que o balcão NÃO pode continua barrado: a regra libera três
+    // chaves de settings/lists, não a lista inteira.
+    const token = await (async () => {
+      const r = await fetch(`${AUTH}/accounts:signInWithPassword?key=fake-api-key`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "balcao@picapau.test", password: "teste123", returnSecureToken: true }) });
+      return (await r.json()).idToken;
+    })();
+    const proibido = await fetch(`${FS}/settings/lists?updateMask.fieldPaths=cashAccounts`, {
+      method: "PATCH", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ fields: { cashAccounts: permissoes(["CONTA INVENTADA"]) } }) });
+    if (proibido.ok) problemas.push("o balcão conseguiu mexer nas contas de caixa: a regra por chave não está travando");
+    const geral = await fetch(`${FS}/settings/global?updateMask.fieldPaths=osPrefix`, {
+      method: "PATCH", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ fields: { osPrefix: texto("HACK") } }) });
+    if (geral.ok) problemas.push("o balcão conseguiu mexer nas configurações gerais");
+
+    // 4. Nada de erro cru na tela: o uid e o e-mail não podem aparecer.
+    const naTela = await balcao.pag.evaluate(() => document.body.innerText);
+    if (naTela.includes(uidBalcao)) problemas.push("o uid de quem está logado apareceu na tela");
+    if (/Missing or insufficient permissions|authInfo|PERMISSION_DENIED/i.test(naTela)) {
+      problemas.push("a mensagem crua do Firestore apareceu na tela");
+    }
+    await balcao.pag.screenshot({ path: `${OUT}/e2e-balcao.png`, fullPage: true });
+  } finally { await balcao.contexto.close(); }
+
+  if (problemas.length) throw new Error("criar categoria e marca pelo balcão:\n      - " + problemas.join("\n      - "));
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();

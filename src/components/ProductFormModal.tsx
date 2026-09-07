@@ -429,7 +429,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   <span className="pdv-label">Grupo <b className="req">*</b></span>
                   {onCreateCategory ? (
                     <QuickAddSelect value={category} onChange={setCategory} options={defaultCategories} onCreate={onCreateCategory}
-                      placeholder="Ex: FILTROS" createTitle="Criar uma categoria sem sair do cadastro"/>
+                      placeholder="Ex: FILTROS" createTitle="Criar uma categoria sem sair do cadastro" acao="criar a categoria"/>
                   ) : (
                     <select value={category} onChange={(e) => setCategory(e.target.value)} className="dialog-select">
                       {defaultCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
@@ -446,7 +446,7 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                   */}
                   {onCreatePartBrand ? (
                     <QuickAddSelect value={brand.trim()} onChange={setBrand} options={brandOptions} onCreate={onCreatePartBrand}
-                      emptyLabel="Sem marca definida" placeholder="Ex: COBREQ" createTitle="Criar uma marca sem sair do cadastro"/>
+                      emptyLabel="Sem marca definida" placeholder="Ex: COBREQ" createTitle="Criar uma marca sem sair do cadastro" acao="criar a marca"/>
                   ) : (
                     <select value={brand === "" || brandOptions.includes(brand) ? brand : "__outra__"}
                       onChange={(e) => setBrand(e.target.value === "__outra__" ? " " : e.target.value)} className="dialog-input">

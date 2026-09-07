@@ -2726,6 +2726,8 @@ export function ModuleWorkspace({
 export function AppDialog({
   dialog,
   canOperate,
+  canCreateCategory,
+  canCreatePartBrand,
   step,
   setStep,
   close,
@@ -2764,6 +2766,10 @@ export function AppDialog({
 }: {
   dialog: DialogKind;
   canOperate: boolean;
+  /** Pode criar categoria de peça sem sair do cadastro. */
+  canCreateCategory: boolean;
+  /** Pode criar marca de peça. Ela vive em settings/lists, e a regra libera essa chave para quem gerencia estoque. */
+  canCreatePartBrand: boolean;
   step: number;
   setStep: (step: number) => void;
   close: () => void;
@@ -3125,8 +3131,12 @@ export function AppDialog({
           allProducts={products}
           units={systemList(lists, "units")}
           partBrands={systemList(lists, "partBrands")}
-          onCreateCategory={criarCategoriaDeProduto}
-          onCreatePartBrand={(nome) => criarItemDeLista("partBrands", nome)}
+          // Sem a permissão, o "+" nem aparece: oferecer um botão que o banco
+          // vai negar depois de a pessoa digitar o nome é pior do que não ter o
+          // botão. A categoria é cadastro de rotina do balcão; a marca vive na
+          // lista do sistema, em settings/lists.
+          onCreateCategory={canCreateCategory ? criarCategoriaDeProduto : undefined}
+          onCreatePartBrand={canCreatePartBrand ? (nome) => criarItemDeLista("partBrands", nome) : undefined}
           settings={settings}
           movementSources={{ stockEntries, sales, orders, adjustments: stockAdjustments }}
           removal={exclusao(canOperate)}
@@ -6195,7 +6205,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canOperate={canOperateDialog} canCreateCategory={canManageInventory || canManageSettings} canCreatePartBrand={canManageInventory || canManageSettings} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {helpOpen ? (
         <div className="dialog-layer" role="presentation" onMouseDown={(evento) => evento.target === evento.currentTarget && setHelpOpen(false)}>
           <section className="dialog dialog-wide help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">
