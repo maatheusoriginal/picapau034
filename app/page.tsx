@@ -1,5 +1,15 @@
 "use client";
 
+import { OperationsOverview } from "../src/components/OperationsOverview";
+import { OrdersWorkspace } from "../src/components/OrdersWorkspace";
+import { CounterWorkspace } from "../src/components/CounterWorkspace";
+import { ActivityWorkspace } from "../src/components/ActivityWorkspace";
+import { WorkspaceSearch, type SearchEntry } from "../src/components/WorkspaceSearch";
+import { RecordPreview } from "../src/components/RecordPreview";
+import { canVisit, destinationForPath, routePaths, workspacePermissions, lowStock, matchesSearch, orderIsLate, calendarDay, type ParkedSale } from "../src/workspace";
+import { useModalFocus } from "../src/use-modal-focus";
+import { OrderItemsEditor } from "../src/components/OrderItemsEditor";
+import { Icon } from "../src/components/WorkshopIcon";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories, isMechanicUser, orDefault, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { NumberField } from "../src/components/NumberField";
@@ -187,39 +197,6 @@ const initialAccounts: AccountRecord[] = [];
 const initialCashSessions: CashSession[] = [];
 const initialMovements: MovementRecord[] = [];
 
-function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
-  const paths: Record<IconName, React.ReactNode> = {
-    home: <><path d="m3 10 9-7 9 7"/><path d="M5 9v11h14V9"/><path d="M9 20v-7h6v7"/></>,
-    wrench: <><path d="M14.7 6.3a4 4 0 0 0-5-5L12 3.6 9.6 6 7.3 3.7a4 4 0 0 0 5 5l-8.9 8.9a2.1 2.1 0 0 0 3 3l8.9-8.9a4 4 0 0 0-.6-5.4Z"/></>,
-    file: <><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></>,
-    box: <><path d="m3 7 9-4 9 4-9 4z"/><path d="m3 7 9 4 9-4v10l-9 4-9-4zM12 11v10"/></>,
-    users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></>,
-    bike: <><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/><path d="M5 17 9 9h4l3 8M8 12h7l4 5M13 9l-2-3h-2M17 6h3"/></>,
-    wallet: <><path d="M3 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h13"/><path d="M16 12h5v4h-5a2 2 0 0 1 0-4Z"/></>,
-    chart: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></>,
-    search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
-    bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></>,
-    plus: <path d="M12 5v14M5 12h14"/>,
-    arrow: <><path d="M5 12h14M13 6l6 6-6 6"/></>,
-    clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
-    alert: <><path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5M12 18h.01"/></>,
-    check: <path d="m5 12 4 4L19 6"/>,
-    menu: <path d="M4 7h16M4 12h16M4 17h16"/>,
-    settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></>,
-    shield: <><path d="M12 22s8-3.5 8-10V5l-8-3-8 3v7c0 6.5 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></>,
-    trash: <><path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13M9 7V4h6v3"/></>,
-    edit: <><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></>,
-    lock: <><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></>,
-    printer: <><path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/></>,
-    refresh: <><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></>,
-  };
-  return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      {paths[name]}
-    </svg>
-  );
-}
-
 const navGroups: Array<{
   label: string;
   icon: IconName;
@@ -274,25 +251,7 @@ const navGroups: Array<{
   },
 ];
 
-const destinationPermissions: Record<string, FirebasePermission[]> = {
-  "Ordens de serviço": ["orders.view"],
-  "Orçamentos": ["budgets.view"],
-  "PDV Balcão": ["pos.use"],
-  "Serviço rápido": ["quickService.use"],
-  "Vendas do balcão": ["pos.use"],
-  "Produtos e estoque": ["inventory.view"],
-  "Compras e entradas": ["inventory.manage"],
-  "Ajuste de estoque": ["inventory.view"],
-  "Fornecedores": ["inventory.manage"],
-  "Clientes": ["customers.view"],
-  "Motocicletas": ["customers.view"],
-  "Funcionários": ["team.view"],
-  "Financeiro": ["finance.view"],
-  "Contas a receber": ["finance.view"],
-  "Contas a pagar": ["finance.view"],
-  "Histórico de caixas": ["finance.view"],
-  "Relatórios": ["finance.view"],
-};
+const destinationPermissions = workspacePermissions;
 
 const initialOrders: OrderRecord[] = [];
 
@@ -563,138 +522,6 @@ function useFirebaseSyncedEmployees(
 // pagamento, que é outro componente. Enquanto o estado morava aqui dentro, o
 // diálogo não tinha como saber o que estava sendo vendido — mostrava um total
 // fixo de R$ 108,00 e a venda sumia ao fechar a janela.
-function PdvWorkspace({
-  notify,
-  openDialog,
-  cart,
-  setCart,
-  discount,
-  setDiscount,
-  products = [],
-  clients = [],
-  blockZeroStockSale = true,
-}: {
-  notify: (message: string) => void;
-  openDialog: OpenDialog;
-  cart: CartItem[];
-  setCart: React.Dispatch<React.SetStateAction<CartItem[]>>;
-  discount: number;
-  setDiscount: (value: number) => void;
-  products?: ProductRecord[];
-  clients?: ClientRecord[];
-  blockZeroStockSale?: boolean;
-}) {
-  const [pdvSearch, setPdvSearch] = useState("");
-  // O texto digitado fica separado do número para a pessoa poder apagar tudo e
-  // recomeçar sem o campo pular para "0" a cada tecla.
-  const [showDiscount, setShowDiscount] = useState(false);
-  const [discountText, setDiscountText] = useState("");
-  // Antes recalculado em toda renderização (inclusive a cada tecla digitada em
-  // qualquer outro campo da tela), mesmo quando `products`/`cart` não mudaram.
-  const total = useMemo(() => cart.reduce((sum, item) => sum + item.unit * item.quantity, 0), [cart]);
-  const addToCart = useCallback((product: Omit<CartItem, "quantity">) => {
-    // "Bloquear venda sem estoque" (Configurações → Estoque & Reposição).
-    // Desligado, a oficina consegue vender a peça que está chegando e acertar o
-    // estoque depois.
-    if (blockZeroStockSale && product.stock <= 0) return notify(`${product.name} está sem estoque.`);
-    setCart((current) => {
-      const inCart = current.find((item) => item.code === product.code);
-      if (blockZeroStockSale && inCart && inCart.quantity >= product.stock) {
-        notify(`${product.name} tem apenas ${product.stock} em estoque.`);
-        return current;
-      }
-      return inCart
-        ? current.map((item) => item.code === product.code ? { ...item, quantity: item.quantity + 1 } : item)
-        : [...current, { ...product, quantity: 1 }];
-    });
-    setPdvSearch("");
-  }, [notify, setCart, blockZeroStockSale]);
-  // Peça desativada não é oferecida na venda: quem digita o nome dela não pode
-  // continuar somando ao carrinho uma peça que a oficina tirou de linha.
-  const pdvCatalog = useMemo(() => somenteAtivos(products).map((p) => ({
-    id: p.id,
-    code: p.code,
-    barcode: p.code,
-    name: p.name,
-    unit: parseBRL(p.price),
-    stock: p.stock,
-    cost: parseBRL(p.cost),
-  })), [products]);
-  const pdvSuggestions = useMemo(() => (
-    pdvSearch ? pdvCatalog.filter((product) => `${product.name} ${product.code} ${product.barcode}`.toLowerCase().includes(pdvSearch.toLowerCase())).slice(0, 8) : []
-  ), [pdvCatalog, pdvSearch]);
-  const changeQuantity = useCallback((code: string, difference: number) => {
-    setCart((current) => current
-      .map((item) => item.code === code
-        ? { ...item, quantity: Math.max(0, blockZeroStockSale ? Math.min(item.stock, item.quantity + difference) : item.quantity + difference) }
-        : item)
-      .filter((item) => item.quantity > 0));
-  }, [setCart, blockZeroStockSale]);
-
-  return (
-    <>
-      <div className="module-heading pdv-heading">
-        <div><p>Venda no balcão</p><h1>PDV Balcão</h1><span>Venda peças com poucos cliques e receba em mais de uma forma.</span></div>
-        <div className="pdv-heading-actions"><button className="outline-button large" onClick={() => openDialog("expense")}><Icon name="plus" size={16}/>Lançar gasto</button><div className="pdv-session"><i/><div><strong>Caixa aberto</strong><small>Pronto para vendas</small></div></div></div>
-      </div>
-      <div className="pdv-layout">
-        <section className="pdv-main">
-          <div className="pdv-search-wrap"><label className="pdv-search"><Icon name="search"/><input autoFocus value={pdvSearch} onChange={(event) => setPdvSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && pdvSuggestions[0]) addToCart(pdvSuggestions[0]); }} placeholder="Digite o produto, código de barras ou código da peça"/><kbd>F2</kbd></label>{pdvSearch ? <div className="pdv-suggestions">{pdvSuggestions.length ? pdvSuggestions.map((product) => <button key={product.code} onClick={() => addToCart(product)} disabled={product.stock === 0}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.barcode}</small></div><b>{product.stock ? `${product.stock} un. · R$ ${product.unit.toFixed(2).replace(".", ",")}` : "Sem estoque"}</b><Icon name="plus" size={16}/></button>) : <div className="no-results">Nenhum produto encontrado.</div>}</div> : null}</div>
-          <div className="pdv-shortcuts">
-            {pdvCatalog.filter((p) => p.stock > 0).slice(0, 2).map((prod, idx) => (
-              <button key={prod.code} onClick={() => addToCart(prod)}>
-                <span>{String(idx + 1).padStart(2, "0")}</span>
-                <div><strong>{prod.name}</strong><small>{prod.stock} em estoque</small></div>
-                <b>R$ {prod.unit.toFixed(2).replace(".", ",")}</b>
-              </button>
-            ))}
-            <button onClick={() => openDialog("catalog")}><span>+</span><div><strong>Ver catálogo</strong><small>{products.length} {products.length === 1 ? "produto" : "produtos"}</small></div><Icon name="arrow" size={17}/></button>
-          </div>
-          <section className="panel pdv-cart">
-            <div className="pdv-cart-head"><div><h2>Itens da venda</h2><span>{cart.reduce((sum, item) => sum + item.quantity, 0)} unidades</span></div><button onClick={() => setCart([])}>Limpar venda</button></div>
-            {cart.length ? (
-              <div className="table-scroll">
-                <table>
-                  <thead><tr><th>Produto</th><th>Quantidade</th><th>Unitário</th><th>Total</th><th></th></tr></thead>
-                  <tbody>{cart.map((item) => (
-                    <tr key={item.code}>
-                      <td><strong>{item.name}</strong><span className="mono">{item.code} · Estoque {item.stock}</span></td>
-                      <td><div className="quantity-control"><button onClick={() => changeQuantity(item.code, -1)}>−</button><strong>{item.quantity}</strong><button onClick={() => changeQuantity(item.code, 1)}>+</button></div></td>
-                      <td className="mono">R$ {item.unit.toFixed(2).replace(".", ",")}</td>
-                      <td><strong className="mono">R$ {(item.unit * item.quantity).toFixed(2).replace(".", ",")}</strong></td>
-                      <td><button className="remove-item" onClick={() => changeQuantity(item.code, -item.quantity)} aria-label={`Remover ${item.name}`}>×</button></td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            ) : <div className="pdv-empty"><span><Icon name="box"/></span><strong>Venda vazia</strong><p>Busque um produto para começar.</p></div>}
-          </section>
-        </section>
-        <aside className="pdv-summary panel">
-          <div className="summary-title"><span>Resumo da venda</span><b>VENDA NO BALCÃO</b></div>
-          <button className="pdv-client" onClick={() => openDialog("client")}><span className="registry-avatar">CF</span><div><strong>Consumidor final</strong><small>Adicionar cliente ou usar crediário</small></div><Icon name="arrow" size={17}/></button>
-          <div className="summary-lines">
-            <div><span>Subtotal</span><b>{formatBRL(total)}</b></div>
-            {/* O botão de desconto abria o diálogo de movimentação financeira,
-                que nunca teve nada a ver com a venda: o desconto não era
-                aplicado em lugar nenhum e o total nunca mudava. Agora o valor
-                é digitado aqui e desce até o pagamento e a venda gravada. */}
-            <div><span>Desconto</span>{showDiscount || discount > 0
-              ? <input className="summary-discount-input" inputMode="decimal" autoFocus value={discountText} onChange={(event) => { setDiscountText(event.target.value); setDiscount(toAmount(event.target.value)); }} placeholder="R$ 0,00"/>
-              : <button onClick={() => setShowDiscount(true)}>Adicionar</button>}</div>
-            {discount > 0 ? <div><span>{discountProblem(total, discount) ? "Desconto inválido" : `Desconto de ${discountPercent(total, discount).toString().replace(".", ",")}%`}</span><b>− {formatBRL(discount)}</b></div> : null}
-          </div>
-          {discountProblem(total, discount) ? <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>{discountProblem(total, discount)}</span></div> : null}
-          <div className="grand-total"><span>Total a receber</span><strong>{formatBRL(totalAfterDiscount(total, discount))}</strong></div>
-          <button className="payment-button" disabled={!cart.length} onClick={() => openDialog("payment")}><Icon name="wallet"/>Receber pagamento<span>F10</span></button>
-          <div className="payment-hints"><span>PIX</span><span>Dinheiro</span><span>Cartão</span><span>Pagamento dividido</span></div>
-          <button className="hold-sale" onClick={() => notify("Venda guardada para continuar depois.")}><Icon name="clock" size={17}/>Guardar venda</button>
-        </aside>
-      </div>
-    </>
-  );
-}
-
 function QuickServiceWorkspace({ openDialog, quickServices }: { openDialog: (dialog: "quick") => void; quickServices: QuickServiceConfig[] }) {
   const enabledServices = quickServices.filter((service) => service.active);
   return (
@@ -2246,6 +2073,7 @@ function AdminWorkspace({
 }
 
 export function ModuleWorkspace({
+  stockEntries, parked, setParked, canManageFinance, canManageSettings, initialFilter = "", initialQuery = "",
   stockAdjustments,
   active,
   canOperate,
@@ -2290,6 +2118,7 @@ export function ModuleWorkspace({
   settings,
   motorcycles,
 }: {
+  stockEntries: StockEntryRecord[]; parked: ParkedSale[]; setParked: React.Dispatch<React.SetStateAction<ParkedSale[]>>; canManageFinance: boolean; canManageSettings: boolean; initialFilter?: string; initialQuery?: string;
   stockAdjustments: StockAdjustmentRecord[];
   active: string;
   canOperate: boolean;
@@ -2334,8 +2163,8 @@ export function ModuleWorkspace({
   settings: Partial<SettingsConfig> | null;
   motorcycles: MotorcycleRecord[];
 }) {
-  const [query, setQuery] = useState("");
-  const [listFilter, setListFilter] = useState("Todos");
+  const [query, setQuery] = useState(initialQuery);
+  const [listFilter, setListFilter] = useState(initialFilter || "Todos");
   // Qual cliente está com o histórico aberto na lista. Um de cada vez: abrir
   // todos empurraria a lista para longe e ninguém acha mais ninguém.
   const [historicoDe, setHistoricoDe] = useState("");
@@ -2353,7 +2182,8 @@ export function ModuleWorkspace({
   const moduleSummary = useMemo(() => financeSummary(sales, orders, expenses, accounts, movements), [sales, orders, expenses, accounts, movements]);
   const salesToday = useMemo(() => sales.filter((sale) => sale.date === new Date().toLocaleDateString("pt-BR")), [sales]);
 
-  if (active === "PDV Balcão") return <PdvWorkspace notify={notify} openDialog={openDialog} cart={cart} setCart={setCart} discount={discount} setDiscount={setDiscount} products={products} clients={clients} blockZeroStockSale={settings?.blockZeroStockSale !== false} />;
+  if (active === "PDV Balcão") return <CounterWorkspace products={products} cart={cart} setCart={setCart} discount={discount} setDiscount={setDiscount} notify={notify} openDialog={openDialog} cash={openSession(cashSessions) ?? undefined} blockZeroStockSale={settings?.blockZeroStockSale !== false} canManageFinance={canManageFinance} parked={parked} setParked={setParked}/>;
+  if (["Compras e entradas", "Vendas do balcão"].includes(active)) return <ActivityWorkspace mode={active === "Compras e entradas" ? "purchases" : "sales"} sales={sales} entries={stockEntries} openDialog={openDialog} navigate={navigate} canOperate={canOperate} settings={settings} notify={notify}/>;
   if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts} notify={notify} canManage={canOperate}/>;
@@ -2365,7 +2195,7 @@ export function ModuleWorkspace({
   if (active === "Usuários e acessos") return <UserAccessWorkspace currentUser={currentFirebaseUser} firebaseConnected={firebaseConnected} employees={users} setEmployees={setUsers} notify={notify} openFirebaseAccess={openFirebaseAccess}/>;
   if (active === "Configurações") return (
     <ErrorBoundary area="este formulário"><Suspense fallback={<LazyFallback />}>
-      <SettingsWorkspace quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify} initialTab={settingsTab}/>
+      <SettingsWorkspace canManage={canManageSettings} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} partners={partners} setPartners={setPartners} notify={notify} initialTab={settingsTab}/>
     </Suspense></ErrorBoundary>
   );
   if (active === "Administração") return <AdminWorkspace navigate={navigate} openSettings={openSettings} settings={settings} users={users} currentFirebaseUser={currentFirebaseUser} products={products} orders={orders} clients={clients} motorcycles={motorcycles} sales={sales} expenses={expenses} accounts={accounts} categories={categories} quickServices={quickServices} partners={partners} paymentMachines={paymentMachines} paymentMethods={paymentMethods} suppliers={suppliers}/>;
@@ -2399,7 +2229,7 @@ export function ModuleWorkspace({
           </span>
           <div className="order-actions">
             <button onClick={() => openDialog("order", order.id)}>Abrir</button>
-            {row.actions.map((action) => (
+            {row.actions.filter(() => canOperate).map((action) => (
               <button key={action.label} onClick={() => void onAdvanceOrder(order, action.target, mechanicsAfterTaking(order, viewerEmployeeId, allowMultiple))
                 .then(() => notify(row.mine ? `${order.id}: ${action.target}.` : `${order.id} agora é sua.`))
                 .catch((error) => notify(error instanceof Error ? error.message : "Não foi possível atualizar a OS."))}>{action.label}</button>
@@ -2453,72 +2283,16 @@ export function ModuleWorkspace({
     );
   }
 
-  if (active === "Ordens de serviço" || active === "Orçamentos") {
-    const isBudget = active === "Orçamentos";
-    const filteredOrders = orders.filter((order) => {
-      const text = `${order.id} ${order.customer} ${order.bike} ${order.plate}`.toLowerCase();
-      const byText = text.includes(query.toLowerCase());
-      const byStatus = listFilter === "Todos" || (listFilter === "Abertas" && ["Recepção", "Avaliação", "Aprovação"].includes(order.status)) || (listFilter === "Em andamento" && ["Em serviço", "Aguardando peça"].includes(order.status)) || (listFilter === "Concluídas" && order.status === "Entrega");
-      return byText && byStatus;
-    });
-    const openCount = orders.filter((order) => ["Recepção", "Avaliação", "Aprovação"].includes(order.status)).length;
-    const inServiceCount = orders.filter((order) => order.status === "Em serviço").length;
-    const blockedCount = orders.filter((order) => order.status === "Aguardando peça").length;
-    const readyCount = orders.filter((order) => order.status === "Entrega" && !order.closed).length;
-    const budgetDraftCount = orders.filter((order) => order.status === "Recepção" || order.status === "Avaliação").length;
-    const budgetPendingCount = orders.filter((order) => order.status === "Aprovação").length;
-    const budgetApprovedCount = orders.filter((order) => order.status === "Em serviço" || order.status === "Entrega").length;
-
-    return (
-      <>
-        <div className="module-heading">
-          <div><p>Oficina</p><h1>{active}</h1><span>{isBudget ? "Acompanhe propostas enviadas e aprovações." : "Controle todas as motos desde a entrada até a entrega."}</span></div>
-          {canCreateOrders ? <button className="primary-button" onClick={() => openDialog(isBudget ? "os" : "osChoice")}><Icon name="plus" size={18} />{isBudget ? "Novo orçamento" : "Abrir nova OS"}</button> : <span className="system-healthy"><i/><b>Consulta da oficina</b></span>}
-        </div>
-        <div className="module-summary">
-          <article><span>{isBudget ? "Em elaboração" : "Em aberto"}</span><strong>{isBudget ? budgetDraftCount : openCount}</strong><small>{(isBudget ? budgetDraftCount : openCount) > 0 ? "Precisam de ação" : "Nenhum pendente"}</small></article>
-          <article><span>{isBudget ? "Aguardando cliente" : "Em serviço"}</span><strong>{isBudget ? budgetPendingCount : inServiceCount}</strong><small>{isBudget ? (budgetPendingCount > 0 ? "Aguardando aprovação" : "Nenhum em andamento") : blockedCount > 0 ? `${blockedCount} parada(s) esperando peça` : inServiceCount > 0 ? "Mecânicos trabalhando" : "Nenhum em andamento"}</small></article>
-          <article><span>{isBudget ? "Aprovados no mês" : "Prontas"}</span><strong>{isBudget ? budgetApprovedCount : readyCount}</strong><small>{(isBudget ? budgetApprovedCount : readyCount) > 0 ? (isBudget ? "Propostas aceitas" : "Aguardando retirada") : "Nenhum registro"}</small></article>
-        </div>
-        <section className="panel module-panel">
-          <div className="list-toolbar">
-            <label className="mini-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por OS, cliente ou placa"/></label>
-            <div className="filter-pills">{["Todos", "Abertas", "Em andamento", "Concluídas"].map((filter) => <button className={listFilter === filter ? "selected" : ""} key={filter} onClick={() => setListFilter(filter)}>{filter}</button>)}</div>
-          </div>
-          <div className="table-scroll">
-            <table>
-              <thead><tr><th>OS / Cliente</th><th className="col-secondary">Motocicleta</th><th className="col-secondary">Responsável</th><th className="col-secondary">Entrada</th><th>Status</th><th>Ação</th></tr></thead>
-              <tbody>{filteredOrders.length > 0 ? filteredOrders.map((order) => (
-                <tr key={order.id}>
-                  <td><strong className="order-id">{order.id}</strong><span>{order.customer}</span></td>
-                  <td className="col-secondary"><strong>{order.bike}</strong><span className="plate">{order.plate}</span></td>
-                  <td className="col-secondary"><span className="mechanic-avatar">{order.mechanic ? order.mechanic[0] : "M"}</span>{order.mechanic || "Não definido"}</td>
-                  <td className="col-secondary">{order.time ? `Entrada: ${order.time}` : "Hoje"}</td>
-                  <td><span className={`status ${statusTone(order.status)}`}><i />{isBudget && order.status === "Em serviço" ? "Aprovado" : order.status}</span></td>
-                  <td><button className="outline-button" onClick={() => openDialog("order", order.id)}>Abrir</button></td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>
-                    Nenhuma ordem de serviço cadastrada. Clique em "Abrir nova OS" para começar.
-                  </td>
-                </tr>
-              )}</tbody>
-            </table>
-          </div>
-        </section>
-      </>
-    );
-  }
+  if (active === "Ordens de serviço" || active === "Orçamentos") return <OrdersWorkspace orders={orders} budget={active === "Orçamentos"} canCreate={canCreateOrders} openDialog={openDialog} initialFilter={initialFilter}/>;
 
   if (active === "Produtos e estoque") {
     // A lista do balcão: procurar por código, referência de fábrica, código de
     // barras, descrição ou grupo — é por qualquer um deles que a peça é pedida.
     const buscaProduto = query.trim().toLowerCase();
     const filteredProducts = products.filter((product) => {
-      const byText = !buscaProduto || `${product.code} ${product.partNumber ?? ""} ${product.barcode ?? ""} ${product.name} ${product.category} ${product.location ?? ""}`.toLowerCase().includes(buscaProduto);
+      const byText = matchesSearch(query, product.code, product.partNumber, product.barcode, product.name, product.category, product.location);
       const byGroup = !productGroup || product.category === productGroup;
-      const byStatus = listFilter === "Todos" || product.status === listFilter;
+      const byStatus = listFilter === "Todos" || (listFilter === "Reposição" && lowStock(product)) || (listFilter === "Crítico" && product.active !== false && product.stock > 0 && product.stock <= product.minimum) || (listFilter === "Sem estoque" && product.active !== false && product.stock <= 0);
       return byText && byGroup && byStatus;
     });
     const gruposComProduto = Array.from(new Set(products.map((product) => product.category).filter(Boolean))).sort((um, outro) => um.localeCompare(outro, "pt-BR"));
@@ -2559,7 +2333,7 @@ export function ModuleWorkspace({
               </select>
             </label>
             <button className="outline-button" onClick={() => { setQuery(""); setProductGroup(""); setListFilter("Todos"); }}>Limpar</button>
-            <div className="filter-pills">{["Todos", "Crítico", "Sem estoque"].map((filter) => <button className={listFilter === filter ? "selected" : ""} key={filter} onClick={() => setListFilter(filter)}>{filter}</button>)}</div>
+            <div className="filter-pills">{["Todos", "Reposição", "Crítico", "Sem estoque"].map((filter) => <button className={listFilter === filter ? "selected" : ""} key={filter} onClick={() => setListFilter(filter)}>{filter}</button>)}</div>
           </div>
           <div className="table-scroll">
             <table className="stock-table">
@@ -2582,7 +2356,7 @@ export function ModuleWorkspace({
                     <strong className={product.stock <= product.minimum ? "danger-text" : ""}>{product.stock}</strong>
                   </td>
                   <td className="col-secondary">{product.unit || "UN"}</td>
-                  <td><button className="row-button" aria-label={`Abrir ${product.name}`} onClick={() => canOperate ? openDialog("product", product.id) : notify("Seu perfil pode consultar o estoque, mas não alterar produtos.")}><Icon name="arrow" size={17}/></button></td>
+                  <td><button className="row-button" aria-label={`Abrir ${product.name}`} onClick={() => openDialog("product", product.id)}><Icon name="arrow" size={17}/></button></td>
                 </tr>
               )) : (
                 <tr>
@@ -2641,7 +2415,7 @@ export function ModuleWorkspace({
   
   const firstValue = active === "Financeiro" ? formatBRL(moduleSummary.dayBalance) : active === "Relatórios" ? formatBRL(moduleSummary.grossMonth) : active === "Motocicletas" ? String(motorcycles.length) : active === "Vendas do balcão" ? String(salesToday.length) : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((supplier) => supplier.active).length) : String(clients.length);
   const secondValue = active === "Financeiro" ? formatBRL(moduleSummary.receivableTotal) : active === "Relatórios" ? formatBRL(moduleSummary.averageTicket) : active === "Motocicletas" ? String(new Set(motorcycles.map((m) => m.brand)).size) : active === "Vendas do balcão" ? formatBRL(salesToday.reduce((total, sale) => total + sale.total, 0)) : active === "Compras e entradas" ? "R$ 0,00" : active === "Fornecedores" ? (suppliers.length > 0 ? `${Math.round(suppliers.reduce((sum, s) => sum + s.deliveryDays, 0) / suppliers.length)} dias` : "0 dias") : String(clients.filter((c) => Boolean(c.phone)).length);
-  const thirdValue = active === "Financeiro" ? String(moduleSummary.overdueCount) : active === "Relatórios" ? String(moduleSummary.closedOrders) : active === "Motocicletas" ? String(motorcycles.filter((m) => m.plate.length === 8).length) : active === "Vendas do balcão" ? formatBRL(salesToday.length ? salesToday.reduce((total, sale) => total + sale.total, 0) / salesToday.length : 0) : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((s) => s.deliveryDays <= 1).length) : String(clients.filter((c) => c.motorcycleIds && c.motorcycleIds.length > 0).length);
+  const thirdValue = active === "Financeiro" ? String(moduleSummary.overdueCount) : active === "Relatórios" ? String(moduleSummary.closedOrders) : active === "Motocicletas" ? String(motorcycles.filter((m) => platePattern(m.plate) === "Padrão Mercosul").length) : active === "Vendas do balcão" ? formatBRL(salesToday.length ? salesToday.reduce((total, sale) => total + sale.total, 0) / salesToday.length : 0) : active === "Compras e entradas" ? "0" : active === "Fornecedores" ? String(suppliers.filter((s) => s.deliveryDays <= 1).length) : String(clients.filter((c) => motorcycles.some((m) => m.ownerId === c.id)).length);
 
   const primaryAction = () => {
     if (active === "Clientes") return openDialog("client");
@@ -2660,7 +2434,7 @@ export function ModuleWorkspace({
   const filteredRecords = records.filter((record) => {
     const texto = `${record.name} ${record.sub} ${record.meta} ${(record as { busca?: string }).busca ?? ""}`.toLowerCase();
     if (!buscaCrua) return true;
-    return texto.includes(buscaCrua) || (buscaPlaca.length >= 3 && texto.toUpperCase().includes(buscaPlaca));
+    return matchesSearch(query, texto);
   });
 
   return (
@@ -2675,12 +2449,10 @@ export function ModuleWorkspace({
         <article><span>{config.third}</span><strong>{thirdValue}</strong><small>Registros no sistema</small></article>
       </div>
       <section className="panel module-panel registry-list">
-        <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Buscar em ${active.toLowerCase()}...`}/></label><button className="outline-button large" onClick={() => setListFilter(listFilter === "Todos" ? "Recentes" : "Todos")}>{listFilter === "Todos" ? "Mais recentes" : "Mostrar todos"}</button></div>
+        <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Buscar em ${active.toLowerCase()}...`}/></label><span className="registry-count">{filteredRecords.length} registro(s)</span></div>
         {filteredRecords.length > 0 ? (
           filteredRecords.map((record) => {
-            const abrirCadastro = () => canOperate
-              ? openDialog(active === "Fornecedores" ? "supplier" : active === "Compras e entradas" ? "purchase" : active === "Financeiro" ? "finance" : active === "Motocicletas" ? "motorcycle" : active === "Clientes" ? "client" : "record", record.id)
-              : notify("Seu perfil possui acesso de consulta a este cadastro.");
+            const abrirCadastro = () => openDialog(active === "Fornecedores" ? "supplier" : active === "Compras e entradas" ? "purchase" : active === "Financeiro" ? "finance" : active === "Motocicletas" ? "motorcycle" : active === "Clientes" ? "client" : "record", record.id);
             // Só cliente e moto têm histórico de oficina: fornecedor e conta não
             // guardam "o que já foi feito nessa moto".
             const temHistorico = active === "Clientes" || active === "Motocicletas";
@@ -2728,6 +2500,7 @@ export function AppDialog({
   canOperate,
   canCreateCategory,
   canCreatePartBrand,
+  canCheckoutOrders,
   step,
   setStep,
   close,
@@ -2770,6 +2543,7 @@ export function AppDialog({
   canCreateCategory: boolean;
   /** Pode criar marca de peça. Ela vive em settings/lists, e a regra libera essa chave para quem gerencia estoque. */
   canCreatePartBrand: boolean;
+  canCheckoutOrders: boolean;
   step: number;
   setStep: (step: number) => void;
   close: () => void;
@@ -2853,7 +2627,10 @@ export function AppDialog({
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [purchasePayment, setPurchasePayment] = useState("À vista");
   const [purchaseItems, setPurchaseItems] = useState<Array<{ productId: string; quantity: number; unitCost: number }>>([]);
-  const [extraOrderItem, setExtraOrderItem] = useState(false);
+  const [orderItems, setOrderItems] = useState<ServiceOrderItem[]>([]);
+  const [orderDelivery, setOrderDelivery] = useState("");
+  const [orderNotes, setOrderNotes] = useState("");
+  const [orderSolution, setOrderSolution] = useState("");
   const [quickService, setQuickService] = useState(quickServices[0]?.name ?? "Serviço rápido");
   const [quickProduct, setQuickProduct] = useState("Sem produto");
   const [quickServiceValue, setQuickServiceValue] = useState(String(quickServices[0]?.laborPrice ?? 0));
@@ -2988,7 +2765,7 @@ export function AppDialog({
   // já escolhe a parceira e a moto, e anotar quem foi buscar não mudava nada no
   // atendimento. O campo continua no tipo para as OS antigas seguirem legíveis.
 
-  const currentOrder = orders.find((order) => order.id === selectedRecordId) ?? orders[0];
+  const currentOrder = orders.find((order) => order.id === selectedRecordId);
   // O botão de baixa passa o id da conta pelo mesmo caminho que o detalhe da OS.
   const currentAccount = accounts.find((account) => account.id === selectedRecordId);
   const currentAccountOpen = currentAccount ? accountOpen(currentAccount) : 0;
@@ -3000,7 +2777,10 @@ export function AppDialog({
     if (dialog !== "order" || !currentOrder) return;
     setOrderStatus((serviceOrderStatuses as readonly string[]).includes(currentOrder.status) ? currentOrder.status as ServiceOrderStatus : "Recepção");
     setOrderMechanicIds(currentOrder.mechanicIds?.length ? currentOrder.mechanicIds : []);
-    setExtraOrderItem(false);
+    setOrderItems((currentOrder.items ?? []).map((item) => ({ ...item })));
+    setOrderDelivery(calendarDay(currentOrder.delivery));
+    setOrderNotes(currentOrder.notes || "");
+    setOrderSolution(currentOrder.solution || "");
     setDialogError("");
   }, [dialog, currentOrder?.id]);
 
@@ -3124,7 +2904,7 @@ export function AppDialog({
           isOpen={true}
           onClose={close}
           editingProduct={editingProduct}
-          onSaved={(prod) => finish(`Produto "${prod.name}" salvo com sucesso no Firestore!`)}
+          onSaved={(prod) => finish(`Produto "${prod.name}" salvo com sucesso.`)}
           categories={categories}
           suppliers={suppliers}
           notify={notify || finish}
@@ -3152,7 +2932,7 @@ export function AppDialog({
           isOpen={true}
           onClose={close}
           editingSupplier={editingSupplier}
-          onSaved={(sup) => finish(`Fornecedor "${sup.name}" salvo com sucesso no Firestore!`)}
+          onSaved={(sup) => finish(`Fornecedor "${sup.name}" salvo com sucesso.`)}
           notify={notify || finish}
           allSuppliers={suppliers}
           removal={exclusao(canOperate)}
@@ -3168,7 +2948,7 @@ export function AppDialog({
           isOpen={true}
           onClose={close}
           editingMotorcycle={editingMotorcycle}
-          onSaved={(moto) => finish(`Motocicleta placa ${moto.plate} salva com sucesso no Firestore!`)}
+          onSaved={(moto) => finish(`Motocicleta placa ${moto.plate} salva com sucesso.`)}
           clients={clients}
           notify={notify || finish}
           allMotorcycles={motorcycles}
@@ -3188,7 +2968,7 @@ export function AppDialog({
           isOpen={true}
           onClose={close}
           editingClient={editingClient}
-          onSaved={(cli) => finish(`Cliente "${cli.name}" salvo com sucesso no Firestore!`)}
+          onSaved={(cli) => finish(`Cliente "${cli.name}" salvo com sucesso.`)}
           notify={notify || finish}
           allClients={clients}
           allMotorcycles={motorcycles}
@@ -3206,7 +2986,7 @@ export function AppDialog({
         <EmployeeFormModal
           isOpen={true}
           onClose={close}
-          onSaved={(emp) => finish(`Funcionário "${emp.name}" salvo com sucesso no Firestore!`)}
+          onSaved={(emp) => finish(`Funcionário "${emp.name}" salvo com sucesso.`)}
           notify={notify || finish}
           allEmployees={users}
         />
@@ -3334,7 +3114,9 @@ export function AppDialog({
   const checkoutPartner = currentOrder && isPartnerBilled(currentOrder)
     ? partners.find((item) => item.id === currentOrder.partnerId) ?? null
     : null;
-  const checkoutTotal = checkoutPartner
+  const checkoutTotal = !currentOrder?.items?.length && !checkoutItems.length && (currentOrder?.total ?? 0) > 0
+    ? currentOrder!.total!
+    : checkoutPartner
     ? partnerTotals(checkoutItems, checkoutPartner.laborDiscount ?? 0).total
     : checkoutRawTotal;
   const tradeCompensated = Math.min(Math.max(valorDigitado(tradeValue) || 0, 0), checkoutTotal);
@@ -3847,12 +3629,17 @@ export function AppDialog({
 
   const saveOrderChanges = async () => {
     if (!currentOrder) throw new Error("Nenhuma ordem de serviço selecionada.");
+    if (!canOperate || currentOrder.closed) throw new Error("Esta OS está disponível somente para consulta.");
     // Mudar a situação pode disparar a baixa (ao iniciar o serviço) ou a
     // devolução (se a OS voltar para orçamento).
     const reserved = (currentOrder.deductedItems ?? []) as ReservedPart[];
-    const target = shouldReserveStock(orderStatus, deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(currentOrder.items) : [];
+    const target = !currentOrder.items?.length && !orderItems.length ? reserved : shouldReserveStock(orderStatus, deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(orderItems) : [];
     const deltas = stockDeltas(target, reserved);
+    const partner = partners.find((item) => item.id === currentOrder.partnerId);
+    const itemsChanged = JSON.stringify(orderItems) !== JSON.stringify(currentOrder.items ?? []);
     await saveOrderWithStock(currentOrder.id, {
+      ...(itemsChanged ? { items: orderItems, total: partnerTotals(orderItems, partner?.laborDiscount ?? 0).total } : {}),
+      delivery: orderDelivery, notes: orderNotes, solution: orderSolution,
       status: orderStatus,
       tone: statusTone(orderStatus),
       mechanicIds: orderMechanicIds,
@@ -3954,6 +3741,8 @@ export function AppDialog({
     // O relatório não grava nada; dizer "registro atualizado com sucesso" era
     // avisar de uma gravação que nunca aconteceu.
     if (dialog === "record") return close();
+    if (!canOperate) return setDialogError("Seu perfil pode consultar, mas não alterar esta operação.");
+    if ((dialog === "order" || dialog === "orderCheckout") && (!currentOrder || currentOrder.closed)) return setDialogError("Esta OS não está disponível para alteração. Atualize a lista.");
 
     if (dialog === "finance") {
       if (movementIssue) return setDialogError(movementIssue);
@@ -4070,46 +3859,11 @@ export function AppDialog({
       }
     }
 
-    if (dialog === "order" && orderStatus !== "Entrega") {
+    if (dialog === "order") {
       setSaving(true);
-      try {
-        await saveOrderChanges();
-        return finish(`Situação da ${currentOrder?.id ?? "OS"} atualizada para ${orderStatus}.`);
-      } catch (error) {
-        return setDialogError(error instanceof Error ? error.message : "Não foi possível salvar a ordem de serviço.");
-      } finally {
-        setSaving(false);
-      }
-    }
-
-    if (dialog === "order" && orderStatus === "Entrega" && !canOperate) {
-      setSaving(true);
-      try {
-        await saveOrderChanges();
-        return finish(`Situação da ${currentOrder?.id ?? "OS"} atualizada para ${orderStatus}.`);
-      } catch (error) {
-        return setDialogError(error instanceof Error ? error.message : "Não foi possível salvar a ordem de serviço.");
-      } finally {
-        setSaving(false);
-      }
-    }
-
-    if (dialog === "order" && orderStatus === "Entrega" && canOperate) {
-      // O checkout revisa o que a OS já tem, em vez de abrir sempre vazio.
-      const items: ServiceOrderItem[] = [
-        ...(currentOrder?.items ?? []),
-        ...(extraOrderItem ? [{ id: `LAB-${Date.now()}`, type: "Mão de obra" as const, name: "Serviço adicional", price: 0 }] : []),
-      ];
-      setCheckoutItems(items);
-      setTradeValue(String(items.reduce((sum, item) => sum + item.price, 0)));
-      // OS de empresa parceira não pede forma de pagamento: já nasce faturada.
-      setPaymentMethod(currentOrder && isPartnerBilled(currentOrder) ? PARTNER_PAYMENT_METHOD : "PIX");
-      setSplitPayment(false);
-      // O id da OS precisa ir junto. Sem ele, `openDialog` limpa o registro
-      // selecionado e `currentOrder` cai no `?? orders[0]`: com mais de uma OS
-      // na lista, o recebimento era gravado na PRIMEIRA — a errada era
-      // encerrada, com os itens e o total desta, e a certa continuava aberta.
-      return changeDialog("orderCheckout", currentOrder?.id);
+      try { await saveOrderChanges(); return finish(`OS ${currentOrder?.id}: alterações salvas.`); }
+      catch (error) { return setDialogError(error instanceof Error ? error.message : "Não foi possível salvar a OS."); }
+      finally { setSaving(false); }
     }
     if (dialog === "orderCheckout") {
       // Rede de segurança para o mesmo defeito: sem o id, `currentOrder` seria
@@ -4158,7 +3912,7 @@ export function AppDialog({
           // então o estoque é acertado pela diferença: peça retirada da OS na
           // conferência volta para a prateleira.
           const reserved = (currentOrder.deductedItems ?? []) as ReservedPart[];
-          const target = partsOf(checkoutItems);
+          const target = !currentOrder.items?.length && !checkoutItems.length ? (currentOrder.deductedItems ?? []) : partsOf(checkoutItems);
           await saveOrderWithStock(currentOrder.id, {
             items: checkoutItems,
             total: checkoutTotal,
@@ -4552,6 +4306,20 @@ export function AppDialog({
     };
     finish(messages[dialog]);
   };
+  const receiveOrder = async () => {
+    if (!currentOrder || currentOrder.closed || !canCheckoutOrders || saving) return;
+    setSaving(true); setDialogError("");
+    try {
+      if (canOperate) await saveOrderChanges();
+      const items = canOperate ? orderItems : (currentOrder.items ?? []);
+      setCheckoutItems(items.map((item) => ({ ...item })));
+      setTradeValue(String(items.reduce((sum, item) => sum + item.price, 0)));
+      setPaymentMethod(isPartnerBilled(currentOrder) ? PARTNER_PAYMENT_METHOD : "PIX");
+      setSplitPayment(false);
+      changeDialog("orderCheckout", currentOrder.id);
+    } catch (error) { setDialogError(error instanceof Error ? error.message : "Não foi possível preparar o recebimento."); }
+    finally { setSaving(false); }
+  };
   const primaryLabels: Partial<Record<Exclude<DialogKind, null>, string>> = {
     quick: "Finalizar e receber",
     // Depois da prévia o botão diz o que vai acontecer, e não "conferir" —
@@ -4581,11 +4349,11 @@ export function AppDialog({
   };
 
   return (
-    <div className="dialog-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
+    <div className="dialog-layer" role="presentation" onMouseDown={(event) => !saving && event.target === event.currentTarget && close()}>
       <section className={`dialog ${["os", "order", "orderCheckout", "payment", "catalog", "settings", "expense"].includes(dialog) ? "dialog-wide" : ""} ${dialog === "os" ? "dialog-os" : ""} ${dialog === "orderCheckout" ? "dialog-checkout" : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
         <header className="dialog-header">
           <div><span>{dialog === "os" ? "Nova ordem de serviço" : dialog === "osChoice" ? "Novo atendimento" : ["order", "orderCheckout", "payment", "cash", "expense", "settleReceivable", "settlePayable", "record"].includes(dialog) ? "Operação" : "Cadastro e configuração"}</span><h2 id="dialog-title">{titles[dialog]}</h2><p>{subtitles[dialog]}</p></div>
-          <button aria-label="Fechar" onClick={close}>×</button>
+          <button aria-label="Fechar" disabled={saving} onClick={close}>×</button>
         </header>
 
         {dialog === "osChoice" ? (
@@ -4921,14 +4689,7 @@ export function AppDialog({
                 </div>
                 </div>
                 <div className="os-single-column">
-                <div className="form-section">
-                  <div className="form-intro"><span className="form-icon"><Icon name="box"/></span><div><h3>Peças e mão de obra</h3><p>Peças usam o preço fixo do cadastro. A mão de obra é informada manualmente.</p></div></div>
-                  <div className="os-items-builder">
-                    <section className="os-catalog-panel"><div className="os-builder-title"><div><strong>Adicionar peças</strong><small>Preço de venda bloqueado pelo cadastro</small></div><span>{produtosAtivos.filter((product) => product.stock > 0).length} disponíveis</span></div><label className="mini-search"><Icon name="search" size={16}/><input value={pieceSearch} onChange={(event) => setPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="os-piece-list">{produtosAtivos.filter((product) => `${product.name} ${product.code}`.toLowerCase().includes(pieceSearch.toLowerCase())).map((product) => { const added = osItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={product.stock === 0} onClick={() => setOsItems((current) => added ? current : [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.code} · {product.stock} em estoque</small></div><b>{product.price}</b><i>{product.stock === 0 ? "Sem estoque" : added ? "Adicionada" : "+"}</i></button>; })}</div></section>
-                    <section className="os-labor-panel"><div className="os-builder-title"><div><strong>Adicionar mão de obra</strong><small>Descrição e valor digitados para esta OS</small></div></div><div className="form-grid"><label className="field field-full"><span>Descrição</span><input value={laborDescription} onChange={(event) => setLaborDescription(emMaiusculo(event.target.value))} placeholder="Ex.: Troca do kit relação"/></label><label className="field"><span>Valor da mão de obra</span><MoneyField value={laborValue} onChange={setLaborValue} placeholder="0,00"/></label><button className="primary-button labor-add-button" onClick={() => { if (!laborDescription.trim()) return setDialogError("Descreva a mão de obra antes de adicionar."); if (!(valorDigitado(laborValue) > 0)) return setDialogError("Informe o valor da mão de obra."); setDialogError(""); setOsItems((current) => [...current, { id: `LAB-${Date.now()}`, type: "Mão de obra", name: laborDescription.trim(), price: valorDigitado(laborValue) }]); setLaborDescription(""); setLaborValue(""); }}><Icon name="plus" size={16}/>Adicionar mão de obra</button></div><div className="labor-rule"><Icon name="check" size={17}/><span>O valor vale somente para esta OS e não altera o cadastro de serviços.</span></div></section>
-                  </div>
-                  <div className="selected-os-items"><div className="os-builder-title"><div><strong>Itens incluídos</strong><small>{osItems.length ? `${osItems.length} item${osItems.length === 1 ? "" : "s"} nesta OS` : "Nenhum item adicionado ainda"}</small></div></div>{osItems.length ? osItems.map((item) => <div className="selected-os-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do cadastro" : "Valor manual desta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setOsItems((current) => current.filter((currentItem) => currentItem.id !== item.id))}>×</button></div>) : <div className="empty-os-items"><Icon name="box"/><span>Adicione as peças e a mão de obra que já souber. Você poderá completar depois.</span></div>}<div className="os-items-total"><span>Peças <b>{formatBRL(partsTotal)}</b></span><span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>{partnerDiscount > 0 ? <span className="discount">Desconto parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}<strong>Total inicial {formatBRL(osTotal)}</strong></div></div>
-                </div>
+                  <OrderItemsEditor items={osItems} onChange={setOsItems} products={products}/>
                 </div>
               </div>
             </div>
@@ -5404,10 +5165,10 @@ export function AppDialog({
           <div className="dialog-body order-detail">
             {currentOrder ? (
               <>
-                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><button onClick={() => printOrder(currentOrder)}><Icon name="printer" size={16}/>{settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"}</button><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
-                <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as ServiceOrderStatus)}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
+                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{currentOrder.closed ? "Entregue e encerrada" : orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><button onClick={() => printOrder(currentOrder)}><Icon name="printer" size={16}/>{settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"}</button><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
+                <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select disabled={!canOperate || !!currentOrder.closed} value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as ServiceOrderStatus)}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button disabled={!canOperate || !!currentOrder.closed} className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
                 <div className="order-info-grid"><div><span>Cliente / pagador</span><strong>{currentOrder.customer}</strong><small>{currentOrder.origin}</small></div><div><span>Motocicleta</span><strong>{currentOrder.bike}</strong><small>{currentOrder.plate}</small></div><div><span>Mecânicos</span><strong>{orderMechanics.map((mechanic) => mechanic.name).join(" + ") || currentOrder.mechanic}</strong><small>{orderMechanics.length || 1} responsável(is)</small></div><div><span>Previsão</span><strong>{currentOrder.delivery}</strong><small>Prioridade {currentOrder.priority}</small></div></div>
-                {canOperate ? (
+                {canOperate && !currentOrder.closed ? (
                   <div className="mechanic-assignment compact">
                     <div><strong>Equipe responsável</strong><small>Selecione mais de um mecânico quando o serviço for compartilhado.</small></div>
                     {activeMechanics.length > 0 ? (
@@ -5427,8 +5188,13 @@ export function AppDialog({
                     )}
                   </div>
                 ) : null}
-                <div className="order-section"><div className="order-section-title"><div><strong>Peças e serviços aprovados</strong><small>A baixa ocorre somente quando a peça for usada</small></div>{canOperate ? <button onClick={() => setExtraOrderItem(true)}><Icon name="plus" size={15}/>Adicionar item</button> : <span className="status blue"><i/>Somente leitura</span>}</div><div className="order-item"><span className="catalog-code">01</span><div><strong>{currentOrder.service}</strong><small>Mão de obra · {currentOrder.mechanic}</small></div><b>{formatBRL(currentOrder.total ?? 0)}</b></div>{extraOrderItem ? <div className="order-item"><span className="catalog-code">02</span><div><strong>Ajuste complementar</strong><small>Serviço adicional</small></div><b>R$ 0,00</b></div> : null}<div className="order-total"><span>Total aprovado</span><strong>{currentOrder.total}</strong></div></div>
-                <div className="order-progress interactive">{serviceOrderStatuses.map((item, index) => { const currentIndex = serviceOrderStatuses.indexOf(orderStatus); return <button className={index <= currentIndex ? "done" : ""} key={item} onClick={() => setOrderStatus(item)}><i>{index < currentIndex ? "✓" : index + 1}</i><span>{item}</span></button>; })}</div>
+                <div className="order-section">
+                  <OrderItemsEditor items={orderItems} onChange={setOrderItems} products={products} editable={canOperate && !currentOrder.closed && !(!currentOrder.items?.length && (currentOrder.total ?? 0) > 0)}/>
+                  {!currentOrder.items?.length && (currentOrder.total ?? 0) > 0 && <p className="readonly-notice">Registro antigo sem itens detalhados. Total preservado: {formatBRL(currentOrder.total ?? 0)}.</p>}
+                  <div className="order-total"><span>Total do atendimento</span><strong>{formatBRL(!currentOrder.items?.length && !orderItems.length ? currentOrder.total ?? 0 : partnerTotals(orderItems, partners.find((partner) => partner.id === currentOrder.partnerId)?.laborDiscount ?? 0).total)}</strong></div>
+                </div>
+                <fieldset className="order-followup" disabled={!canOperate || !!currentOrder.closed}><legend>Acompanhamento</legend><div className="form-grid"><label className="field"><span>Previsão de entrega</span><input type="date" value={orderDelivery} onChange={(event) => setOrderDelivery(event.target.value)}/></label><label className="field field-full"><span>Diagnóstico e serviço realizado</span><textarea value={orderSolution} onChange={(event) => setOrderSolution(event.target.value)} placeholder="O que foi identificado e realizado na moto"/></label><label className="field field-full"><span>Observações</span><textarea value={orderNotes} onChange={(event) => setOrderNotes(event.target.value)} placeholder="Peça aguardada, retorno do cliente ou outras informações"/></label></div></fieldset>
+                <div className="order-progress interactive">{serviceOrderStatuses.map((item, index) => { const currentIndex = serviceOrderStatuses.indexOf(orderStatus); return <button disabled={!canOperate || !!currentOrder.closed} className={index <= currentIndex ? "done" : ""} key={item} onClick={() => setOrderStatus(item)}><i>{index < currentIndex ? "✓" : index + 1}</i><span>{item}</span></button>; })}</div>
               </>
             ) : (
               <div className="empty-panel"><Icon name="wrench" size={24}/><span>Nenhuma ordem de serviço ativa.</span></div>
@@ -5556,7 +5322,8 @@ export function AppDialog({
             </div>
           ) : null}
           <div>
-            <button className="primary-button" disabled={saving} onClick={() => void submit()}>{saving ? "Salvando..." : dialog === "os" ? "Abrir Ordem de Serviço" : dialog === "order" && !canOperate ? "Salvar situação" : dialog === "order" && orderStatus === "Entrega" ? "Finalizar OS e receber" : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button>
+            {dialog === "order" && currentOrder && !currentOrder.closed && orderStatus === "Entrega" && canCheckoutOrders && <button className="outline-button" disabled={saving} onClick={() => void receiveOrder()}>Receber e entregar <Icon name="wallet" size={16}/></button>}
+            {canOperate && !(dialog === "order" && currentOrder?.closed) ? <button className="primary-button" disabled={saving} onClick={() => void submit()}>{saving ? "Salvando..." : dialog === "os" ? "Abrir ordem de serviço" : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button> : <span className="readonly-footer">Somente consulta</span>}
           </div>
         </footer> : <footer className="dialog-footer choice-footer"><button className="ghost-button" onClick={close}>Cancelar</button></footer>}
       </section>
@@ -5792,6 +5559,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const firebasePermissions = firebaseSession.profile?.permissions ?? defaultFirebasePermissions(firebaseSession.profile?.role ?? "Mecânico");
   const hasPermission = (permission: FirebasePermission) => firebaseAdmin || firebasePermissions.includes(permission);
   const canViewOrders = hasPermission("orders.view");
+  const canViewBudgets = hasPermission("budgets.view");
   const canCreateOrders = hasPermission("orders.create");
   const canUpdateOrders = hasPermission("orders.update");
   const canUsePdv = hasPermission("pos.use");
@@ -5812,7 +5580,35 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [mobileMenu, setMobileMenu] = useState(false);
   // A tela inicial sai da URL de forma síncrona, no primeiro render: decidir
   // isso em um efeito faria o endereço piscar /admin -> / -> /admin.
-  const [active, setActive] = useState(() => (firebaseAdmin && isAdminPath() ? "Administração" : "Visão geral"));
+  const [active, setActiveState] = useState(() => {
+    const destination = destinationForPath(currentPath());
+    return canVisit(destination, firebaseSession.profile!.role, firebasePermissions) ? destination : "Visão geral";
+  });
+  const [moduleFilter, setModuleFilter] = useState("");
+  const [moduleQuery, setModuleQuery] = useState("");
+  const [navRevision, setNavRevision] = useState(0);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [parked, setParked] = useState<ParkedSale[]>([]);
+  const [recordPreview, setRecordPreview] = useState<SearchEntry | null>(null);
+  const [online, setOnline] = useState(navigator.onLine);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const dirtyDialog = useRef(false);
+  const toastTimer = useRef<number>();
+  const navigateTo = useCallback((destination: string, filter = "", query = "") => {
+    if (!canVisit(destination, firebaseSession.profile!.role, firebasePermissions)) return;
+    setActiveState(destination); setModuleFilter(filter); setModuleQuery(query); setNavRevision((value) => value + 1); setMobileMenu(false);
+    const path = routePaths[destination];
+    if (currentPath() !== path) window.history.pushState(null, "", path);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [firebaseSession.profile?.role, firebasePermissions]);
+  const setActive = (destination: string) => navigateTo(destination);
+  useEffect(() => {
+    const back = () => { const destination = destinationForPath(currentPath()); setActiveState(canVisit(destination, firebaseSession.profile!.role, firebasePermissions) ? destination : "Visão geral"); setModuleFilter(""); setModuleQuery(""); setNavRevision((value) => value + 1); setMobileMenu(false); };
+    const connection = () => setOnline(navigator.onLine);
+    window.addEventListener("popstate", back); window.addEventListener("online", connection); window.addEventListener("offline", connection);
+    return () => { window.removeEventListener("popstate", back); window.removeEventListener("online", connection); window.removeEventListener("offline", connection); };
+  }, [firebaseSession.profile?.role, firebasePermissions]);
   const [dialog, setDialog] = useState<DialogKind>(null);
   // Qual registro o diálogo deve abrir: OS, conta ou cadastro.
   // Vazio = nenhum selecionado, e o diálogo abre em branco.
@@ -5825,15 +5621,14 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [cartDiscount, setCartDiscount] = useState(0);
   // Aba de Configurações a abrir. O painel /admin usa isto para levar direto
   // ao grupo escolhido em vez de sempre cair na primeira aba.
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(() => new URLSearchParams(window.location.search).get("aba") === "logo" ? "logo" : "general");
   const openSettings = useCallback((tab: SettingsTab) => {
     setSettingsTab(tab);
-    setActive("Configurações");
-  }, []);
+    navigateTo("Configurações");
+  }, [navigateTo]);
   const [osStep, setOsStep] = useState(1);
   const [toast, setToast] = useState("");
   const [openGroup, setOpenGroup] = useState("Oficina");
-  const [globalSearch, setGlobalSearch] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   // A central de ajuda. Fica fora do roteador de diálogos porque precisa abrir
@@ -5841,22 +5636,25 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpTopicId, setHelpTopicId] = useState("");
   const [helpSearch, setHelpSearch] = useState("");
-  const searchInput = useRef<HTMLInputElement>(null);
     const canOperate = firebaseAdmin
     || (["Ordens de serviço", "Orçamentos"].includes(active) && (canUpdateOrders || canCreateOrders))
     || (["PDV Balcão", "Vendas do balcão"].includes(active) && canUsePdv)
     || (active === "Serviço rápido" && canUseQuickService)
-    || (["Produtos e estoque", "Compras e entradas", "Fornecedores"].includes(active) && canManageInventory)
+    || (["Produtos e estoque", "Compras e entradas", "Ajuste de estoque", "Fornecedores"].includes(active) && canManageInventory)
+    || (active === "Funcionários" && hasPermission("team.manage"))
     || (["Clientes", "Motocicletas"].includes(active) && canManageCustomers)
     || (["Financeiro", "Contas a receber", "Contas a pagar", "Relatórios"].includes(active) && canManageFinance);
   const canOperateDialog = firebaseAdmin
     || (["osChoice", "os"].includes(dialog ?? "") && canCreateOrders)
     || (dialog === "order" && canUpdateOrders)
-    || (["quick", "payment", "cash"].includes(dialog ?? "") && (canUseQuickService || canUsePdv))
-    || (["product", "import", "catalog", "supplier", "purchase"].includes(dialog ?? "") && canManageInventory)
+    || (dialog === "quick" && canUseQuickService)
+    || (dialog === "payment" && canUsePdv)
+    || (dialog === "cash" && canManageFinance)
+    || (dialog === "employee" && hasPermission("team.manage"))
+    || (["product", "import", "nfe", "catalog", "supplier", "purchase"].includes(dialog ?? "") && canManageInventory)
     || (["client", "motorcycle"].includes(dialog ?? "") && canManageCustomers)
     || (["finance", "expense", "receivable", "payable", "settleReceivable", "settlePayable", "orderCheckout"].includes(dialog ?? "") && canManageFinance);
-  const [orders] = useFirebaseSyncedCollection("serviceOrders", initialOrders, firebaseEnabled && canViewOrders, canCreateOrders || canUpdateOrders, firebaseSession.reportSyncError);
+  const [orders] = useFirebaseSyncedCollection("serviceOrders", initialOrders, firebaseEnabled && (canViewOrders || canViewBudgets), canCreateOrders || canUpdateOrders, firebaseSession.reportSyncError);
   const [products] = useFirebaseSyncedCollection("products", initialProducts, firebaseEnabled && canViewInventory, canManageInventory, firebaseSession.reportSyncError);
   const [clients] = useFirebaseSyncedCollection("clients", initialClients, firebaseEnabled && canViewCustomers, canManageCustomers, firebaseSession.reportSyncError);
   const [motorcycles] = useFirebaseSyncedCollection("motorcycles", initialMotorcycles, firebaseEnabled && canViewCustomers, canManageCustomers, firebaseSession.reportSyncError);
@@ -5865,7 +5663,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [partners, setPartners] = useFirebaseSyncedCollection("partners", initialPartners, firebaseEnabled && (canViewCustomers || canCreateOrders), canManageSettings, firebaseSession.reportSyncError);
   const [quickServices, setQuickServices] = useFirebaseSyncedCollection("quickServices", initialQuickServices, firebaseEnabled && (canUseQuickService || canCreateOrders), canManageSettings, firebaseSession.reportSyncError);
   const [categories, setCategories] = useFirebaseSyncedCollection("categories", initialCategories, firebaseEnabled && canViewInventory, canManageSettings || canManageInventory, firebaseSession.reportSyncError);
-  const [suppliers, setSuppliers] = useFirebaseSyncedCollection("suppliers", initialSuppliers, firebaseEnabled && canManageInventory, firebaseAdmin, firebaseSession.reportSyncError);
+  const [suppliers, setSuppliers] = useFirebaseSyncedCollection("suppliers", initialSuppliers, firebaseEnabled && canManageInventory, canManageInventory, firebaseSession.reportSyncError);
   const [paymentMachines, setPaymentMachines] = useFirebaseSyncedCollection("paymentMachines", initialPaymentMachines, firebaseEnabled && canSeeFinance, canManageSettings, firebaseSession.reportSyncError);
   const [paymentMethods, setPaymentMethods] = useFirebaseSyncedCollection("paymentMethods", initialPaymentMethods, firebaseEnabled && (canSeeFinance || canUsePdv), canManageSettings, firebaseSession.reportSyncError);
   const [sales] = useFirebaseSyncedCollection<SaleRecord>("sales", initialSales, firebaseEnabled && (canSeeFinance || canUsePdv || canUseQuickService), false, firebaseSession.reportSyncError);
@@ -5898,8 +5696,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
 
   useEffect(() => {
     if (firebaseAdmin || active === "Visão geral") return;
-    const required = destinationPermissions[active];
-    const allowed = Boolean(required?.some((permission) => firebasePermissions.includes(permission)));
+    const allowed = canVisit(active, firebaseSession.profile!.role, firebasePermissions);
     if (!allowed) {
       const timer = window.setTimeout(() => setActive("Visão geral"), 0);
       return () => window.clearTimeout(timer);
@@ -5941,58 +5738,72 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   // / no resto. Quem abre /admin sem ser Super Admin volta para a raiz, em vez
   // de ficar com a URL prometendo uma tela que não vai abrir.
   useEffect(() => {
-    const path = active === "Administração" && firebaseAdmin ? "/admin" : "/";
+    const path = routePaths[active] || "/";
+    document.title = `${active} · Pica Pau Motos`;
     if (currentPath() !== path) window.history.replaceState(null, "", path + window.location.search);
   }, [active, canManageSettings]);
 
-  // A topbar sempre anunciou o atalho no badge "Ctrl K", mas nada o escutava.
-  // Esc fecha a busca sem precisar do mouse.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        searchInput.current?.focus();
-        searchInput.current?.select();
-        return;
-      }
-      if (event.key === "Escape" && document.activeElement === searchInput.current) {
-        setGlobalSearch("");
-        searchInput.current?.blur();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  const openDialog = (next: Exclude<DialogKind, null>, recordId?: string) => {
-    setOsStep(1);
-    setSelectedRecordId(recordId ?? "");
-    setDialog(next);
-  };
   const notify = (message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 3200);
+    window.clearTimeout(toastTimer.current); setToast(message);
+    toastTimer.current = window.setTimeout(() => setToast(""), 5200);
   };
-  const finishDialog = (message: string) => {
+  const openDialog: OpenDialog = (next, recordId) => {
+    const editPermissions: Partial<Record<Exclude<DialogKind, null>, boolean>> = { product: canManageInventory, supplier: canManageInventory, client: canManageCustomers, motorcycle: canManageCustomers, employee: hasPermission("team.manage"), os: canCreateOrders, osChoice: canCreateOrders, quick: canUseQuickService, payment: canUsePdv, import: canManageInventory, nfe: canManageInventory, purchase: canManageInventory, expense: canManageFinance, finance: canManageFinance, receivable: canManageFinance, payable: canManageFinance, settleReceivable: canManageFinance, settlePayable: canManageFinance, orderCheckout: canManageFinance };
+    if (editPermissions[next] === false) {
+      if (recordId && ["product", "supplier", "client", "motorcycle"].includes(next)) {
+        const entry = searchEntries.find((item) => item.kind === next && item.recordId === recordId);
+        if (entry) setRecordPreview(entry);
+      } else notify("Seu perfil pode consultar esta área. Peça acesso ao responsável para alterar.");
+      return;
+    }
+    dirtyDialog.current = false; setOsStep(1); setSelectedRecordId(recordId ?? ""); setDialog(next); setMobileMenu(false);
+  };
+  const requestCloseDialog = () => {
+    if (Array.from(document.querySelectorAll(".dialog button:disabled, .dialog-window button:disabled")).some((button) => /Salvando|Gravando|Confirmando/.test(button.textContent || ""))) return;
+    if (dirtyDialog.current) { setConfirmClose(true); return; }
     setDialog(null);
-    notify(message);
   };
+  const finishDialog = (message: string) => { dirtyDialog.current = false; setDialog(null); notify(message); };
+  useModalFocus(Boolean(dialog || helpOpen || recordPreview || confirmClose || confirmLogout), () => {
+    if (confirmLogout) setConfirmLogout(false);
+    else if (confirmClose) setConfirmClose(false);
+    else if (helpOpen) setHelpOpen(false);
+    else if (recordPreview) setRecordPreview(null);
+    else requestCloseDialog();
+  });
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (cart.length || parked.length || dirtyDialog.current) { event.preventDefault(); event.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [cart.length, parked.length]);
   const addExpense = (expense: Omit<ExpenseRecord, "id">) => {
     setExpenses((current) => [{ ...expense, id: `GST-${String(185 + current.length).padStart(4, "0")}` }, ...current]);
   };
-  const globalResults = [
-    ...(canViewOrders ? orders : []).map((order) => ({ title: order.id, detail: `${order.customer} · ${order.bike} · ${order.plate}`, destination: "Ordens de serviço" })),
-    ...(canViewInventory ? products : []).map((product) => ({ title: product.name, detail: `${product.code} · ${product.stock} em estoque`, destination: "Produtos e estoque" })),
-    ...(canViewCustomers ? clients : []).map((client) => ({ title: client.name, detail: `${client.phone} · ${client.detail}`, destination: "Clientes" })),
-  ].filter((item) => `${item.title} ${item.detail}`.toLowerCase().includes(globalSearch.toLowerCase())).slice(0, 6);
-  const goToSearchResult = (destination: string) => {
-    setActive(destination);
-    setGlobalSearch("");
-    setShowNotifications(false);
-  };
+  const directNav: Array<{ label: string; short: string; icon: IconName }> = [
+    { label: "Visão geral", short: "Meu dia", icon: "home" }, { label: "Ordens de serviço", short: "Oficina", icon: "wrench" },
+    { label: "PDV Balcão", short: "Balcão", icon: "wallet" }, { label: "Produtos e estoque", short: "Estoque", icon: "box" },
+    { label: "Clientes", short: "Clientes", icon: "users" },
+  ].filter((item) => canVisit(item.label, firebaseSession.profile!.role, firebasePermissions)) as Array<{ label: string; short: string; icon: IconName }>;
+  const searchEntries = useMemo<SearchEntry[]>(() => [
+    ...Object.keys(routePaths).filter((destination) => canVisit(destination, firebaseSession.profile!.role, firebasePermissions)).map((destination) => ({ key: `page:${destination}`, title: destination, detail: "Abrir área do sistema", destination, icon: "arrow" as IconName })),
+    ...orders.map((order) => ({ key: `order:${order.id}`, title: `${order.id} · ${order.customer}`, detail: `${order.plate} · ${order.bike} · ${order.closed ? "Entregue" : order.status}`, destination: canViewOrders ? "Ordens de serviço" : "Orçamentos", icon: "wrench" as IconName, kind: "order" as const, recordId: order.id })),
+    ...products.map((product) => ({ key: `product:${product.id}`, title: product.name, detail: `${product.code} · ${product.price} · ${product.stock} em estoque`, keywords: `${product.barcode || ""} ${product.partNumber || ""}`, destination: "Produtos e estoque", icon: "box" as IconName, kind: "product" as const, recordId: product.id })),
+    ...clients.map((client) => ({ key: `client:${client.id}`, title: client.name, detail: client.phone || "Cliente cadastrado", keywords: client.document, destination: "Clientes", icon: "users" as IconName, kind: "client" as const, recordId: client.id })),
+    ...motorcycles.map((moto) => ({ key: `moto:${moto.id}`, title: `${moto.plate} · ${moto.brand} ${moto.model}`, detail: clients.find((client) => client.id === moto.ownerId)?.name || moto.partnerName || "Motocicleta", destination: "Motocicletas", icon: "bike" as IconName, kind: "motorcycle" as const, recordId: moto.id })),
+    ...suppliers.map((supplier) => ({ key: `supplier:${supplier.id}`, title: supplier.name, detail: supplier.phone || "Fornecedor", destination: "Fornecedores", icon: "users" as IconName, kind: "supplier" as const, recordId: supplier.id })),
+  ], [orders, products, clients, motorcycles, suppliers, firebaseSession.profile?.role, firebasePermissions]);
+  const goToSearchResult = (destination: string, filter = "") => { navigateTo(destination, filter); setShowNotifications(false); };
+  const notices = [
+    ...(canViewOrders && orders.some((order) => orderIsLate(order)) ? [{ title: `${orders.filter((order) => orderIsLate(order)).length} OS com prazo vencido`, detail: "Conferir prazo e atualizar o cliente", destination: "Ordens de serviço", filter: "Atrasadas", icon: "clock" as IconName }] : []),
+    ...(canViewOrders && orders.some((order) => !order.closed && order.status === "Aprovação") ? [{ title: `${orders.filter((order) => !order.closed && order.status === "Aprovação").length} aguardando aprovação`, detail: "Retornar ao cliente", destination: "Ordens de serviço", filter: "Aprovação", icon: "file" as IconName }] : []),
+    ...(canViewInventory && products.some(lowStock) ? [{ title: `${products.filter(lowStock).length} peças para repor`, detail: "Consultar estoque e reposição", destination: "Produtos e estoque", filter: "Reposição", icon: "box" as IconName }] : []),
+    ...(canSeeFinance && summary.overdueCount ? [{ title: `${summary.overdueCount} contas vencidas`, detail: formatBRL(summary.overdueExpenses), destination: "Contas a pagar", filter: "", icon: "wallet" as IconName }] : []),
+  ];
+  const badges: Record<string, number> = { "Ordens de serviço": orders.filter((order) => !order.closed).length, "Orçamentos": orders.filter((order) => !order.closed && order.status === "Aprovação").length, "Produtos e estoque": products.filter(lowStock).length, "Contas a pagar": summary.overdueCount, "PDV Balcão": cart.length + parked.length };
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell workshop-v3 ${sidebarHidden ? "sidebar-hidden" : ""}`} onClickCapture={(event) => { if (dialog && (event.target as HTMLElement).closest(".ready-action, .mechanic-picker button, .order-progress button, .editable-order-line button, .order-item-result")) dirtyDialog.current = true; }} onInputCapture={() => { if (dialog) dirtyDialog.current = true; }} onChangeCapture={() => { if (dialog) dirtyDialog.current = true; }}>
+      <a className="skip-link" href="#workspace-content">Ir para o conteúdo</a>
       <aside className={`sidebar ${mobileMenu ? "sidebar-open" : ""}`}>
         <div className="brand">
           <div className="brand-mark">PP</div>
@@ -6003,11 +5814,12 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
         </div>
 
         <nav className="main-nav" aria-label="Navegação principal">
-          <p className="nav-label">Menu principal</p>
-          <button className={`nav-item ${active === "Visão geral" ? "active" : ""}`} onClick={() => { setActive("Visão geral"); setMobileMenu(false); }}>
-            <Icon name="home" /><span>Visão geral</span>
-          </button>
-          {visibleNavGroups.map((group) => {
+          <p className="nav-label">Dia a dia</p>
+          {directNav.map((item) => <button key={item.label} className={`nav-item ${active === item.label ? "active" : ""}`} aria-current={active === item.label ? "page" : undefined} onClick={() => setActive(item.label)}><Icon name={item.icon}/><span>{item.short}</span>{badges[item.label] > 0 && <b className={item.label === "Produtos e estoque" ? "danger-badge" : ""}>{badges[item.label]}</b>}</button>)}
+          <div className="nav-divider"/><p className="nav-label">Mais opções</p>
+          {visibleNavGroups.map((sourceGroup) => {
+            const group = { ...sourceGroup, items: sourceGroup.items.filter((item) => !directNav.some((main) => main.label === item.label)) };
+            if (!group.items.length) return null;
             const containsActive = group.items.some((item) => item.label === active);
             const expanded = openGroup === group.label || containsActive;
             return (
@@ -6018,7 +5830,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
                 {expanded ? <div className="nav-subitems">{group.items.map((item) => (
                   <button className={`nav-subitem ${active === item.label ? "active" : ""}`} key={item.label} onClick={() => { setActive(item.label); setMobileMenu(false); }}>
                     <span>{item.label}</span>
-                    {item.badge ? <b className={item.label === "Produtos e estoque" ? "danger-badge" : ""}>{item.badge}</b> : null}
+                    {badges[item.label] > 0 ? <b className={item.label === "Contas a pagar" ? "danger-badge" : ""}>{badges[item.label]}</b> : null}
                   </button>
                 ))}</div> : null}
               </div>
@@ -6062,7 +5874,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
             <div><strong>{currentUserName}</strong><span>{firebaseSession.profile?.role}</span></div>
             <button aria-label="Opções do perfil" onClick={() => setShowProfile(!showProfile)}>•••</button>
           </div>
-          {showProfile ? <div className="profile-menu"><div><strong>{currentUserName}</strong><span>{firebaseSession.profile?.role}</span></div>{canSeeSettings ? <button onClick={() => { setActive("Configurações"); setShowProfile(false); }}>Configurações da oficina</button> : null}<button onClick={() => { setShowProfile(false); void firebaseSession.logout(); }}>Sair do sistema</button></div> : null}
+          {showProfile ? <div className="profile-menu"><div><strong>{currentUserName}</strong><span>{firebaseSession.profile?.role}</span></div>{canSeeSettings ? <button onClick={() => { setActive("Configurações"); setShowProfile(false); }}>Configurações da oficina</button> : null}<button onClick={() => { setShowProfile(false); if (cart.length || parked.length || dirtyDialog.current) setConfirmLogout(true); else void firebaseSession.logout(); }}>Sair do sistema</button></div> : null}
         </div>
       </aside>
 
@@ -6071,146 +5883,32 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
       <section className="workspace">
         <header className="topbar">
           <button className="mobile-menu" aria-label="Abrir menu" onClick={() => setMobileMenu(true)}><Icon name="menu" /></button>
-          <label className="search-box">
-            <Icon name="search" size={19} />
-            <input ref={searchInput} aria-label="Buscar" value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && globalResults[0]) goToSearchResult(globalResults[0].destination); }} placeholder="Buscar OS, cliente, placa ou peça..." />
-            <kbd>Ctrl K</kbd>
-            {globalSearch ? <div className="global-results">{globalResults.length ? globalResults.map((result) => <button key={`${result.destination}-${result.title}`} onClick={() => goToSearchResult(result.destination)}><span className="registry-avatar">{result.destination.slice(0,2).toUpperCase()}</span><div><strong>{result.title}</strong><small>{result.detail}</small></div><Icon name="arrow" size={16}/></button>) : <div className="no-results">Nenhum resultado encontrado.</div>}</div> : null}
-          </label>
+          <button className="desktop-menu icon-button" aria-label={sidebarHidden ? "Mostrar menu lateral" : "Recolher menu lateral"} title={sidebarHidden ? "Mostrar menu" : "Recolher menu"} onClick={() => setSidebarHidden(!sidebarHidden)}><Icon name="menu"/></button>
+          <WorkspaceSearch entries={searchEntries} onPick={(entry) => { setShowNotifications(false); if (entry.kind && entry.recordId) openDialog(entry.kind, entry.recordId); else navigateTo(entry.destination); }}/>
           <div className="topbar-actions">
-            <span className="system-online-badge"><i/><span>Sistema online</span></span>
-            <div className="notification-wrap"><button className="icon-button" aria-label="Notificações" onClick={() => setShowNotifications(!showNotifications)}><Icon name="bell" /><span className="notification-dot" /></button>{showNotifications ? <div className="notification-menu"><div className="notification-head"><strong>Notificações</strong><button onClick={() => notify("Todas as notificações foram marcadas como lidas.")}>Marcar como lidas</button></div>{canViewOrders ? <button onClick={() => goToSearchResult("Ordens de serviço")}><span className="notice-icon red"><Icon name="clock" size={17}/></span><div><strong>{orders.filter((o) => o.status === "Aprovação").length > 0 ? `${orders.filter((o) => o.status === "Aprovação").length} orçamento(s) aguardando` : "Nenhum orçamento pendente"}</strong><small>{orders.filter((o) => o.status === "Aprovação").length > 0 ? "Aguardando aprovação de clientes" : "Tudo em dia na oficina"}</small></div></button> : null}{canViewInventory ? <button onClick={() => goToSearchResult("Produtos e estoque")}><span className="notice-icon amber"><Icon name="alert" size={17}/></span><div><strong>{products.filter((p) => p.stock <= p.minimum).length > 0 ? `${products.filter((p) => p.stock <= p.minimum).length} produto(s) com estoque baixo` : "Estoque em dia"}</strong><small>{products.filter((p) => p.stock <= p.minimum).length > 0 ? "Revisar compras de reposição" : "Nenhum item com estoque crítico"}</small></div></button> : null}{canSeeFinance ? <button onClick={() => goToSearchResult("Financeiro")}><span className="notice-icon green"><Icon name="wallet" size={17}/></span><div><strong>Controle do caixa</strong><small>Conferência e movimentações</small></div></button> : null}{!canViewOrders && !canViewInventory && !canSeeFinance ? <div className="no-results">Nenhuma notificação para os módulos liberados.</div> : null}</div> : null}</div>
-            {canCreateOrders ? <button className="primary-button" onClick={() => openDialog("osChoice")}><Icon name="plus" size={18} />Abrir nova OS</button> : null}
+            <span className={`connection-status ${!online || firebaseSession.error ? "connection-warning" : ""}`}><i/>{!online ? "Sem conexão" : firebaseSession.error ? "Revisar conexão" : "Conectado"}</span>
+            <div className="notification-wrap"><button className="icon-button" aria-label={`Pendências: ${notices.length}`} aria-expanded={showNotifications} onClick={() => setShowNotifications(!showNotifications)}><Icon name="bell"/>{notices.length > 0 && <span className="notification-dot"/>}</button>{showNotifications && <div className="notification-menu"><div className="notification-head"><strong>Pendências da oficina</strong><button aria-label="Fechar pendências" onClick={() => setShowNotifications(false)}>Fechar</button></div>{notices.length ? notices.map((notice) => <button key={notice.title} onClick={() => goToSearchResult(notice.destination, notice.filter)}><span className="notice-icon amber"><Icon name={notice.icon} size={18}/></span><div><strong>{notice.title}</strong><small>{notice.detail}</small></div><Icon name="arrow" size={16}/></button>) : <div className="no-results">Nenhuma pendência no momento.</div>}</div>}</div>
+            {canCreateOrders ? <button className="primary-button" onClick={() => openDialog("osChoice")}><Icon name="plus" size={18} />Novo atendimento</button> : null}
           </div>
         </header>
 
-        <div className="content">
+        <div className="content" id="workspace-content" tabIndex={-1}>
+          {(!online || firebaseSession.error) && <div className="sync-warning" role="status"><Icon name="alert" size={19}/><span>{!online ? "Sem internet. Os dados exibidos podem estar desatualizados. Aguarde a conexão para confirmar operações." : firebaseSession.error}</span>{online && <button className="outline-button" onClick={() => { if (cart.length || parked.length || dirtyDialog.current) notify("Conclua as vendas e o formulário antes de recarregar."); else window.location.reload(); }}>Reconectar</button>}</div>}
           {active === "Visão geral" ? (
-          <>
-          <div className="page-heading">
-            <div>
-              <p>{new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long" }).format(new Date()).replace(/^[a-z]/, (c) => c.toUpperCase())}</p>
-              <h1>Bem-vindo, {currentUserName}.</h1>
-              <span>Veja o que precisa da sua atenção hoje.</span>
-            </div>
-            {canCreateOrders ? <button className="primary-button heading-button" onClick={() => openDialog("osChoice")}><Icon name="plus" size={18} />Abrir nova OS</button> : <span className="system-healthy"><i/><b>Acesso personalizado</b></span>}
-          </div>
-
-          <section className="dashboard-shortcuts" aria-label="Acessos rápidos">
-            {canCreateOrders ? <button className="dashboard-shortcut primary-shortcut" onClick={() => openDialog("osChoice")}><span><Icon name="plus"/></span><div><strong>Nova OS</strong><small>Rápida ou completa</small></div><Icon name="arrow" size={17}/></button> : null}
-            {canUsePdv ? <button className="dashboard-shortcut" onClick={() => setActive("PDV Balcão")}><span><Icon name="wallet"/></span><div><strong>Abrir PDV</strong><small>Venda no balcão</small></div><Icon name="arrow" size={17}/></button> : null}
-            {canViewInventory ? <button className="dashboard-shortcut" onClick={() => setActive("Produtos e estoque")}><span><Icon name="box"/></span><div><strong>Produtos</strong><small>Estoque e preços</small></div><Icon name="arrow" size={17}/></button> : null}
-            {canViewCustomers ? <button className="dashboard-shortcut" onClick={() => setActive("Clientes")}><span><Icon name="users"/></span><div><strong>Clientes</strong><small>Cadastro e histórico</small></div><Icon name="arrow" size={17}/></button> : null}
-            {canUseQuickService ? <button className="dashboard-shortcut" onClick={() => openDialog("quick")}><span><Icon name="clock"/></span><div><strong>Serviço rápido</strong><small>Atendimento expresso</small></div><Icon name="arrow" size={17}/></button> : null}
-            {canManageFinance ? <button className="dashboard-shortcut" onClick={() => openDialog("expense")}><span><Icon name="file"/></span><div><strong>Adicionar gasto</strong><small>Agora ou a pagar</small></div><Icon name="arrow" size={17}/></button> : null}
-          </section>
-
-          <section className={`stats-grid ${!canViewOrders ? "limited" : ""}`} aria-label="Resumo da oficina">
-            {canViewOrders ? <>
-            <button className="stat-card" onClick={() => setActive("Ordens de serviço")}>
-              <div className="stat-icon red"><Icon name="wrench" /></div>
-              <div className="stat-info"><span>OS ativas</span><strong>{orders.filter((o) => o.status !== "Entrega" && !o.closed).length}</strong><small>{orders.length} total registrada(s)</small></div>
-            </button>
-            <button className="stat-card" onClick={() => setActive("Orçamentos")}>
-              <div className="stat-icon amber"><Icon name="clock" /></div>
-              <div className="stat-info"><span>Aguardando aprovação</span><strong>{orders.filter((o) => o.status === "Aprovação").length}</strong><small>Orçamentos pendentes</small></div>
-            </button>
-            <button className="stat-card" onClick={() => setActive("Ordens de serviço")}>
-              <div className="stat-icon green"><Icon name="check" /></div>
-              <div className="stat-info"><span>Prontas para entrega</span><strong>{orders.filter((o) => o.status === "Entrega" && !o.closed).length}</strong><small>Aguardando retirada</small></div>
-            </button>
-            </> : <div className="stat-card access-stat"><div className="stat-icon red"><Icon name="shield"/></div><div className="stat-info"><span>Seu perfil de acesso</span><strong>{firebaseSession.profile?.role ?? "Usuário"}</strong><small>{firebasePermissions.length} permissões liberadas pelo Super Admin</small></div></div>}
-            {canSeeFinance ? <button className="stat-card" onClick={() => setActive("Financeiro")}>
-              <div className="stat-icon blue"><Icon name="wallet" /></div>
-              <div className="stat-info"><span>Recebido hoje</span><strong className="money">{formatBRL(summary.receivedToday)}</strong><small>{summary.salesTodayCount} {summary.salesTodayCount === 1 ? "movimentação" : "movimentações"} do dia</small></div>
-            </button> : null}
-          </section>
-
-          {canSeeFinance ? <section className="dashboard-finance-grid" aria-label="Valores financeiros">
-            <button className="dashboard-money-card receive" onClick={() => setActive("Contas a receber")}><span className="money-card-icon"><Icon name="arrow"/></span><div><small>A receber</small><strong>{formatBRL(summary.receivableTotal)}</strong><em>{summary.receivableTotal ? "Vendas e OS a prazo" : "Nenhum valor em aberto"}</em></div><Icon name="arrow" size={18}/></button>
-            <button className="dashboard-money-card pay" onClick={() => setActive("Contas a pagar")}><span className="money-card-icon"><Icon name="file"/></span><div><small>A pagar</small><strong>{formatBRL(expenses.filter((e) => e.status === "Agendado").reduce((sum, e) => sum + e.amount, 0))}</strong><em>{expenses.filter((e) => e.status === "Agendado").length} conta(s) agendada(s)</em></div><Icon name="arrow" size={18}/></button>
-            <button className="dashboard-money-card cash" onClick={() => openDialog("cash")}><span className="money-card-icon"><Icon name="wallet"/></span><div><small>{dashboardCash ? "Dinheiro na gaveta" : "Saldo do caixa"}</small><strong>{formatBRL(dashboardCash ? dashboardDrawer : summary.cashBalance)}</strong><em>{dashboardCash ? `${dashboardCash.id} aberto ${dashboardCash.openedDate}` : "Caixa fechado · abra para começar o dia"}</em></div><Icon name="arrow" size={18}/></button>
-          </section> : null}
-
-          {canViewOrders ? <section className="flow-section">
-            <div className="section-title">
-              <div><h2>Fluxo da oficina</h2><p>Acompanhe cada etapa do serviço</p></div>
-              <button className="text-button" onClick={() => setActive("Ordens de serviço")}>Ver todas as OS <Icon name="arrow" size={16} /></button>
-            </div>
-            <div className="flow-grid">
-              {[
-                { label: "Recepção", value: String(orders.filter((o) => o.status === "Recepção").length), helper: "Entrada e triagem", tone: "blue" },
-                { label: "Avaliação", value: String(orders.filter((o) => o.status === "Avaliação").length), helper: "Orçamento e diagnóstico", tone: "violet" },
-                { label: "Aprovação", value: String(orders.filter((o) => o.status === "Aprovação").length), helper: "Aguardando cliente", tone: "red" },
-                { label: "Em serviço", value: String(orders.filter((o) => o.status === "Em serviço").length), helper: "Execução na oficina", tone: "amber" },
-                { label: "Aguardando peça", value: String(orders.filter((o) => o.status === "Aguardando peça").length), helper: "Serviço parado até a peça chegar" },
-                { label: "Prontas", value: String(orders.filter((o) => o.status === "Entrega" && !o.closed).length), helper: "Aguardando retirada", tone: "green" },
-              ].map((item) => (
-                <button className="flow-card" key={item.label} onClick={() => setActive("Ordens de serviço")}>
-                  <span className={`flow-dot ${item.tone}`} />
-                  <div><strong>{item.value}</strong><span>{item.label}</span></div>
-                  <small>{item.helper}</small>
-                  <Icon name="arrow" size={18} />
-                </button>
-              ))}
-            </div>
-          </section> : null}
-
-          <div className="main-grid">
-            {canViewOrders ? <section className="panel orders-panel">
-              <div className="panel-header">
-                <div><h2>Ordens recentes</h2><p>Últimas movimentações da oficina</p></div>
-                <button className="outline-button" onClick={() => setActive("Ordens de serviço")}>Ver todas</button>
-              </div>
-              <div className="table-scroll">
-                <table>
-                  <thead><tr><th>OS / Cliente</th><th className="col-secondary">Motocicleta</th><th className="col-secondary">Mecânico</th><th className="col-secondary">Entrada</th><th>Status</th><th></th></tr></thead>
-                  <tbody>
-                    {orders.length ? orders.map((order) => (
-                      <tr key={order.id}>
-                        <td><strong className="order-id">{order.id}</strong><span>{order.customer}</span></td>
-                        <td className="col-secondary"><strong>{order.bike}</strong><span className="plate">{order.plate}</span></td>
-                        <td className="col-secondary"><span className="mechanic-avatar">{order.mechanic ? order.mechanic.slice(0, 1) : "M"}</span>{order.mechanic || "Não definido"}</td>
-                        <td className="col-secondary">{order.time}</td>
-                        <td><span className={`status ${statusTone(order.status)}`}><i />{order.status}</span></td>
-                        <td><button className="row-button" aria-label={`Abrir ${order.id}`} onClick={() => openDialog("order", order.id)}><Icon name="arrow" size={17} /></button></td>
-                      </tr>
-                    )) : (
-                      <tr><td colSpan={6} style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>Nenhuma ordem de serviço cadastrada no momento.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section> : <section className="panel access-scope-card"><span><Icon name="shield" size={25}/></span><div><small>Acesso personalizado</small><h2>Você vê somente os módulos liberados</h2><p>O Super Admin pode alterar suas permissões a qualquer momento em Usuários e acessos.</p></div></section>}
-
-            <aside className="side-stack">
-              {canViewInventory ? <section className="alert-card">
-                <div className="alert-top"><span><Icon name="alert" size={19} /></span><b>Atenção necessária</b></div>
-                <strong>{products.filter((p) => p.stock <= p.minimum).length > 0 ? `${products.filter((p) => p.stock <= p.minimum).length} item(ns) com estoque crítico` : "Estoque regularizado"}</strong>
-                <p>{products.filter((p) => p.stock <= p.minimum).length > 0 ? `${products.filter((p) => p.stock === 0).length} item(ns) totalmente zerados no momento.` : "Todos os produtos cadastrados estão dentro do nível seguro."}</p>
-                <button onClick={() => setActive("Produtos e estoque")}>Ver itens do estoque <Icon name="arrow" size={16} /></button>
-              </section> : null}
-
-              {canSeeFinance ? <section className="panel quick-panel">
-                <div className="panel-header"><div><h2>Financeiro rápido</h2><p>Sem sair do painel</p></div></div>
-                <button onClick={() => openDialog("expense")}><span className="quick-icon red"><Icon name="file" /></span><div><strong>Adicionar gasto</strong><small>Peça, frete ou despesa</small></div><Icon name="arrow" size={17} /></button>
-                <button onClick={() => setActive("Contas a receber")}><span className="quick-icon green"><Icon name="arrow" /></span><div><strong>Contas a receber</strong><small>{formatBRL(summary.receivableTotal)} em aberto</small></div><Icon name="arrow" size={17} /></button>
-                <button onClick={() => setActive("Contas a pagar")}><span className="quick-icon dark"><Icon name="wallet" /></span><div><strong>Contas a pagar</strong><small>{formatBRL(expenses.filter((e) => e.status === "Agendado").reduce((sum, e) => sum + e.amount, 0))} em aberto</small></div><Icon name="arrow" size={17} /></button>
-              </section> : null}
-            </aside>
-          </div>
-          </>
+          <OperationsOverview name={currentUserName} orders={orders} products={products} summary={summary} cash={dashboardCash ?? undefined} drawer={dashboardDrawer} can={hasPermission} navigate={navigateTo} openDialog={openDialog}/>
           ) : (
-            <ModuleWorkspace stockAdjustments={stockAdjustments} active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
+            <ModuleWorkspace key={`${active}:${navRevision}`} initialFilter={moduleFilter} initialQuery={moduleQuery} stockEntries={stockEntries} parked={parked} setParked={setParked} canManageFinance={canManageFinance} canManageSettings={canManageSettings} stockAdjustments={stockAdjustments} active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>
-      <AppDialog dialog={dialog} canOperate={canOperateDialog} canCreateCategory={canManageInventory || canManageSettings} canCreatePartBrand={canManageInventory || canManageSettings} step={osStep} setStep={setOsStep} close={() => setDialog(null)} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <nav className="mobile-bottom-nav" aria-label="Atalhos no celular">{directNav.slice(0, 3).map((item) => <button key={item.label} aria-current={active === item.label ? "page" : undefined} onClick={() => setActive(item.label)}><Icon name={item.icon} size={21}/><span>{item.short}</span></button>)}<button onClick={() => setMobileMenu(true)} aria-label="Abrir todas as opções"><Icon name="menu" size={21}/><span>Menu</span></button></nav>
+      {recordPreview && <RecordPreview entry={recordPreview} products={products} clients={clients} motorcycles={motorcycles} suppliers={suppliers} orders={orders} close={() => setRecordPreview(null)}/>}
+      <AppDialog dialog={dialog} canCreateCategory={canManageInventory || canManageSettings} canCreatePartBrand={canManageInventory || canManageSettings} canCheckoutOrders={canManageFinance} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={requestCloseDialog} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {helpOpen ? (
         <div className="dialog-layer" role="presentation" onMouseDown={(evento) => evento.target === evento.currentTarget && setHelpOpen(false)}>
           <section className="dialog dialog-wide help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">
             <header className="dialog-header">
-              <div><span>Central de ajuda</span><h2 id="help-title">Como fazer as coisas no sistema</h2><p>Escrito para o dia a dia da oficina, não para quem programa.</p></div>
+              <div><span>Central de ajuda</span><h2 id="help-title">Como fazer as coisas no sistema</h2><p>Encontre o passo a passo de cada rotina.</p></div>
               <button aria-label="Fechar" onClick={() => setHelpOpen(false)}>×</button>
             </header>
             <div className="dialog-body help-body">
@@ -6256,6 +5954,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           </section>
         </div>
       ) : null}
+      {(confirmClose || confirmLogout) && <div className="dialog-layer confirmation-layer"><section className="dialog compact-confirmation" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><header className="dialog-header"><div><span>{confirmLogout ? "Sair do sistema" : "Fechar formulário"}</span><h2 id="confirm-title">{confirmLogout ? "Há trabalho em andamento" : "Descartar alterações?"}</h2><p>{confirmLogout ? "Vendas em andamento ou em espera serão perdidas ao sair. As operações já confirmadas continuam salvas." : "As alterações deste formulário ainda não foram salvas."}</p></div></header><footer className="dialog-footer"><button className="outline-button" onClick={() => { setConfirmClose(false); setConfirmLogout(false); }}>Continuar trabalhando</button><button className="primary-button" onClick={() => { dirtyDialog.current = false; if (confirmLogout) { setConfirmLogout(false); void firebaseSession.logout(); } else { setConfirmClose(false); setDialog(null); } }}>{confirmLogout ? "Sair mesmo assim" : "Descartar e fechar"}</button></footer></section></div>}
       {toast ? <div className="toast" role="status"><span><Icon name="check" size={17}/></span>{toast}</div> : null}
     </main>
   );

@@ -25,22 +25,31 @@ export function printDocument(html: string) {
   // O iframe só pode ser removido depois que o diálogo de impressão fecha —
   // tirá-lo antes cancela a impressão no meio.
   const cleanup = () => {
+    window.clearTimeout(fallbackCleanup);
     window.setTimeout(() => frame.remove(), 1000);
   };
+  // Some browsers return from print() while their print sheet is still open.
+  const fallbackCleanup = window.setTimeout(cleanup, 10 * 60 * 1000);
 
-  frame.onload = () => {
+  let started = false;
+  frame.onload = async () => {
+    if (started) return;
+    started = true;
     const view = frame.contentWindow;
     if (!view) return cleanup();
     try {
+      // Wait for the uploaded logo to decode before the print snapshot is taken.
+      await Promise.all(Array.from(view.document.images).map((image) => image.decode().catch(() => undefined)));
+      view.addEventListener("afterprint", cleanup, { once: true });
       view.focus();
       view.print();
-    } finally {
+    } catch {
       cleanup();
     }
   };
 
-  document.body.appendChild(frame);
   frame.srcdoc = html;
+  document.body.appendChild(frame);
 }
 
 /**

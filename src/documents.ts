@@ -1,4 +1,5 @@
 import { paymentsOf } from "./finance";
+import { logoForFormat, logoWidthMm } from "./logo";
 import type { OrderRecord, SaleRecord, ServiceOrderItem, SettingsConfig } from "./types";
 
 /**
@@ -56,9 +57,10 @@ export type PrintFormat = "Cupom 80mm" | "A4" | string;
 /** O cupom térmico é estreito e sem margem; o A4 é uma folha comum. */
 function documentStyle(format: PrintFormat): string {
   const thermal = !String(format).toLowerCase().includes("a4");
+  const paperWidth = String(format).includes("58") ? 58 : 80;
   return thermal
-    ? `@page { size: 80mm auto; margin: 4mm; }
-       body { width: 72mm; margin: 0; font-family: "Courier New", monospace; font-size: 11px; color: #000; }
+    ? `@page { size: ${paperWidth}mm auto; margin: 4mm; }
+       body { width: ${paperWidth - 8}mm; margin: 0; font-family: "Courier New", monospace; font-size: 11px; color: #000; }
        h1 { font-size: 13px; margin: 0 0 2px; }
        .via { page-break-after: always; }
        .via:last-child { page-break-after: auto; }`
@@ -74,6 +76,7 @@ function documentShell(title: string, format: PrintFormat, body: string): string
     ${documentStyle(format)}
     .head { text-align: center; margin-bottom: 8px; }
     .head small { display: block; }
+    .print-logo { display: block; width: auto; height: auto; max-height: 32mm; object-fit: contain; margin: 0 auto 3mm; }
     .row { display: flex; justify-content: space-between; gap: 8px; }
     .rule { border-top: 1px dashed #000; margin: 6px 0; }
     .label { text-transform: uppercase; font-size: 9px; letter-spacing: .04em; }
@@ -89,11 +92,14 @@ function documentShell(title: string, format: PrintFormat, body: string): string
 }
 
 function workshopHead(settings: Partial<SettingsConfig> | null): string {
+  const format = settings?.printFormat ?? "Cupom 80mm";
+  const logo = logoForFormat(settings, format);
+  const image = logo ? `<img class="print-logo" src="${escapeHtml(logo)}" alt="Logomarca da oficina" style="max-width:${logoWidthMm(settings?.logoWidthMm, format)}mm">` : "";
   const lines = [settings?.cnpj && `CNPJ ${settings.cnpj}`, settings?.phone, settings?.address]
     .filter(Boolean)
     .map((line) => `<small>${escapeHtml(line)}</small>`)
     .join("");
-  return `<div class="head"><h1>${escapeHtml(settings?.workshopName || "Oficina")}</h1>${lines}</div>`;
+  return `<div class="head">${image}<h1>${escapeHtml(settings?.workshopName || "Oficina")}</h1>${lines}</div>`;
 }
 
 function itemRows(items: ServiceOrderItem[]): string {

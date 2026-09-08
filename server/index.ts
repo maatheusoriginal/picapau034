@@ -6,6 +6,8 @@ import { getAdminUsers, postAdminUsers } from "./admin-users.js";
 import { bootstrapSuperAdmin } from "./bootstrap.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+// Load server credentials from the same .env used by the interface locally.
+if (existsSync(resolve(root, ".env"))) process.loadEnvFile(resolve(root, ".env"));
 const port = Number(process.env.PORT || 3000);
 const isProduction = process.env.NODE_ENV === "production";
 

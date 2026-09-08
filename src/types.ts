@@ -301,6 +301,7 @@ export type ServiceOrderItem = {
   id: string;
   type: "Peça" | "Mão de obra";
   name: string;
+  /** Total da linha (valor unitário × quantidade), preservado no formato existente. */
   price: number;
   quantity?: number;
   cost?: number;
@@ -805,6 +806,12 @@ export type SettingsConfig = {
   thermalPrinter: string;
   printFormat: string;
   printThreeCopies: boolean;
+  /** Imagem reduzida, embutida para impressão sem depender de links externos. */
+  logoDataUrl?: string;
+  logoFileName?: string;
+  logoWidthMm?: number;
+  logoOnThermal?: boolean;
+  logoOnA4?: boolean;
   defaultWhatsappMessage: string;
   /** ISO 8601 da última cópia de segurança baixada. Fica aqui, e não no
    *  navegador, para valer em qualquer aparelho: guardado localmente, o

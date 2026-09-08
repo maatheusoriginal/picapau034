@@ -12,9 +12,11 @@ import type {
 import { categoryGroups, defaultPaymentMethods, defaultProductCategories, defaultSystemLists, orDefault, systemList, systemListLabels } from "../types";
 import { saveFirestoreDoc, deleteFirestoreDoc, observeFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
+import { LogoSettings } from "./LogoSettings";
 import { searchSettings, settingsSections, type SettingsSectionId } from "../settings-map";
 
 interface SettingsWorkspaceProps {
+  canManage?: boolean;
   quickServices: QuickServiceConfig[];
   setQuickServices: React.Dispatch<React.SetStateAction<QuickServiceConfig[]>>;
   categories: CategoryConfig[];
@@ -30,9 +32,10 @@ interface SettingsWorkspaceProps {
   initialTab?: SettingsTab;
 }
 
-export type SettingsTab = "general" | "services" | "categories" | "payments" | "partners" | "stock" | "print" | "lists";
+export type SettingsTab = "general" | "services" | "categories" | "payments" | "partners" | "stock" | "print" | "lists" | "logo";
 
 export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
+  canManage = false,
   quickServices,
   setQuickServices,
   categories,
@@ -49,6 +52,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [buscaDeSecao, setBuscaDeSecao] = useState("");
   const [isSavingGeneral, setIsSavingGeneral] = useState(false);
+  const [settingsReady, setSettingsReady] = useState(false);
 
   // O que falta preencher, dito em português e dentro do próprio formulário.
   //
@@ -108,6 +112,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
       if (data) {
         setGeneralSettings((prev) => ({ ...prev, ...data }));
       }
+      setSettingsReady(true);
     });
     return () => unsub();
   }, []);
@@ -614,8 +619,10 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
           )}
         </nav>
 
-        <div className="settings-content">
+        <fieldset className="settings-content settings-fields" disabled={!canManage}>
+        {!canManage && <div className="readonly-notice">Você pode consultar as configurações. Alterações dependem de permissão do responsável.</div>}
       {/* TAB 1: GERAL & OS */}
+      {activeTab === "logo" && <LogoSettings settings={generalSettings} ready={settingsReady} canManage={canManage} notify={notify} onSaved={(logo) => setGeneralSettings((previous) => ({ ...previous, ...logo }))}/>}
       {activeTab === "general" && (
         <form noValidate onSubmit={handleSaveGeneral} className="settings-card">
           <div className="settings-card-header">
@@ -1814,7 +1821,7 @@ export const SettingsWorkspace: React.FC<SettingsWorkspaceProps> = ({
           </div>
         </form>
       )}
-        </div>
+        </fieldset>
       </div>
     </div>
   );

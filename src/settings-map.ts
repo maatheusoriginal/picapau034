@@ -12,7 +12,7 @@
  */
 export type SettingsSectionId =
   | "general" | "services" | "categories" | "payments"
-  | "partners" | "stock" | "print" | "lists";
+  | "partners" | "stock" | "print" | "lists" | "logo";
 
 export type SettingsSection = {
   id: SettingsSectionId;
@@ -33,7 +33,13 @@ export const settingsSections: SettingsSection[] = [
     id: "general",
     title: "Oficina e OS",
     summary: "Nome, CNPJ, endereço e como a ordem de serviço é numerada.",
-    keywords: ["nome da oficina", "razão social", "cnpj", "endereço", "telefone", "whatsapp da oficina", "logo", "numeração", "número da os", "prefixo", "prazo de entrega", "garantia", "dados da empresa"],
+    keywords: ["nome da oficina", "razão social", "cnpj", "endereço", "telefone", "whatsapp da oficina", "numeração", "número da os", "prefixo", "prazo de entrega", "garantia", "dados da empresa"],
+  },
+  {
+    id: "logo",
+    title: "Logomarca",
+    summary: "Logo da oficina nos cupons, ordens de serviço e comprovantes A4.",
+    keywords: ["logo", "logomarca", "logotipo", "imagem", "enviar", "trocar", "remover", "cupom", "nota fiscal", "comprovante", "a4", "cabeçalho", "impressão", "tamanho"],
   },
   {
     id: "services",

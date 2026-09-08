@@ -19,6 +19,7 @@ import {
   whatsappUrl,
 } from "../src/documents";
 import type { OrderRecord, SaleRecord, SettingsConfig } from "../src/types";
+import { logoWidthMm, safeLogoDataUrl, MAX_LOGO_DATA_LENGTH } from "../src/logo";
 
 const settings: Partial<SettingsConfig> = {
   workshopName: "Pica Pau Motos",
@@ -52,8 +53,27 @@ const saleDividida = buildSaleDocument({ ...sale, total: 150, paymentMethod: "PI
   payments: [{ method: "PIX", amount: 100 }, { method: "Dinheiro", amount: 50 }] }, settings);
 const uma = buildOrderDocument({ order, settings: { ...settings, printThreeCopies: false }, mechanics: "" });
 const a4 = buildOrderDocument({ order, settings: { ...settings, printFormat: "A4" }, mechanics: "" });
+const logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jY4QAAAAASUVORK5CYII=";
+const logoSettings = { ...settings, logoDataUrl: logo, logoWidthMm: 56 };
+const logoOs = buildOrderDocument({ order, settings: logoSettings, mechanics: "João" });
+const logo58 = buildSaleDocument(sale, { ...logoSettings, printFormat: "Cupom 58mm" });
 
 const casos: Array<[string, unknown, unknown]> = [
+  ["logomarca aparece em cada uma das três vias da OS", (logoOs.match(/<img class="print-logo"/g) || []).length, 3],
+  ["cupom inclui a imagem embutida", buildSaleDocument(sale, logoSettings).includes(`src="${logo}"`), true],
+  ["comprovante A4 também inclui a logomarca", buildSaleDocument(sale, { ...logoSettings, printFormat: "A4" }).includes(`src="${logo}"`), true],
+  ["sem imagem não cria imagem quebrada", saleDoc.includes('<img class="print-logo"'), false],
+  ["remover a logomarca mantém os dados da oficina", buildSaleDocument(sale, { ...logoSettings, logoDataUrl: "" }).includes("Pica Pau Motos"), true],
+  ["desativar nos cupons omite a imagem", buildSaleDocument(sale, { ...logoSettings, logoOnThermal: false }).includes('<img class="print-logo"'), false],
+  ["desativar nos cupons preserva a imagem no A4", buildSaleDocument(sale, { ...logoSettings, logoOnThermal: false, printFormat: "A4" }).includes('<img class="print-logo"'), true],
+  ["desativar no A4 omite a imagem no A4", buildSaleDocument(sale, { ...logoSettings, logoOnA4: false, printFormat: "A4" }).includes('<img class="print-logo"'), false],
+  ["a logo respeita o papel de 58mm", logo58.includes("max-width:50mm"), true],
+  ["papel estreito não imprime como 80mm", logo58.includes("size: 58mm"), true],
+  ["a imagem externa não gera requisição no cupom", buildSaleDocument(sale, { ...settings, logoDataUrl: "https://example.invalid/logo.png" }).includes('<img class="print-logo"'), false],
+  ["SVG ativo não entra na impressão", safeLogoDataUrl("data:image/svg+xml;base64,PHN2Zz4="), ""],
+  ["atributos injetados não entram na imagem", safeLogoDataUrl(`${logo}\" onerror=\"alert(1)`), ""],
+  ["imagem excessiva não ultrapassa o limite de armazenamento", safeLogoDataUrl(`data:image/png;base64,${"A".repeat(MAX_LOGO_DATA_LENGTH)}`), ""],
+  ["tamanho corrompido volta ao padrão", logoWidthMm("oops"), 44],
   // Pagamento dividido no cupom
   ["cupom dividido mostra as duas formas", saleDividida.includes("PIX") && saleDividida.includes("Dinheiro"), true],
   ["com o valor de cada parte", saleDividida.includes((100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })), true],
