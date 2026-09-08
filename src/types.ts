@@ -26,6 +26,12 @@ export type IconName =
 export type DialogKind =
   | "osChoice"
   | "os"
+  /**
+   * A OS que já aconteceu, lançada depois só para o histórico da moto.
+   * Não entra na fila da oficina, não baixa peça e não mexe no dinheiro.
+   * Ver src/backfill.ts.
+   */
+  | "osPast"
   | "quick"
   | "product"
   | "import"
@@ -359,6 +365,22 @@ export type OrderRecord = {
   /** Empresa parceira que encaminhou a moto e responde pela OS. */
   partnerId?: string;
   partnerName?: string;
+  /**
+   * O número da OS no sistema do parceiro.
+   *
+   * A moto chega da concessionária com a folha DELES, e é por aquele número
+   * que o mecânico e o parceiro conversam. Sem guardá-lo, o papel preso na
+   * moto e a OS do sistema não se acham, e alguém confere na mão.
+   */
+  partnerOrderId?: string;
+  /**
+   * OS lançada depois, só para o histórico da moto.
+   *
+   * Não passou pela oficina neste sistema: não baixou peça, não entrou no
+   * caixa e não conta no faturamento — o dinheiro dela já foi contado onde
+   * quer que a oficina contasse antes. Ver src/backfill.ts.
+   */
+  backfilled?: boolean;
   /** Quem paga: o dono da moto ou a empresa parceira (fatura mensal). */
   payer?: "owner" | "partner";
   /** Quem trouxe a moto pela parceira, para a oficina saber com quem falar. */

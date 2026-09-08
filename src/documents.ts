@@ -175,6 +175,7 @@ export function buildOrderDocument({ order, settings, mechanics }: OrderPrintInp
     <div class="rule"></div>
     <div class="facts">
       <div class="fact"><span class="label">Cliente</span><b>${escapeHtml(order.customer)}</b></div>
+      ${order.partnerOrderId ? `<div class="fact"><span class="label">OS ${escapeHtml(order.partnerName || "do parceiro")}</span><b>${escapeHtml(order.partnerOrderId)}</b></div>` : ""}
       <div class="fact"><span class="label">Motocicleta</span><b>${escapeHtml(order.bike)}</b>${order.plate ? `<span class="plate">${escapeHtml(order.plate)}</span>` : ""}</div>
       ${order.mileage ? `<div class="fact"><span class="label">Quilometragem</span><b>${escapeHtml(order.mileage)}</b></div>` : ""}
       ${mechanics ? `<div class="fact"><span class="label">Mecânico</span><b>${escapeHtml(mechanics)}</b></div>` : ""}

@@ -24,6 +24,7 @@ import { acharPorCodigo, ajusteProblema, diferencaDoAjuste, motivosDeAjuste, par
 import { atalhosDePeriodo, nomeDoArquivo, paraCSV, pecasMaisVendidas, periodoAnterior, periodoDe, periodoEmTexto, porFormaDePagamento, resultadoDoPeriodo, resultadoPorTipo, servicosMaisFeitos, variacao, type AtalhoDePeriodo } from "../src/report";
 import { pendenciasRecorrentes, periodicidades, proximaConta, serieDe, textoDaPendencia, type Periodicidade } from "../src/recurring";
 import { emMaiusculo } from "../src/text-case";
+import { dataBrasileira, problemasDaOSAntiga, registroDaOSAntiga, separarMarcaEModelo } from "../src/backfill";
 import { mensagemDoErro } from "../src/firebase-errors";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
@@ -2408,10 +2409,13 @@ export function ModuleWorkspace({
     const owner = clients.find((c) => c.id === moto.ownerId);
     return {
       id: moto.id,
-      name: `${moto.brand} ${moto.model}`,
+      // Campo que falta some da linha em vez de virar "undefined" na tela.
+      // Moto que entrou pela OS antiga, ou por um cadastro de anos atrás, nem
+      // sempre tem marca, ano e cor — e o texto cru aparecia para o balcão.
+      name: [moto.brand, moto.model].map((parte) => (parte ?? "").trim()).filter(Boolean).join(" ") || "Moto sem modelo",
       sub: `${owner ? owner.name : "Proprietário não vinculado"} · ${moto.plate}`,
-      meta: `${moto.year} · ${moto.color}`,
-      initials: (moto.model.slice(0, 2) || "MT").toUpperCase(),
+      meta: [moto.year, moto.color].map((parte) => (parte ?? "").trim()).filter(Boolean).join(" · ") || "Ano e cor não informados",
+      initials: ((moto.model ?? "").slice(0, 2) || "MT").toUpperCase(),
       inativo: moto.active === false,
     };
   });
@@ -2767,6 +2771,25 @@ export function AppDialog({
   // ninguém lendo: escolher "Empresa parceira" não mudava nada, e a OS da
   // frota era cobrada do motoboy que trouxe a moto.
   const [osPayer, setOsPayer] = useState<"owner" | "partner">("owner");
+  /** Número da OS no sistema do parceiro (a folha que veio junto com a moto). */
+  const [osPartnerOrderId, setOsPartnerOrderId] = useState("");
+
+  /**
+   * A OS que já aconteceu, lançada depois só para o histórico da moto.
+   *
+   * É um formulário separado do da OS nova de propósito: quase tudo o que a OS
+   * nova pergunta (mecânico, prioridade, combustível, previsão de entrega) não
+   * faz sentido para um serviço que terminou meses atrás, e pedir isso faria
+   * quem está lançando trinta papéis desistir no terceiro.
+   */
+  const [antigaData, setAntigaData] = useState("");
+  const [antigaPlaca, setAntigaPlaca] = useState("");
+  const [antigaMoto, setAntigaMoto] = useState("");
+  const [antigaCliente, setAntigaCliente] = useState("");
+  const [antigaServico, setAntigaServico] = useState("");
+  const [antigaValor, setAntigaValor] = useState("");
+  const [antigaParceiroId, setAntigaParceiroId] = useState("");
+  const [antigaOsDoParceiro, setAntigaOsDoParceiro] = useState("");
   // Os campos de entregador saíram junto com a etapa de origem: quem abre a OS
   // já escolhe a parceira e a moto, e anotar quem foi buscar não mudava nada no
   // atendimento. O campo continua no tipo para as OS antigas seguirem legíveis.
@@ -3301,6 +3324,7 @@ export function AppDialog({
     changePassword: "Definir uma nova senha",
     osChoice: "Que tipo de atendimento é?",
     os: "Abrir nova ordem de serviço",
+    osPast: "Lançar OS que já aconteceu",
     quick: "Lançar serviço rápido",
     product: "Adicionar produto",
     import: "Importar cadastro de estoque",
@@ -3328,6 +3352,7 @@ export function AppDialog({
     changePassword: "Escolha a senha que você vai usar a partir de agora.",
     osChoice: "Escolha o fluxo certo antes de começar.",
     os: "Preencha somente o necessário. Você poderá completar depois.",
+    osPast: "Serve para o histórico da moto. Não entra na fila, não baixa peça e não mexe no caixa.",
     quick: "Para trocas e ajustes sem cadastro completo.",
     product: "Cadastre a peça e já defina o saldo inicial.",
     import: "Use o modelo CSV preenchido no Google Sheets.",
@@ -3435,7 +3460,12 @@ export function AppDialog({
       plate,
       mechanic: selectedMechanics[0]?.name ?? "",
       mechanicIds: selectedMechanics.map((mechanic) => mechanic.id),
-      time: new Date().toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }),
+      // O ANO entra aqui. Sem ele a data de abertura ficava "08/09, 20:04", e
+      // o histórico da moto não conseguia sequer ordenar por essa data —
+      // `historySortKey` precisa de dd/mm/aaaa e devolvia vazio. Para uma moto
+      // que volta depois de um ano, o papel não dizia se foi este setembro ou
+      // o passado, que é exatamente o que o histórico existe para responder.
+      time: new Date().toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }),
       status: "Recepção",
       tone: statusTone("Recepção"),
       items: osItems,
@@ -3446,6 +3476,7 @@ export function AppDialog({
       fuelLevel: currentFuel,
       delivery: osDelivery ? osDelivery.split("-").reverse().join("/") : "",
       origin: osOrigin === "partner" ? `Encaminhado por ${selectedPartner?.name ?? "parceiro"}` : "Cliente direto",
+      ...(daParceira && osPartnerOrderId.trim() ? { partnerOrderId: osPartnerOrderId.trim() } : {}),
       total: osTotal,
       deductedItems: [],
       // Quem paga fica gravado na OS: é o que faz o encerramento mandar a
@@ -3749,6 +3780,56 @@ export function AppDialog({
     if (dialog === "record") return close();
     if (!canOperate) return setDialogError("Seu perfil pode consultar, mas não alterar esta operação.");
     if ((dialog === "order" || dialog === "orderCheckout") && (!currentOrder || currentOrder.closed)) return setDialogError("Esta OS não está disponível para alteração. Atualize a lista.");
+
+    // A OS que já aconteceu: entra encerrada, com a data do papel, e o
+    // `backfilled` do registro é o que mantém o financeiro fora disso.
+    if (dialog === "osPast") {
+      const parceira = activePartners.find((item) => item.id === antigaParceiroId);
+      const dados = {
+        data: antigaData,
+        placa: antigaPlaca,
+        moto: antigaMoto,
+        cliente: antigaCliente,
+        servico: antigaServico,
+        valor: valorDigitado(antigaValor),
+        parceiroId: parceira?.id,
+        parceiroNome: parceira?.name,
+        osDoParceiro: antigaOsDoParceiro,
+        motoId: motorcycles.find((item) => normalizePlate(item.plate) === normalizePlate(antigaPlaca))?.id,
+        clienteId: clients.find((item) => emMaiusculo(item.name) === emMaiusculo(antigaCliente.trim()))?.id,
+      };
+      const problemas = problemasDaOSAntiga(dados);
+      if (problemas.length) return setDialogError(problemas.join(" "));
+      setSaving(true);
+      try {
+        // A moto precisa existir no cadastro, senão o histórico não tem de
+        // onde ser aberto: ele é lido a partir da moto. Sem isto, a OS antiga
+        // ficava gravada e invisível — e quando a moto voltasse, digitar a
+        // placa não acharia nada, que é justamente o que se quer evitar.
+        if (!dados.motoId && canManageCustomers) {
+          const novaId = motorcycleIdFor(antigaPlaca);
+          const { marca, modelo } = separarMarcaEModelo(antigaMoto, systemList(lists, "motorcycleBrands"));
+          await saveFirestoreDoc("motorcycles", novaId, {
+            plate: antigaPlaca,
+            // Campos vazios entram como texto vazio, e não ausentes: o cadastro
+            // fica completo e a tela não precisa adivinhar o que falta.
+            brand: marca,
+            model: modelo || "Não informado",
+            year: "",
+            color: "",
+            ...(parceira ? { partnerId: parceira.id, partnerName: parceira.name } : {}),
+            ...(dados.clienteId ? { ownerId: dados.clienteId, ownerName: antigaCliente.trim() } : {}),
+          });
+          dados.motoId = novaId;
+        }
+        await createServiceOrder(osPrefix, nextOrderNumber, registroDaOSAntiga(dados) as Record<string, unknown>);
+        return finish(`OS de ${dataBrasileira(antigaData)} lançada no histórico da placa ${antigaPlaca}.`);
+      } catch (falha) {
+        return setDialogError(mensagemDoErro(falha, { acao: "lançar a OS no histórico", temPermissao: canOperate }));
+      } finally {
+        setSaving(false);
+      }
+    }
 
     if (dialog === "finance") {
       if (movementIssue) return setDialogError(movementIssue);
@@ -4286,6 +4367,7 @@ export function AppDialog({
       changePassword: "Senha atualizada.",
       osChoice: "Atendimento selecionado.",
       os: "Nova ordem de serviço aberta com sucesso.",
+      osPast: "OS antiga lançada no histórico da moto.",
       quick: "Serviço rápido lançado e pronto para recebimento.",
       product: "Produto adicionado ao estoque.",
       import: "Planilha recebida e pronta para importação.",
@@ -4328,6 +4410,7 @@ export function AppDialog({
   };
   const primaryLabels: Partial<Record<Exclude<DialogKind, null>, string>> = {
     quick: "Finalizar e receber",
+    osPast: "Lançar no histórico",
     // Depois da prévia o botão diz o que vai acontecer, e não "conferir" —
     // a conferência já é a tela que está na frente da pessoa.
     import: importPlan ? `Importar ${importPlan.create.length + importPlan.update.length} peça(s)` : "Escolher planilha",
@@ -4365,7 +4448,38 @@ export function AppDialog({
         {dialog === "osChoice" ? (
           <div className="dialog-body attendance-choice">
             <button onClick={() => changeDialog("quick")}><span className="attendance-icon fast"><Icon name="clock"/></span><div><b>É um serviço rápido</b><strong>Atendimento expresso</strong><small>Troca de óleo, lâmpada, regulagem ou ajuste concluído na hora. Cliente e moto são opcionais.</small><em>Ir para Serviço Rápido <Icon name="arrow" size={16}/></em></div></button>
-            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setOsNewCustomer(false); setOsSkipCustomer(false); setNewVehicleBrand("Honda"); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setOsPayer("owner"); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
+            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setOsNewCustomer(false); setOsSkipCustomer(false); setNewVehicleBrand("Honda"); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setOsPayer("owner"); setOsPartnerOrderId(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
+            {/* A pilha de OS em papel de motos que já passaram pela oficina.
+                Sem elas no sistema, a pergunta que se faz com a moto no portão
+                — "o que já foi feito nessa aqui?" — continua sem resposta. */}
+            <button onClick={() => { setAntigaData(""); setAntigaPlaca(""); setAntigaMoto(""); setAntigaCliente(""); setAntigaServico(""); setAntigaValor(""); setAntigaParceiroId(""); setAntigaOsDoParceiro(""); setDialogError(""); changeDialog("osPast"); }}><span className="attendance-icon past"><Icon name="clock"/></span><div><b>Já aconteceu</b><strong>Lançar no histórico</strong><small>OS em papel de moto que já passou aqui. Entra encerrada, com a data do papel, sem baixar peça nem mexer no caixa.</small><em>Lançar OS antiga <Icon name="arrow" size={16}/></em></div></button>
+          </div>
+        ) : null}
+
+        {dialog === "osPast" ? (
+          <div className="dialog-body os-past">
+            <div className="info-strip"><Icon name="check" size={17}/><span>Este lançamento serve para o <b>histórico da moto</b>. Ele nasce encerrado, não entra na fila da oficina, não baixa peça do estoque e <b>não conta no caixa nem no faturamento</b> — o dinheiro dele já foi contado do jeito que a oficina fazia antes.</span></div>
+            <div className="form-grid">
+              <label className="field"><span>Data do serviço <b className="req">*</b></span>
+                <input type="date" value={antigaData} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setAntigaData(event.target.value)}/></label>
+              <label className="field"><span>Placa <b className="req">*</b></span>
+                <input value={antigaPlaca} onChange={(event) => setAntigaPlaca(formatPlate(event.target.value))} placeholder="ABC-1234"/></label>
+              <label className="field"><span>Motocicleta</span>
+                <input value={antigaMoto} onChange={(event) => setAntigaMoto(event.target.value)} placeholder="Ex.: Honda CB 600F Hornet"/></label>
+              <label className="field"><span>Cliente</span>
+                <input value={antigaCliente} onChange={(event) => setAntigaCliente(event.target.value)} placeholder="Quem trouxe a moto"/></label>
+              <label className="field"><span>Empresa parceira</span>
+                <select value={antigaParceiroId} onChange={(event) => setAntigaParceiroId(event.target.value)}>
+                  <option value="">Nenhuma — cliente direto</option>
+                  {activePartners.map((parceira) => <option value={parceira.id} key={parceira.id}>{parceira.name}</option>)}
+                </select></label>
+              {antigaParceiroId ? <label className="field"><span>OS do parceiro</span>
+                <input value={antigaOsDoParceiro} onChange={(event) => setAntigaOsDoParceiro(event.target.value)} placeholder="Ex.: 001684" inputMode="numeric"/></label> : null}
+              <label className="field field-full"><span>O que foi feito <b className="req">*</b></span>
+                <textarea value={antigaServico} onChange={(event) => setAntigaServico(event.target.value)} placeholder="Copie do papel: verificar barulho na parte de trás, trocar capa do banco..."/></label>
+              <label className="field"><span>Valor cobrado</span>
+                <MoneyField value={antigaValor} onChange={setAntigaValor} placeholder="0,00"/></label>
+            </div>
           </div>
         ) : null}
 
@@ -4435,6 +4549,13 @@ export function AppDialog({
                             <select value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)}>
                               {activePartners.length ? activePartners.map((parceira) => <option value={parceira.id} key={parceira.id}>{parceira.name} · {parceira.laborDiscount}% mão de obra</option>) : <option value="">Nenhuma empresa parceira cadastrada</option>}
                             </select>
+                          </label>
+                          {/* A moto chega da concessionária com a folha DELES, e é por aquele
+                              número que o mecânico e o parceiro conversam. Guardar aqui é o que
+                              faz o papel preso na moto e a OS do sistema se acharem. */}
+                          <label className="field">
+                            <span>OS do parceiro</span>
+                            <input value={osPartnerOrderId} onChange={(event) => setOsPartnerOrderId(event.target.value)} placeholder="Ex.: 001684" inputMode="numeric"/>
                           </label>
                           <label className="field">
                             <span>Quem paga</span>
@@ -5792,7 +5913,9 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   ].filter((item) => canVisit(item.label, firebaseSession.profile!.role, firebasePermissions)) as Array<{ label: string; short: string; icon: IconName }>;
   const searchEntries = useMemo<SearchEntry[]>(() => [
     ...Object.keys(routePaths).filter((destination) => canVisit(destination, firebaseSession.profile!.role, firebasePermissions)).map((destination) => ({ key: `page:${destination}`, title: destination, detail: "Abrir área do sistema", destination, icon: "arrow" as IconName })),
-    ...orders.map((order) => ({ key: `order:${order.id}`, title: `${order.id} · ${order.customer}`, detail: `${order.plate} · ${order.bike} · ${order.closed ? "Entregue" : order.status}`, destination: canViewOrders ? "Ordens de serviço" : "Orçamentos", icon: "wrench" as IconName, kind: "order" as const, recordId: order.id })),
+    // `keywords` leva o número da OS do parceiro: quem está com a folha da
+    // concessionária na mão digita o número DELES e cai na OS daqui.
+    ...orders.map((order) => ({ key: `order:${order.id}`, title: `${order.id} · ${order.customer}`, detail: `${order.plate} · ${order.bike} · ${order.closed ? "Entregue" : order.status}${order.partnerOrderId ? ` · OS ${order.partnerName || "do parceiro"} ${order.partnerOrderId}` : ""}`, keywords: order.partnerOrderId || "", destination: canViewOrders ? "Ordens de serviço" : "Orçamentos", icon: "wrench" as IconName, kind: "order" as const, recordId: order.id })),
     ...products.map((product) => ({ key: `product:${product.id}`, title: product.name, detail: `${product.code} · ${product.price} · ${product.stock} em estoque`, keywords: `${product.barcode || ""} ${product.partNumber || ""}`, destination: "Produtos e estoque", icon: "box" as IconName, kind: "product" as const, recordId: product.id })),
     ...clients.map((client) => ({ key: `client:${client.id}`, title: client.name, detail: client.phone || "Cliente cadastrado", keywords: client.document, destination: "Clientes", icon: "users" as IconName, kind: "client" as const, recordId: client.id })),
     ...motorcycles.map((moto) => ({ key: `moto:${moto.id}`, title: `${moto.plate} · ${moto.brand} ${moto.model}`, detail: clients.find((client) => client.id === moto.ownerId)?.name || moto.partnerName || "Motocicleta", destination: "Motocicletas", icon: "bike" as IconName, kind: "motorcycle" as const, recordId: moto.id })),

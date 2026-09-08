@@ -128,6 +128,15 @@ const casos: Array<[string, unknown, unknown]> = [
   // O que o balcão procura de longe no papel.
   ["cliente, moto e placa saem em destaque", (osDoc.match(/class="fact"/g) || []).length >= 6, true],
   ["a placa sai emoldurada", osDoc.includes('class="plate"'), true],
+  // A moto chega da concessionária com a folha DELES: é por aquele número que
+  // o mecânico e o parceiro conversam, então ele tem de sair no papel.
+  ["o número da OS do parceiro sai no papel",
+    buildOrderDocument({ order: { ...order, partnerName: "Gonzaga Motos", partnerOrderId: "001684" },
+      settings, mechanics: "João" }).includes("001684"), true],
+  ["e diz de quem é esse número",
+    buildOrderDocument({ order: { ...order, partnerName: "Gonzaga Motos", partnerOrderId: "001684" },
+      settings, mechanics: "João" }).includes("OS Gonzaga Motos"), true],
+  ["OS sem parceiro não imprime linha vazia", osDoc.includes("do parceiro"), false],
   ["o cupom da venda destaca o cliente",
     buildSaleDocument({ ...sale, customer: "Rayane Ferreira" }, settings).includes('class="fact"'), true],
   // Venda de balcão em geral não tem cliente: o bloco não pode sair vazio,
