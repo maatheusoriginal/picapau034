@@ -98,7 +98,30 @@ const preencherEtapa1 = async (dados) => {
   await p.waitForTimeout(300);
 };
 
+// A versão 3 promoveu cinco destinos para o topo do menu ("Dia a dia") e os
+// tirou dos grupos — e lá eles aparecem com rótulo curto: "Produtos e estoque"
+// é o botão escrito "Estoque". Procurar pelo nome completo dentro do grupo não
+// acha mais nada.
+const ATALHO_DIRETO = {
+  "Visão geral": "Meu dia",
+  "Ordens de serviço": "Oficina",
+  "PDV Balcão": "Balcão",
+  "Produtos e estoque": "Estoque",
+  "Clientes": "Clientes",
+};
+
 const ir = async (destino) => {
+  const curto = ATALHO_DIRETO[destino];
+  if (curto) {
+    // O rótulo curto é comparado inteiro: "Estoque" no topo não pode casar com
+    // o grupo "Estoque", que é outro elemento e apenas abre a gaveta.
+    const direto = p.locator(".main-nav .nav-item").filter({ hasText: new RegExp(`^${curto}\\d*$`) }).first();
+    if (await direto.count()) {
+      await direto.click();
+      await p.waitForTimeout(1500);
+      return;
+    }
+  }
   const g = GRUPO[destino];
   const alvo = p.locator(g ? ".nav-subitem" : ".nav-item", { hasText: destino }).first();
   // Só abre o grupo se ele estiver fechado: clicar num grupo já aberto o

@@ -34,7 +34,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { allFirebasePermissions, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../../src/types";
-import { costAfterEntry, toAmount } from "../../src/inventory";
+import { costAfterEntry, toAmount, stockDeltas, mergeParts, type ReservedPart } from "../../src/inventory";
 import { BACKUP_COLLECTIONS } from "../../src/backup";
 
 type FirebaseWebConfig = {
@@ -747,12 +747,8 @@ export async function recordStockEntry(
 }
 
 /**
- * Grava a OS e a baixa (ou devolução) das peças no mesmo lote.
- *
- * `deltas` positivos tiram do estoque, negativos devolvem — é o que acontece
- * quando uma peça sai da ordem ou quando a OS volta para orçamento. Usa
- * increment pelo mesmo motivo da venda no PDV: a quantidade lida na tela pode
- * estar velha, e gravar valor absoluto faria uma operação apagar a outra.
+ * Rechecks reservations in the same transaction that writes the order.
+ * Two open screens must not deduct the same reservation twice.
  */
 export async function saveOrderWithStock(
   orderId: string,
@@ -761,12 +757,28 @@ export async function saveOrderWithStock(
 ) {
   const { db } = services();
   try {
-    const batch = writeBatch(db);
-    batch.set(doc(db, "serviceOrders", orderId), { ...withoutUndefined(order), updatedAt: serverTimestamp() }, { merge: true });
-    deltas.forEach(({ productId, quantity }) => {
-      batch.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
+    await runTransaction(db, async (transaction) => {
+      const orderRef = doc(db, "serviceOrders", orderId);
+      const current = await transaction.get(orderRef);
+      if (!current.exists()) throw new Error("Esta OS não foi encontrada. Atualize a lista antes de continuar.");
+      if (current.data().closed) throw new Error("Esta OS já foi encerrada. Atualize a lista para consultar o recebimento.");
+      const target = Array.isArray(order.deductedItems) ? order.deductedItems as ReservedPart[] : null;
+      if (target?.some((item) => !item.productId || !Number.isFinite(item.quantity) || item.quantity < 0)) throw new Error("Confira as quantidades das peças desta OS.");
+      const changes = target ? stockDeltas(mergeParts(target), current.data().deductedItems ?? []) : deltas;
+      const settings = changes.length ? await transaction.get(doc(db, "settings", "global")) : null;
+      const stock = await Promise.all(changes.map(async (change) => {
+        const ref = doc(db, "products", change.productId);
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists()) throw new Error("Uma peça desta OS não existe mais no estoque. Confira os itens.");
+        const data = snapshot.data();
+        const next = Number(data.stock ?? 0) - change.quantity;
+        if (!Number.isFinite(next)) throw new Error("Uma peça está com saldo inválido. Confira o estoque.");
+        if (change.quantity > 0 && next < 0 && settings?.data()?.blockZeroStockSale !== false) throw new Error(`Estoque insuficiente de ${data.name || change.productId}. Disponível: ${data.stock ?? 0}.`);
+        return { ref, next };
+      }));
+      transaction.set(orderRef, { ...withoutUndefined(order), ...(target ? { deductedItems: mergeParts(target) } : {}), updatedAt: serverTimestamp() }, { merge: true });
+      for (const item of stock) transaction.update(item.ref, { stock: item.next, updatedAt: serverTimestamp() });
     });
-    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `serviceOrders/${orderId}`);
   }

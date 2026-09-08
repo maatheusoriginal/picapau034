@@ -44,6 +44,9 @@ const buscasReais: Array<[string, SettingsSectionId]> = [
   ["faturado", "partners"],
   ["troca de óleo", "services"],
   ["cnpj", "general"],
+  ["logomarca", "logo"],
+  ["logo no cupom", "logo"],
+  ["imagem na nota fiscal", "logo"],
   ["marca de moto", "lists"],
 ];
 

@@ -1,0 +1,14 @@
+import type { SearchEntry } from "./WorkspaceSearch";
+import type { ClientRecord, MotorcycleRecord, ProductRecord, SupplierConfig, OrderRecord } from "../types";
+import { clientHistory, motorcycleHistory } from "../history";
+import { HistoryPanel } from "./HistoryPanel";
+
+export function RecordPreview({ entry, products, clients, motorcycles, suppliers, orders, close }: { entry: SearchEntry; products: ProductRecord[]; clients: ClientRecord[]; motorcycles: MotorcycleRecord[]; suppliers: SupplierConfig[]; orders: OrderRecord[]; close: () => void }) {
+  const product = entry.kind === "product" ? products.find((item) => item.id === entry.recordId) : undefined;
+  const client = entry.kind === "client" ? clients.find((item) => item.id === entry.recordId) : undefined;
+  const motorcycle = entry.kind === "motorcycle" ? motorcycles.find((item) => item.id === entry.recordId) : undefined;
+  const supplier = entry.kind === "supplier" ? suppliers.find((item) => item.id === entry.recordId) : undefined;
+  const fields: Array<[string, unknown]> = product ? [["Preço de venda", product.price], ["Estoque", `${product.stock} ${product.unit || "UN"}`], ["Código", product.code], ["Código de barras", product.barcode], ["Referência", product.partNumber], ["Localização", product.location], ["Categoria", product.category], ["Compatibilidade", product.compatibility], ["Observações", product.notes]] : client ? [["WhatsApp", client.phone], ["Documento", client.document], ["Endereço", client.address], ["Condição", client.condition], ["Observações", client.notes]] : motorcycle ? [["Placa", motorcycle.plate], ["Moto", `${motorcycle.brand} ${motorcycle.model}`], ["Ano", motorcycle.year], ["Cor", motorcycle.color], ["Proprietário", clients.find((item) => item.id === motorcycle.ownerId)?.name || motorcycle.partnerName], ["Observações", motorcycle.notes]] : supplier ? [["Contato", supplier.phone], ["Documento", supplier.document], ["Entrega", `${supplier.deliveryDays} dia(s)`], ["Condições", supplier.paymentTerms], ["Endereço", supplier.address]] : [];
+  const history = client ? clientHistory(client, orders, motorcycles) : motorcycle ? motorcycleHistory(motorcycle, orders) : null;
+  return <div className="dialog-layer"><section className="dialog record-preview" role="dialog" aria-modal="true" aria-labelledby="preview-title"><header className="dialog-header"><div><span>Consulta</span><h2 id="preview-title">{entry.title}</h2><p>{entry.detail}</p></div><button aria-label="Fechar consulta" onClick={close}>×</button></header><div className="dialog-body"><dl className="record-fields">{fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{String(value || "Não informado")}</dd></div>)}</dl>{history && <HistoryPanel historico={history} vazio="Nenhum atendimento registrado."/>}</div><footer className="dialog-footer"><button className="outline-button" onClick={close}>Fechar</button></footer></section></div>;
+}
