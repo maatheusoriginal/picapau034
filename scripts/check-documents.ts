@@ -107,6 +107,33 @@ const casos: Array<[string, unknown, unknown]> = [
   ["o documento sai com as três vias", (osDoc.match(/class="via"/g) || []).length, 3],
   ["desligando três vias, sai uma só", (uma.match(/class="via"/g) || []).length, 1],
 
+  // O corte entre as vias. A guilhotina corta no fim de cada PÁGINA, e a via
+  // do cliente é a última: sem quebra nela, sai grudada e alguém rasga na mão.
+  ["toda via termina em quebra de página", osDoc.includes("break-after: page"), true],
+  ["e no nome antigo da propriedade também", osDoc.includes("page-break-after: always"), true],
+  ["a última via não é mais exceção", osDoc.includes(".via:last-child"), false],
+  // A lâmina fica acima da cabeça de impressão: sem a sobra, o corte come a
+  // última linha, que é a assinatura do cliente.
+  ["cada via reserva o espaço da lâmina", (osDoc.match(/class="feed"/g) || []).length, 3],
+  ["o cupom da venda também reserva", (saleDoc.match(/class="feed"/g) || []).length, 1],
+
+  // O tamanho da letra. O balcão reclamou que não dava para ler, e o defeito
+  // era de ORDEM: o bloco comum vinha depois do bloco do formato e anulava o
+  // tamanho dele, com o mesmo peso de regra.
+  ["o corpo do cupom não é mais 11px", osDoc.includes("font-size: 11px"), false],
+  ["nada no cupom sai com 9px", osDoc.includes("font-size: 9px"), false],
+  ["o bloco comum não redefine tamanho",
+    /\.label \{ text-transform: uppercase; letter-spacing/.test(osDoc), true],
+
+  // O que o balcão procura de longe no papel.
+  ["cliente, moto e placa saem em destaque", (osDoc.match(/class="fact"/g) || []).length >= 6, true],
+  ["a placa sai emoldurada", osDoc.includes('class="plate"'), true],
+  ["o cupom da venda destaca o cliente",
+    buildSaleDocument({ ...sale, customer: "Rayane Ferreira" }, settings).includes('class="fact"'), true],
+  // Venda de balcão em geral não tem cliente: o bloco não pode sair vazio,
+  // gastando papel e uma linha em branco no cupom.
+  ["venda sem cliente não imprime o bloco vazio", saleDoc.includes('class="facts"'), false],
+
   // Conteúdo da OS
   ["o número da OS aparece", osDoc.includes("OS-0007"), true],
   ["o nome do cliente é escapado no documento", osDoc.includes("Zé &quot;Fera&quot; &amp; Cia"), true],
