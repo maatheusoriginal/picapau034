@@ -126,7 +126,9 @@ export function drawerEntries(session: CashSession | null, sources: DrawerSource
 
   (sources.orders ?? []).forEach((order) => {
     const at = orderInstant(order);
-    if (!order.closed || !withinSession(session, at)) return;
+    // A OS lançada só para o histórico não passou pela gaveta: o dinheiro dela
+    // entrou meses atrás, do jeito que a oficina fazia antes.
+    if (!order.closed || order.backfilled || !withinSession(session, at)) return;
     const emEspecie = drawerTotal(paymentsOf(order));
     if (emEspecie <= 0) return;
     const dividido = (order.payments?.length ?? 0) > 1;

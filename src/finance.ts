@@ -279,7 +279,12 @@ function orderEntry(order: OrderRecord): FinanceEntry {
 }
 
 function allEntries(sales: SaleRecord[], orders: OrderRecord[]): FinanceEntry[] {
-  return [...sales.map(saleEntry), ...orders.filter((order) => order.closed).map(orderEntry)];
+  // A OS lançada só para o histórico fica de fora do dinheiro: ela nasce
+  // encerrada e com data antiga, então sem este filtro entraria no
+  // faturamento do mês em que o serviço foi feito — inventando receita que a
+  // oficina já contou de outro jeito. Ver src/backfill.ts.
+  const daOficina = orders.filter((order) => order.closed && !order.backfilled);
+  return [...sales.map(saleEntry), ...daOficina.map(orderEntry)];
 }
 
 /**

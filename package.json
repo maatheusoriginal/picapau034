@@ -44,7 +44,8 @@
     "check:settings-map": "node --import tsx scripts/check-settings-map.ts",
     "e2e:emulador": "node scripts/emulador/e2e.mjs",
     "check:workspace": "node --import tsx scripts/check-workspace.ts",
-    "verify": "npm run typecheck && node scripts/verify.mjs"
+    "verify": "npm run typecheck && node scripts/verify.mjs",
+    "check:backfill": "tsx scripts/check-backfill.ts"
   },
   "dependencies": {
     "express": "4.21.2",

@@ -1051,6 +1051,12 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: .875rem; }
 .attendance-choice > button:hover { border-color: #dcaaa6; background: #fffbfa; transform: translateY(-1px); box-shadow: 0 10px 26px rgba(24,24,27,.06); }
 .attendance-icon { width: 43px; height: 43px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 11px; }
 .attendance-icon.fast { background: #fff4e4; color: var(--amber); }.attendance-icon.full { background: #fff0ef; color: var(--red); }
+/* A OS que já aconteceu: cinza, porque não é atendimento de hoje — é
+   arquivo entrando no histórico da moto. */
+.attendance-icon.past { background: #eeefec; color: #6b6f66; }
+.os-past .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+.os-past .field-full { grid-column: 1 / -1; }
+.os-past textarea { min-height: 84px; }
 .attendance-choice > button > div { flex: 1; }
 .attendance-choice b, .attendance-choice strong, .attendance-choice small, .attendance-choice em { display: block; }
 .attendance-choice b { color: #96969a; text-transform: uppercase; letter-spacing: .07em; font-size: .875rem; }
