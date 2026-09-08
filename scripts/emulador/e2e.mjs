@@ -853,7 +853,9 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
   if ((await p.locator(".os-single-columns").count()) !== 1) problemas.push("a OS não abriu na tela única");
   // Quem, qual moto, a recepção e os itens: tudo à vista de uma vez.
   const naTela = await p.locator(".os-single").innerText();
-  for (const pedaco of ["Quem responde por esta OS", "Motocicleta", "Quilometragem", "Adicionar peças", "Adicionar mão de obra"]) {
+  // A versão 3 renomeou os botões do editor de itens: "Adicionar peças" virou
+  // "Adicionar peça" e "Adicionar mão de obra" virou "Adicionar serviço".
+  for (const pedaco of ["Quem responde por esta OS", "Motocicleta", "Quilometragem", "Adicionar peça", "Adicionar serviço"]) {
     if (!naTela.includes(pedaco)) problemas.push(`a tela única não traz "${pedaco}"`);
   }
   if ((await p.locator(".os-party-switch button").count()) !== 2) problemas.push("não dá para escolher entre cliente e parceira");
