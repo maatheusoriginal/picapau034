@@ -24,6 +24,7 @@ import { acharPorCodigo, ajusteProblema, diferencaDoAjuste, motivosDeAjuste, par
 import { atalhosDePeriodo, nomeDoArquivo, paraCSV, pecasMaisVendidas, periodoAnterior, periodoDe, periodoEmTexto, porFormaDePagamento, resultadoDoPeriodo, resultadoPorTipo, servicosMaisFeitos, variacao, type AtalhoDePeriodo } from "../src/report";
 import { pendenciasRecorrentes, periodicidades, proximaConta, serieDe, textoDaPendencia, type Periodicidade } from "../src/recurring";
 import { emMaiusculo } from "../src/text-case";
+import { mensagemDoErro } from "../src/firebase-errors";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
 import { nextSequentialId, withoutUndefined } from "../src/firestore-data";
@@ -389,8 +390,13 @@ function useFirebaseSession() {
     }
   };
 
+  // A tarja do alto da tela. Ela mostra o erro da SINCRONIZAÇÃO — quem não
+  // consegue ler uma coleção —, então a frase diz o que falhou de verdade em
+  // vez de um "não foi possível" solto. A recusa do Firestore chega aqui com o
+  // uid e o e-mail dentro; `mensagemDoErro` é quem garante que isso não sobe
+  // para a tela.
   const reportSyncError = (firebaseError: unknown) => {
-    setError(firebaseErrorMessage(firebaseError));
+    setError(mensagemDoErro(firebaseError, { acao: "carregar os dados da oficina" }));
   };
 
   return { user, profile, state, error, login, logout, resetPassword, changePassword, bootstrapAdmin, reportSyncError };

@@ -14,6 +14,7 @@ import {
   connectAuthEmulator,
 } from "firebase/auth";
 import { withoutUndefined } from "../../src/firestore-data";
+import { mensagemDoErro } from "../../src/firebase-errors";
 import {
   connectFirestoreEmulator,
   collection,
@@ -159,12 +160,25 @@ function services() {
 
 export const firebaseProjectId = envFirebaseConfig.projectId ?? "";
 
+/**
+ * O que deu errado no Firebase, escrito para quem está no balcão.
+ *
+ * As frases abaixo são as do login e da administração, que sabem dizer coisas
+ * que o resto do sistema não saberia ("ative o login por e-mail e senha").
+ * Todo o resto é delegado para `mensagemDoErro`, e isso não é enfeite:
+ *
+ * A recusa do Firestore chega com a mensagem inteira do backend, e ela carrega
+ * o uid e o e-mail de quem está logado. Devolver `error.message` publicava isso
+ * numa tarja no alto da tela — que é o tipo de coisa que vira print no grupo do
+ * WhatsApp. `mensagemDoErro` nunca devolve a mensagem crua de um erro do
+ * Firebase, e reconhece a recusa pelos dois textos que ela tem: a do SDK
+ * ("Missing or insufficient permissions") e a do backend ("PERMISSION_DENIED"),
+ * que não trazem `code` nenhum e por isso escapavam da conferência antiga.
+ */
 export function firebaseErrorMessage(error: unknown) {
   const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
   if (code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found")) return "E-mail ou senha inválidos.";
   if (code.includes("too-many-requests")) return "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
-  if (code.includes("network-request-failed") || code.includes("unavailable")) return "Sem conexão com o Firebase. Confira a internet.";
-  if (code.includes("permission-denied")) return "A conta entrou, mas ainda não possui permissão no banco de dados.";
   if (code.includes("operation-not-allowed")) return "Ative o login por e-mail e senha no Firebase Authentication.";
   if (code.includes("unauthorized-domain")) return "Este domínio ainda não está autorizado no Firebase Authentication.";
   if (code.includes("user-disabled")) return "Esta conta foi desativada pelo administrador.";
@@ -172,10 +186,9 @@ export function firebaseErrorMessage(error: unknown) {
   if (code.includes("invalid-email")) return "Informe um endereço de e-mail válido.";
   if (code.includes("weak-password")) return "A senha precisa ter pelo menos 6 caracteres.";
   if (code.includes("requires-recent-login")) return "Por segurança, entre novamente no sistema antes de trocar a senha.";
-  if (code.includes("unauthenticated")) return "Sua sessão expirou. Entre novamente para continuar.";
   if (code.includes("admin/configuration")) return "Configure a credencial do Firebase Admin nas variáveis protegidas do ambiente.";
   if (code.includes("admin/internal")) return "O backend administrativo não conseguiu concluir a operação. Confira os logs do ambiente.";
-  return error instanceof Error ? error.message : "Não foi possível concluir a operação no Firebase.";
+  return mensagemDoErro(error);
 }
 
 function summarizeUser(user: User | null): FirebaseUserSummary | null {
