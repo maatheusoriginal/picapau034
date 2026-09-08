@@ -13,6 +13,19 @@
  * Rode com: npm run check:firebase-errors
  */
 import { codigoDoErro, ehRecusaDePermissao, mensagemDoErro } from "../src/firebase-errors";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+// A versão 3 chegou com a correção desfeita: o `firebaseErrorMessage` do
+// cliente voltou a terminar em `error.message`, e o JSON com uid e e-mail
+// subiu de novo para a tarja do alto da tela. Conferir só as funções puras não
+// pegou isso, porque o vazamento estava em quem NÃO as chamava. Daí esta
+// leitura do arquivo: é feia, e é a que teria acusado.
+const CLIENTE = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "app", "firebase", "client.ts"),
+  "utf8",
+);
 
 // O erro real, como o SDK entrega — com o uid e o e-mail dentro.
 const recusaReal = Object.assign(
@@ -82,6 +95,12 @@ const casos: Array<[string, unknown, unknown]> = [
   ["mensagem nossa passa como está", mensagemDoErro(nosso), "Informe um valor maior que zero."],
   ["erro sem nada dentro vira frase genérica",
     mensagemDoErro({}, { acao: "criar a marca" }), "Não foi possível criar a marca. Tente de novo."],
+
+  // --- Quem mostra a mensagem na tela ---
+  ["o cliente do Firebase delega a mensagem final",
+    /return mensagemDoErro\(error\);/.test(CLIENTE), true],
+  ["e não devolve mais a mensagem crua do Firebase",
+    /return error instanceof Error \? error\.message/.test(CLIENTE), false],
 ];
 
 let falhas = 0;
