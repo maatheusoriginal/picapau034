@@ -20,6 +20,28 @@ No Firebase Console do projeto `oficina-picapau`:
 
 As regras fazem o bloqueio de verdade no banco. Esconder um botão na tela não é usado como segurança.
 
+### Toda vez que o `firestore.rules` mudar, publique de novo
+
+Regra editada no arquivo **não vale nada** até ser publicada no Firebase. Enquanto
+não for, o sistema deixa clicar no que o banco vai negar, e a tela mostra "sem
+permissão" mesmo para quem tem tudo liberado no perfil — inclusive o dono.
+
+Pelo console é o mesmo caminho de cima: Firestore Database → Rules → colar o
+conteúdo novo de `firestore.rules` → **Publish**.
+
+Pela linha de comando, dentro da pasta do projeto:
+
+```
+npx firebase-tools deploy --only firestore:rules --project SEU-PROJETO
+```
+
+**O `--project` não é opcional.** O `.firebaserc` deste repositório aponta para
+`picapau-teste`, que é o projeto de faz-de-conta usado pelo emulador nos testes.
+Sem passar o `--project`, o comando publica as regras no lugar errado e a oficina
+continua exatamente como estava. O identificador do projeto de verdade é o mesmo
+que está em `VITE_FIREBASE_PROJECT_ID` no seu `.env`, e aparece na barra de
+endereço do console do Firebase.
+
 ## 3. Configuração do Firebase Web App (cliente)
 
 O app não traz mais nenhuma chave de Firebase embutida no código-fonte. Configure estas
