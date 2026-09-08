@@ -55,20 +55,28 @@ venda; a mão de obra da OS entra por um editor que só inclui o item ao
 confirmar; e o rodapé da OS separou "Salvar alterações" de "Receber e
 entregar" — quem clicava no botão primário encerrava a OS sem cobrar nada.
 
-### O que continua em aberto
+### Placar
 
-Duas conferências de densidade reprovam, e as duas têm a mesma causa: o
-`app/workspace.css` da versão 3 ("All forms keep the same readable scale",
-linhas 203-207) sobe todo campo de formulário para 41-42px e empilha o rótulo
-em cima do campo na OS, passando por cima das regras compactas que o
-`app/globals.css` continua tendo (linhas 658-676 e 2842-2854). É uma troca
-deliberada — o próprio MELHORIAS-V3.md diz "campos maiores" — e o efeito é
-medido:
+42 dos 45 passos passam. Os três que reprovam são a mesma coisa, medida em
+três telas: **a versão 3 trocou densidade por legibilidade**, e agora as telas
+rolam. O `app/workspace.css` ("All forms keep the same readable scale", linhas
+203-207, e a regra de celular na linha 224) sobe todo campo de formulário para
+41-43px e empilha o rótulo em cima do campo na OS, passando por cima das
+regras compactas que o `app/globals.css` continua tendo (linhas 658-676 e
+2842-2854). É uma troca deliberada — o próprio MELHORIAS-V3.md diz "campos
+maiores" — e o preço dela é este:
 
-- nova OS: 951px de conteúdo numa área de 749px, então "Mecânicos
-  responsáveis" e o bloco de peças e serviços ficam abaixo da dobra;
-- cadastro de peça: 870px numa área de 764px.
+- **celular do mecânico**: a OS termina em 890px numa tela de 844px, então ele
+  precisa rolar para ver o que tem de fazer;
+- **nova OS no balcão**: 948px de conteúdo numa área de 749px, então
+  "Mecânicos responsáveis" e o bloco de peças e serviços ficam abaixo da dobra;
+- **cadastro de peça**: 870px numa área de 764px.
 
-Restaurar só a régua de rótulos da OS (`app/globals.css:671`) devolve cerca de
-200px sem mexer no tamanho dos campos. A decisão é da oficina: ler mais fácil
-ou não rolar.
+Restaurar só a régua de rótulos da OS (`app/globals.css:671`, desligada por
+`app/workspace.css:207`) devolve cerca de 200px sem encolher campo nenhum, e
+sozinha resolve a nova OS. O celular e o cadastro de peça só cabem encolhendo
+o campo, que é justamente o que a versão 3 aumentou de propósito.
+
+A decisão é da oficina: ler mais fácil ou não rolar. Enquanto ela não for
+tomada, os três passos ficam reprovando de propósito — é o jeito de a conta
+não sumir.
