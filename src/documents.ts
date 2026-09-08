@@ -54,21 +54,50 @@ export function whatsappUrl(phone: string, message: string): string {
 
 export type PrintFormat = "Cupom 80mm" | "A4" | string;
 
+/**
+ * O corte entre as vias.
+ *
+ * A guilhotina da impressora térmica corta no fim de cada PÁGINA, então cada
+ * via precisa terminar numa quebra de página — inclusive a última, senão a via
+ * do cliente sai grudada no papel e alguém rasga na mão. `break-after` é o
+ * nome novo da propriedade e `page-break-after` o antigo: os dois vão juntos
+ * porque impressora se configura uma vez e fica anos assim, e não dá para
+ * saber em que navegador o balcão vai estar.
+ *
+ * O `.feed` é o espaço em branco no fim de cada via. A lâmina fica alguns
+ * milímetros ACIMA da cabeça de impressão, então sem essa sobra o corte passa
+ * por cima da última linha — que é justamente a assinatura do cliente.
+ */
+const CUT = `.via { break-after: page; page-break-after: always; }
+       .via .feed { height: 14mm; }`;
+
 /** O cupom térmico é estreito e sem margem; o A4 é uma folha comum. */
 function documentStyle(format: PrintFormat): string {
   const thermal = !String(format).toLowerCase().includes("a4");
   const paperWidth = String(format).includes("58") ? 58 : 80;
+  // O papel de 58mm cabe menos texto por linha: o nome do cliente e a placa
+  // continuam grandes, o resto encolhe um ponto para não quebrar em duas
+  // linhas a cada item.
+  const base = paperWidth === 58 ? 13 : 14;
   return thermal
     ? `@page { size: ${paperWidth}mm auto; margin: 4mm; }
-       body { width: ${paperWidth - 8}mm; margin: 0; font-family: "Courier New", monospace; font-size: 11px; color: #000; }
-       h1 { font-size: 13px; margin: 0 0 2px; }
-       .via { page-break-after: always; }
-       .via:last-child { page-break-after: auto; }`
+       body { width: ${paperWidth - 8}mm; margin: 0; font-family: "Courier New", monospace; font-size: ${base}px; line-height: 1.35; color: #000; }
+       h1 { font-size: ${base + 5}px; margin: 0 0 2px; }
+       .label { font-size: ${base - 2}px; }
+       .fact b, .plate { font-size: ${base + 4}px; }
+       .total { font-size: ${base + 4}px; }
+       .copy { font-size: ${base + 1}px; }
+       .note { font-size: ${base - 2}px; }
+       ${CUT}`
     : `@page { size: A4; margin: 14mm; }
-       body { margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #000; }
-       h1 { font-size: 18px; margin: 0 0 4px; }
-       .via { page-break-after: always; }
-       .via:last-child { page-break-after: auto; }`;
+       body { margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.4; color: #000; }
+       h1 { font-size: 22px; margin: 0 0 4px; }
+       .label { font-size: 11px; }
+       .fact b, .plate { font-size: 19px; }
+       .total { font-size: 19px; }
+       .copy { font-size: 15px; }
+       .note { font-size: 12px; }
+       ${CUT}`;
 }
 
 function documentShell(title: string, format: PrintFormat, body: string): string {
@@ -79,15 +108,24 @@ function documentShell(title: string, format: PrintFormat, body: string): string
     .print-logo { display: block; width: auto; height: auto; max-height: 32mm; object-fit: contain; margin: 0 auto 3mm; }
     .row { display: flex; justify-content: space-between; gap: 8px; }
     .rule { border-top: 1px dashed #000; margin: 6px 0; }
-    .label { text-transform: uppercase; font-size: 9px; letter-spacing: .04em; }
+    /* Os tamanhos de letra ficam TODOS em documentStyle, que vem antes daqui.
+       Repetir font-size nesta parte anularia o do formato, porque as duas
+       regras têm o mesmo peso e a de baixo ganha. */
+    .label { text-transform: uppercase; letter-spacing: .04em; }
     table { width: 100%; border-collapse: collapse; }
-    td { padding: 1px 0; vertical-align: top; }
-    td.qty { width: 28px; }
+    td { padding: 2px 0; vertical-align: top; }
+    td.qty { width: 34px; }
     td.val { text-align: right; white-space: nowrap; }
-    .total { font-weight: bold; font-size: 13px; }
+    .total { font-weight: bold; }
     .sign { margin-top: 22px; border-top: 1px solid #000; padding-top: 3px; text-align: center; }
-    .note { margin-top: 8px; font-size: 9px; line-height: 1.35; }
+    .note { margin-top: 8px; line-height: 1.35; }
     .copy { text-align: center; font-weight: bold; margin-bottom: 4px; }
+    /* O que o balcão procura no papel de longe: nome do cliente, moto e placa.
+       Ficavam do tamanho do resto e sumiam no meio da lista de itens. */
+    .facts { margin: 5px 0; }
+    .fact { margin-bottom: 5px; }
+    .fact b { display: block; font-weight: bold; line-height: 1.2; }
+    .plate { display: inline-block; margin-top: 2px; padding: 1px 7px; border: 2px solid #000; border-radius: 3px; font-weight: bold; letter-spacing: .1em; }
   </style></head><body>${body}</body></html>`;
 }
 
@@ -135,11 +173,13 @@ export function buildOrderDocument({ order, settings, mechanics }: OrderPrintInp
     <div class="row"><strong>${escapeHtml(order.id)}</strong><span>${escapeHtml(order.time)}</span></div>
     <div class="row"><span class="label">Situação</span><span>${escapeHtml(order.status)}</span></div>
     <div class="rule"></div>
-    <div><span class="label">Cliente</span><br>${escapeHtml(order.customer)}</div>
-    <div><span class="label">Motocicleta</span><br>${escapeHtml(order.bike)}${order.plate ? ` · ${escapeHtml(order.plate)}` : ""}</div>
-    ${order.mileage ? `<div><span class="label">Quilometragem</span><br>${escapeHtml(order.mileage)}</div>` : ""}
-    ${mechanics ? `<div><span class="label">Mecânico</span><br>${escapeHtml(mechanics)}</div>` : ""}
-    ${order.delivery ? `<div><span class="label">Previsão</span><br>${escapeHtml(order.delivery)}</div>` : ""}
+    <div class="facts">
+      <div class="fact"><span class="label">Cliente</span><b>${escapeHtml(order.customer)}</b></div>
+      <div class="fact"><span class="label">Motocicleta</span><b>${escapeHtml(order.bike)}</b>${order.plate ? `<span class="plate">${escapeHtml(order.plate)}</span>` : ""}</div>
+      ${order.mileage ? `<div class="fact"><span class="label">Quilometragem</span><b>${escapeHtml(order.mileage)}</b></div>` : ""}
+      ${mechanics ? `<div class="fact"><span class="label">Mecânico</span><b>${escapeHtml(mechanics)}</b></div>` : ""}
+      ${order.delivery ? `<div class="fact"><span class="label">Previsão de entrega</span><b>${escapeHtml(order.delivery)}</b></div>` : ""}
+    </div>
     ${order.problem ? `<div class="rule"></div><div><span class="label">Problema relatado</span><br>${escapeHtml(order.problem)}</div>` : ""}
     <div class="rule"></div>
     <table>${itemRows(items)}</table>
@@ -148,6 +188,7 @@ export function buildOrderDocument({ order, settings, mechanics }: OrderPrintInp
     ${warranty ? `<div class="note">Garantia de ${warranty} dias sobre os serviços executados.</div>` : ""}
     ${notes ? `<div class="note">${escapeHtml(notes)}</div>` : ""}
     <div class="sign">Assinatura do cliente</div>
+    <div class="feed"></div>
   </div>`;
 
   const copies = orderCopyLabels(settings?.printThreeCopies !== false).map(via).join("");
@@ -161,8 +202,10 @@ export function buildSaleDocument(sale: SaleRecord, settings: Partial<SettingsCo
     <div class="rule"></div>
     <div class="row"><strong>${escapeHtml(sale.id)}</strong><span>${escapeHtml(sale.date)}</span></div>
     <div class="row"><span class="label">Origem</span><span>${escapeHtml(sale.origin)}</span></div>
-    ${sale.customer ? `<div class="row"><span class="label">Cliente</span><span>${escapeHtml(sale.customer)}</span></div>` : ""}
-    ${sale.mechanicName ? `<div class="row"><span class="label">Mecânico</span><span>${escapeHtml(sale.mechanicName)}</span></div>` : ""}
+    ${sale.customer || sale.mechanicName ? `<div class="facts">
+      ${sale.customer ? `<div class="fact"><span class="label">Cliente</span><b>${escapeHtml(sale.customer)}</b></div>` : ""}
+      ${sale.mechanicName ? `<div class="fact"><span class="label">Mecânico</span><b>${escapeHtml(sale.mechanicName)}</b></div>` : ""}
+    </div>` : ""}
     <div class="rule"></div>
     <table>${itemRows(sale.items)}</table>
     <div class="rule"></div>
@@ -180,6 +223,7 @@ export function buildSaleDocument(sale: SaleRecord, settings: Partial<SettingsCo
     })()}
     ${sale.machineName ? `<div class="row"><span class="label">Maquininha</span><span>${escapeHtml(sale.machineName)}</span></div>` : ""}
     <div class="note">Documento sem valor fiscal.</div>
+    <div class="feed"></div>
   </div>`;
   return documentShell(`Cupom ${sale.id}`, settings?.printFormat ?? "Cupom 80mm", body);
 }
