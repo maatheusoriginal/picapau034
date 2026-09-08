@@ -41,6 +41,10 @@ const p = await b.newPage({ viewport: { width: 1360, height: 950 } });
 const erros = [];
 p.on("pageerror", (e) => erros.push("PAGEERROR: " + String(e).split("\n")[0]));
 p.on("console", (m) => { if (m.type() === "error") erros.push("CONSOLE: " + m.text().split("\n")[0].slice(0, 220)); });
+// A versão 3 avisa antes de sair com formulário mexido (beforeunload). Sem
+// aceitar esse aviso, o reload do roteiro era CANCELADO em silêncio e a
+// máscara do diálogo continuava lá, reprovando os passos seguintes.
+p.on("dialog", (aviso) => { void aviso.accept().catch(() => {}); });
 
 let n = 0, falhas = 0, ordem = 0;
 const foto = async (s) => { n++; await p.screenshot({ path: `${OUT}/e2e-${String(n).padStart(2,"0")}-${s}.png`, fullPage: true }); };
@@ -64,13 +68,97 @@ const banco = async (colecao) => {
 // Cadastro entra em maiúsculo: comparar nome com maiúscula/minúscula fixa
 // quebraria o roteiro sem nada estar errado no sistema.
 const mesmoNome = (valor, esperado) => (valor || "").toLocaleUpperCase("pt-BR") === esperado.toLocaleUpperCase("pt-BR");
+/**
+ * Fecha o que estiver aberto, custe o que custar.
+ *
+ * A versão 3 pergunta antes de descartar um formulário mexido: o Escape abre
+ * uma SEGUNDA camada por cima da primeira, com "Continuar trabalhando" e
+ * "Descartar e fechar". Clicar no botão errado mantém tudo aberto — e a
+ * máscara do diálogo engole o clique de todos os passos seguintes, o que fazia
+ * um defeito virar trinta falhas iguais.
+ */
+const fecharQualquerDialogo = async () => {
+  // Duas máscaras cobrem a tela: `.dialog-layer` (os diálogos do app/page.tsx,
+  // incluindo o aviso de descarte, que vem POR CIMA do formulário) e
+  // `.dialog-backdrop` (os cinco formulários de cadastro, que são componentes
+  // próprios). Qualquer uma engole o clique seguinte.
+  //
+  // A versão 3 pergunta antes de descartar um formulário mexido, então fechar
+  // é uma sequência: Escape levanta o aviso, o aviso pede o botão certo —
+  // "Continuar trabalhando" mantém tudo aberto e é a armadilha aqui.
+  const abertos = () => p.locator(".dialog-layer, .dialog-backdrop");
+  await p.waitForTimeout(400);
+  for (let tentativa = 0; tentativa < 6; tentativa += 1) {
+    if (!(await abertos().count())) return;
+    const descartar = p.locator(".confirmation-layer button", { hasText: /Descartar e fechar|Sair mesmo assim/ }).first();
+    if (await descartar.count()) await descartar.click({ timeout: 3000 }).catch(() => {});
+    else await p.keyboard.press("Escape").catch(() => {});
+    await p.waitForTimeout(700);
+  }
+  // Último recurso: recarregar. Os dados vivem no Firestore, então nada se
+  // perde, e é melhor recomeçar limpo do que reprovar o passo por uma máscara.
+  if (await abertos().count()) {
+    await p.reload().catch(() => {});
+    await p.waitForTimeout(4500);
+  }
+};
+
+/** Abre a primeira OS da lista, na visão que estiver ativa. */
+const abrirPrimeiraOS = async () => {
+  const noCartao = p.locator(".work-order-card button", { hasText: /Abrir OS/ }).first();
+  if (await noCartao.count()) { await noCartao.click(); return; }
+  await p.locator("tbody tr button", { hasText: /^Abrir$/ }).first().click();
+};
+
+/** Abre a OS de uma placa, no cartão ou na linha da lista. */
+const abrirOSdaPlaca = async (placa) => {
+  const noCartao = p.locator(".work-order-card", { hasText: placa }).locator("button", { hasText: /Abrir OS/ }).first();
+  if (await noCartao.count()) await noCartao.click();
+  else await p.locator("tr", { hasText: placa }).locator("button", { hasText: /^Abrir$/ }).first().click();
+  await p.waitForTimeout(2500);
+};
+
+/**
+ * Abre a cobrança de uma OS que chegou na entrega.
+ *
+ * A versão 3 separou as duas coisas no rodapé da OS: o `.primary-button` é
+ * "Salvar alterações", que só grava o andamento e fecha a tela, e quem abre o
+ * recebimento é "Receber e entregar". Clicar no primário — que era o caminho
+ * da versão anterior — encerrava a OS sem cobrar nada e sem gerar a fatura.
+ */
+const abrirRecebimento = async () => {
+  const receber = p.locator(".dialog-footer button", { hasText: /Receber e entregar/ }).first();
+  await receber.waitFor({ state: "visible", timeout: 15000 });
+  await receber.click();
+  await p.waitForTimeout(2500);
+};
+
+// Teto por passo. Sem ele, um passo que trava (um clique que nunca resolve, um
+// diálogo que não fecha) segura o roteiro inteiro e o resultado nunca sai — o
+// que é pior que uma falha, porque não diz onde está o problema.
+const TETO_DO_PASSO = 150000;
+const comTeto = (promessa) => Promise.race([
+  promessa,
+  new Promise((_, rejeitar) => setTimeout(() => rejeitar(new Error(`o passo passou de ${TETO_DO_PASSO / 1000}s e foi interrompido`)), TETO_DO_PASSO)),
+]);
+
 const passo = async (nome, fn) => {
   const antes = erros.length;
   ordem += 1;
-  try { await fn(); const nov = [...new Set(erros.slice(antes))];
+  // Começa a partir de uma tela limpa. Um passo que termina com o diálogo
+  // aberto — porque salvou e a tela ficou lá, ou porque o roteiro não fechou —
+  // fazia o próximo falhar no primeiro clique, com a máscara engolindo tudo.
+  // Cada passo passa a valer por si.
+  await fecharQualquerDialogo();
+  try { await comTeto(fn()); const nov = [...new Set(erros.slice(antes))];
     console.log(`OK    ${ordem}. ${nome}${nov.length ? "\n      ⚠ " + nov.join("\n      ⚠ ") : ""}`); }
-  catch (e) { falhas++; console.log(`FALHA ${ordem}. ${nome}\n      ${String(e).replace(/^Error: /, "").split("\n").slice(0, 8).join("\n      ").slice(0, 700)}`);
-    await foto("FALHA-" + nome.replace(/\W+/g,"-").slice(0,40)); }
+  catch (e) { falhas++; console.log(`FALHA ${ordem}. ${nome}\n      ${String(e).replace(/^Error: /, "").split("\n").slice(0, 16).join("\n      ").slice(0, 1400)}`);
+    await foto("FALHA-" + nome.replace(/\W+/g,"-").slice(0,40));
+    // Um passo que morre no meio deixa o diálogo aberto, e a máscara dele
+    // engole o clique de TODOS os passos seguintes: um defeito virava trinta
+    // falhas iguais, e o relatório deixava de dizer onde está o problema.
+    await fecharQualquerDialogo();
+  }
 };
 /**
  * Preenche a etapa 1 da OS: cliente e depois a moto.
@@ -110,7 +198,29 @@ const ATALHO_DIRETO = {
   "Clientes": "Clientes",
 };
 
+/**
+ * Inclui uma mão de obra no editor de itens da OS.
+ *
+ * Na versão 3 o campo do serviço não fica na tela: aparece depois de escolher
+ * "Adicionar serviço", e o item só entra na OS ao confirmar em "Incluir
+ * serviço". Preencher e sair sem confirmar deixa a OS sem mão de obra.
+ */
+const incluirMaoDeObra = async (descricao, valor) => {
+  await p.locator(".order-add-actions button", { hasText: /Adicionar serviço/ }).first().click();
+  await p.waitForTimeout(700);
+  const campos = p.locator(".order-labor-fields");
+  await campos.locator("input").first().fill(descricao);
+  await campos.locator("input").last().fill(valor);
+  await p.waitForTimeout(300);
+  await campos.locator("button", { hasText: /Incluir serviço/ }).click();
+  await p.waitForTimeout(900);
+};
+
 const ir = async (destino) => {
+  // Trocar de tela com um formulário aberto faz a versão 3 perguntar se pode
+  // descartar, e a pergunta bloqueia o clique no menu. Quem chama `ir` quer
+  // chegar na tela; fechar o que está aberto faz parte disso.
+  await fecharQualquerDialogo();
   const curto = ATALHO_DIRETO[destino];
   if (curto) {
     // O rótulo curto é comparado inteiro: "Estoque" no topo não pode casar com
@@ -182,15 +292,26 @@ await passo("preço gravado formatado (custo 25 + margem 60% = R$ 40,00)", async
 });
 
 await passo("vender no PDV em dinheiro com desconto", async () => {
+  // A versão 3 mudou o balcão: a peça é procurada num campo de busca, e
+  // escolher a peça abre um passo de quantidade ANTES de ela entrar na venda.
   await ir("PDV Balcão");
-  await p.getByRole("button", { name: /Óleo 20W50 Mineral/i }).first().click({ timeout: 10000 });
+  await p.locator(".counter-search input").fill("Óleo 20W50 Mineral");
   await p.waitForTimeout(1200);
-  await p.locator(".summary-lines button", { hasText: /Adicionar/ }).click();
-  await p.waitForTimeout(500);
-  await p.locator(".summary-discount-input").fill("5");
-  await p.waitForTimeout(600);
-  await p.getByRole("button", { name: /Receber pagamento/i }).click();
-  await p.waitForTimeout(1500);
+  const achadas = p.locator(".counter-suggestions button");
+  if (!(await achadas.count())) throw new Error("a busca do balcão não achou o óleo cadastrado no passo 2");
+  await achadas.first().click();
+  await p.waitForTimeout(900);
+  // O passo da quantidade: sem confirmar aqui, nada entra no carrinho.
+  const quantidade = p.locator(".quantity-prompt");
+  if (!(await quantidade.count())) throw new Error("escolher a peça não abriu o passo da quantidade");
+  await quantidade.locator("button", { hasText: /Adicionar/ }).click();
+  await p.waitForTimeout(900);
+  if ((await p.locator(".counter-line").count()) !== 1) throw new Error("a peça não entrou na venda");
+
+  await p.locator(".counter-totals input").last().fill("5");
+  await p.waitForTimeout(700);
+  await p.locator(".payment-button").click();
+  await p.waitForTimeout(1800);
   await p.locator(".payment-methods button").filter({ hasText: "Dinheiro" }).first().click();
   await p.waitForTimeout(600);
   await p.locator(".dialog-footer .primary-button").click();
@@ -217,7 +338,7 @@ await passo("estoque baixou de 10 para 9", async () => {
 
 await passo("abrir uma OS completa com placa, problema e mão de obra", async () => {
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   // "Que tipo de atendimento é?": serviço rápido ou OS completa.
   if (await p.getByText(/tipo de atendimento/i).count()) {
@@ -231,12 +352,9 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
   await p.getByPlaceholder("Ex.: 38.420 km").fill("38.420 km");
   await p.locator(".dialog textarea").first().fill("Barulho na relação");
   await p.waitForTimeout(400);
-  await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Troca do kit relação");
-  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("150");
-  await p.waitForTimeout(300);
-  await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
-  await p.waitForTimeout(900);
-  // O total fica no rodapé, à vista o tempo todo enquanto se monta a OS.
+  // A versão 3 monta os itens num editor próprio: primeiro se escolhe se o que
+  // entra é peça ou serviço, e o serviço só é incluído ao confirmar.
+  await incluirMaoDeObra("TROCA DO KIT RELAÇÃO", "150");
   const rodape = await p.locator(".os-single-total").innerText().catch(() => "");
   if (!/150,00/.test(rodape)) throw new Error(`o rodapé não mostra o total: ${JSON.stringify(rodape)}`);
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4000);
@@ -260,12 +378,13 @@ await foto("os-aberta");
 
 await passo("levar a OS até a entrega e faturar em dinheiro", async () => {
   await ir("Ordens de serviço");
-  await p.locator("button", { hasText: /^Abrir$/ }).first().click();
+  // A versão 3 mostra a OS em cartões (padrão) ou em lista, e o botão muda de
+  // nome conforme a visão: "Abrir OS" no cartão, "Abrir" na lista.
+  await abrirPrimeiraOS();
   await p.waitForTimeout(2500);
   await p.locator(".order-status-control select").selectOption("Entrega");
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click();  // Salvar alterações -> checkout
-  await p.waitForTimeout(2000);
+  await abrirRecebimento();
   const titulo = await p.locator(".dialog h2").first().innerText();
   if (!/receber/i.test(titulo)) throw new Error(`não abriu o recebimento da OS: "${titulo}"`);
   await p.locator(".payment-methods button").filter({ hasText: "Dinheiro" }).first().click();
@@ -423,7 +542,7 @@ await passo("Configurações: avisar em português e gravar o que foi mudado", a
   // botão com só o contador ("0") aparecendo, sem nome nenhum. Virou menu
   // lateral, mas a exigência é a mesma.
   const rotulos = await p.locator(".settings-nav-item").allInnerTexts();
-  if (rotulos.length !== 8) problemas.push(`${rotulos.length} seções, esperado 8`);
+  if (rotulos.length !== 9) problemas.push(`${rotulos.length} seções, esperado 9 (a versão 3 acrescentou a logomarca)`);
   if (!rotulos.every((t) => /[A-Za-zÀ-ú]/.test(t))) problemas.push("seção sem nome visível: " + JSON.stringify(rotulos));
   const foraDaTela = await p.locator(".settings-nav-item").evaluateAll((els) =>
     els.filter((e) => { const b = e.getBoundingClientRect(); return b.right > window.innerWidth + 1 || b.x < -1; }).map((e) => e.innerText.replace(/\n/g, " ")));
@@ -628,7 +747,7 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
   const problemas = [];
   const antes = (await banco("clients")).length;
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -724,7 +843,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
 
   // 3. a OS começa escolhendo a parceira, e tudo cabe numa tela só.
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -755,10 +874,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
 
   await p.getByPlaceholder("Ex.: 38.420 km").fill("12.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão da frota");
-  await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão completa");
-  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("200");
-  await p.waitForTimeout(300);
-  await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
+  await incluirMaoDeObra("REVISÃO COMPLETA", "200");
   await p.waitForTimeout(900);
   await p.locator(".dialog-footer .primary-button").click();
   await p.waitForTimeout(4500);
@@ -771,12 +887,10 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
   if (clientesInventados.length) problemas.push("a OS de frota criou um cliente com o nome da parceira");
 
   // 4. o encerramento não pergunta forma de pagamento
-  await p.locator("tr", { hasText: "FLA-2C34" }).locator("button", { hasText: /^Abrir$/ }).first().click();
-  await p.waitForTimeout(2500);
+  await abrirOSdaPlaca("FLA-2C34");
   await p.locator(".order-status-control select").selectOption("Entrega");
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click();
-  await p.waitForTimeout(2200);
+  await abrirRecebimento();
   if (await p.locator(".payment-methods.checkout-methods").count()) problemas.push("perguntou forma de pagamento numa OS de parceira");
   if (!(await p.locator(".partner-billing-card").count())) problemas.push("não mostrou o que vai para a fatura");
   await p.locator(".dialog-footer .primary-button").click();
@@ -878,7 +992,7 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   // sozinho, tudo junto.
   const problemas = [];
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -962,7 +1076,7 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
   if (!oFilho) throw new Error("os dois homônimos não foram cadastrados");
 
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -986,10 +1100,7 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
 
   await p.getByPlaceholder("Ex.: 38.420 km").fill("21.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão dos 20 mil");
-  await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão");
-  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("90");
-  await p.waitForTimeout(300);
-  await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
+  await incluirMaoDeObra("REVISÃO", "90");
   await p.waitForTimeout(900);
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4500);
 
@@ -1009,7 +1120,7 @@ await passo("busca por placa acha o dono, e o histórico dele abre quando pedido
   // já foi feito nela? A resposta estava só no caderno.
   const problemas = [];
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -1110,7 +1221,7 @@ await passo("mecânico com login mas sem cadastro entra na OS pelo aviso", async
 
   // A prova que importa: agora ele aparece para escolher na nova OS.
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -1412,7 +1523,7 @@ await passo("Configurações: menu com o que cada seção resolve, e busca pelas
   await p.waitForTimeout(2500);
 
   const secoes = await p.locator(".settings-nav-item").allInnerTexts();
-  if (secoes.length !== 8) problemas.push(`o menu tem ${secoes.length} seção(ões), esperado 8`);
+  if (secoes.length !== 9) problemas.push(`o menu tem ${secoes.length} seção(ões), esperado 9`);
   // Cada item diz o que resolve, e não só o nome da aba.
   if (!secoes.every((texto) => texto.split("\n").length >= 2)) problemas.push("alguma seção está sem a explicação do que resolve");
   // Seção com item cadastrado mostra quantos: seção vazia é o que a oficina
@@ -1451,7 +1562,7 @@ await passo("Configurações: menu com o que cada seção resolve, e busca pelas
   // Limpar volta as oito, e a seção continua aberta.
   await p.locator(".settings-nav-search input").fill("");
   await p.waitForTimeout(900);
-  if ((await p.locator(".settings-nav-item").count()) !== 8) problemas.push("limpar a busca não devolveu as seções");
+  if ((await p.locator(".settings-nav-item").count()) !== 9) problemas.push("limpar a busca não devolveu as seções");
   await p.locator(".settings-nav-item", { hasText: "Impressão" }).click();
   await p.waitForTimeout(1200);
   if (!/impress/i.test(await p.locator(".settings-content h2").first().innerText().catch(() => ""))) {
@@ -1584,7 +1695,7 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   // oficina fica com serviço feito e ninguém para cobrar.
   const problemas = [];
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -1606,10 +1717,7 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   await listas.nth(2).selectOption("Fan"); await p.waitForTimeout(500);
   await p.getByPlaceholder("Ex.: 38.420 km").fill("50.000 km");
   await p.locator(".dialog textarea").first().fill("Chegou de guincho");
-  await p.getByPlaceholder("Ex.: Troca do kit relação").fill("Revisão");
-  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("120");
-  await p.waitForTimeout(300);
-  await p.locator("button", { hasText: /Adicionar mão de obra/ }).click();
+  await incluirMaoDeObra("REVISÃO", "120");
   await p.waitForTimeout(900);
   await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4000);
 
@@ -1618,12 +1726,12 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   // A moto precisa existir mesmo sem dono: é a placa que segura a ordem.
   if (!(await banco("motorcycles")).some((moto) => moto.plate === "GUI-4D44")) problemas.push("a moto não foi cadastrada sem o cliente");
 
-  await p.locator("tr", { hasText: "GUI-4D44" }).locator("button", { hasText: /^Abrir$/ }).first().click();
-  await p.waitForTimeout(2500);
+  // Na versão 3 a lista abre em cartões; a linha de tabela só existe na visão
+  // "Lista". Abrir pelo cartão da placa procurada funciona nas duas.
+  await abrirOSdaPlaca("GUI-4D44");
   await p.locator(".order-status-control select").selectOption("Entrega");
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click();
-  await p.waitForTimeout(2200);
+  await abrirRecebimento();
   if (!(await p.locator(".checkout-pending-customer").count())) problemas.push("o encerramento não pediu os dados que faltam");
   await p.locator(".payment-methods button").filter({ hasText: "Dinheiro" }).first().click();
   await p.waitForTimeout(600);
@@ -1801,11 +1909,10 @@ await passo("no celular, o mecânico vê a OS inteira sem rolar e acerta os bot�
     // No celular o menu vive atrás do botão de sanduíche.
     await cel.locator(".mobile-menu").first().click().catch(() => {});
     await cel.waitForTimeout(900);
-    const alvo = cel.locator(".nav-subitem", { hasText: "Ordens de serviço" }).first();
-    if (!(await alvo.isVisible().catch(() => false))) {
-      await cel.locator(".nav-group-trigger", { hasText: "Oficina" }).first().click().catch(() => {});
-      await cel.waitForTimeout(700);
-    }
+    // "Ordens de serviço" subiu para o topo do menu na versão 3, escrito
+    // "Oficina"; no grupo "Mais opções" ele já não está.
+    const alvo = cel.locator(".main-nav .nav-item").filter({ hasText: /^Oficina\d*$/ }).first();
+    await alvo.waitFor({ state: "visible", timeout: 15000 });
     await alvo.click();
     await cel.waitForTimeout(2600);
     await cel.screenshot({ path: `${OUT}/e2e-celular-mecanico.png` });
@@ -1899,7 +2006,7 @@ await passo("OS de parceira: acha a moto pela placa sem hífen, e a que já est�
   const semHifen = String(deCliente.plate).replace(/[^A-Za-z0-9]/g, "");
 
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -1958,7 +2065,7 @@ await passo("a nova OS cabe numa tela só, sem rolar atrás do problema e dos me
   // nos mecânicos, que são os campos que ele mais preenche.
   const problemas = [];
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -1996,10 +2103,16 @@ await passo("a nova OS cabe numa tela só, sem rolar atrás do problema e dos me
   // devolve como scrollHeight igual à altura visível.
   if (medida.conteudo > medida.corpo + 12) problemas.push(`a OS ainda rola: ${medida.conteudo}px de conteúdo numa área de ${medida.corpo}px`);
   if (medida.cabecalho > 60) problemas.push(`o cabeçalho da OS voltou a ${medida.cabecalho}px (era 150px em três linhas)`);
-  if (medida.campo > 34) problemas.push(`o campo da OS está com ${medida.campo}px, esperado no máximo 34`);
+  // A versão 3 aumentou os campos de propósito ("campos maiores", no
+  // MELHORIAS-V3). O teto sobe junto, mas continua existindo: o que não pode
+  // voltar é o formulário deixar de caber na tela, conferido logo acima.
+  if (medida.campo > 44) problemas.push(`o campo da OS está com ${medida.campo}px, esperado no máximo 44`);
   if (medida.peca && medida.peca > 42) problemas.push(`a linha de peça está com ${medida.peca}px, esperado no máximo 42`);
   if (medida.regua !== true) problemas.push("o rótulo da OS voltou a ficar em cima do campo, fora do formato dos cadastros");
-  for (const pedaco of ["Problema relatado", "Mecânicos responsáveis", "Adicionar peças", "Adicionar mão de obra"]) {
+  // A versão 3 renomeou os dois botões do editor de itens: "Adicionar peças"
+  // virou "Adicionar peça" e "Adicionar mão de obra" virou "Adicionar
+  // serviço". O que importa é que os dois cabem na tela única, não o nome.
+  for (const pedaco of ["Problema relatado", "Mecânicos responsáveis", "Adicionar peça", "Adicionar serviço"]) {
     if (!medida.textoTodo.includes(pedaco)) problemas.push(`"${pedaco}" sumiu da tela única`);
   }
   await p.locator(".dialog-footer .ghost-button", { hasText: /Cancelar/ }).first().click().catch(() => {});
@@ -2082,7 +2195,7 @@ await passo("excluir cadastro: some quem nunca foi usado, e desativa quem tem hi
   if (!/Inativo/i.test(naLista)) problemas.push("a lista não marca a peça como inativa");
 
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Abrir nova OS/i }).first().click();
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
   await p.waitForTimeout(1500);
   if (await p.getByText(/tipo de atendimento/i).count()) {
     await p.getByText(/Abrir OS completa/i).first().click();
@@ -2547,11 +2660,10 @@ await passo("quem toca o balcão cria categoria e marca da peça, e quem só con
     return { contexto, pag, vistos };
   };
   const irAoEstoque = async (pag) => {
-    const alvo = pag.locator(".nav-subitem", { hasText: "Produtos e estoque" }).first();
-    if (!(await alvo.isVisible().catch(() => false))) {
-      await pag.locator(".nav-group-trigger", { hasText: "Estoque" }).first().click();
-      await pag.waitForTimeout(700);
-    }
+    // "Produtos e estoque" subiu para o topo do menu na versão 3, e lá o botão
+    // está escrito só "Estoque".
+    const alvo = pag.locator(".main-nav .nav-item").filter({ hasText: /^Estoque\d*$/ }).first();
+    if (!(await alvo.count())) throw new Error("o menu não oferece o estoque para este perfil");
     await alvo.click();
     await pag.waitForTimeout(2400);
   };
