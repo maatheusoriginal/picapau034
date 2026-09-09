@@ -1071,7 +1071,17 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: .875rem; }
    na conta, e o cliente sai pagando a menos. */
 .row-items { color: #6b795e; font-size: .8125rem; }
 .row-items.empty { color: var(--muted, #8a8b8f); font-style: italic; }
-@media (max-width: 560px) { .mechanic-actions { grid-template-columns: 1fr; } }
+/* No celular os dois botões continuam LADO A LADO e sem a frase de apoio.
+   Empilhados eles custavam 107px da tela — e a tela do mecânico é justamente
+   a que não pode rolar: a primeira OS tem de caber inteira. Dois alvos de
+   metade da largura ainda são maiores que qualquer dedo. */
+@media (max-width: 560px) {
+  .mechanic-actions { gap: 9px; margin-bottom: 11px; }
+  .mechanic-actions .action-tile { flex-direction: column; align-items: flex-start; justify-content: center; min-height: 52px; padding: 9px 11px; gap: 2px; }
+  .mechanic-actions .action-tile strong { font-size: .875rem; }
+  .mechanic-actions .action-tile small { display: none; }
+  .mechanic-actions .action-tile > svg { display: none; }
+}
 
 /* "Pegar peça": busca em cima, resultado embaixo, e a confirmação dizendo o
    saldo antes e depois — é o número que o mecânico confere de cabeça. */
