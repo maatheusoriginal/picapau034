@@ -2797,6 +2797,45 @@ await passo("quem toca o balcão cria categoria e marca da peça, e quem só con
   if (problemas.length) throw new Error("criar categoria e marca pelo balcão:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("dois cliques no cartão abrem a OS, e o botão não abre duas vezes", async () => {
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+
+  // Visão de cartões: dois cliques no corpo do cartão, longe de qualquer botão.
+  const cartao = p.locator(".work-order-card").first();
+  if (!(await cartao.count())) throw new Error("nenhuma OS na lista para testar o duplo clique");
+  await cartao.locator("h2").first().dblclick();
+  await p.waitForTimeout(2000);
+  const abriu = await p.locator(".dialog-body.order-detail").count();
+  if (!abriu) throw new Error("dois cliques no cartão não abriram a OS");
+
+  // E o histórico da OS precisa estar ali dentro, com pelo menos a abertura.
+  const linhas = await p.locator(".order-timeline-list li").count();
+  if (!linhas) throw new Error("a OS abriu sem o bloco do histórico");
+
+  await fecharQualquerDialogo();
+  await p.waitForTimeout(1200);
+
+  // Visão de lista: o mesmo atalho na linha da tabela.
+  const paraLista = p.locator(".view-switch button", { hasText: /^Lista$/ }).first();
+  if (await paraLista.count()) {
+    await paraLista.click();
+    await p.waitForTimeout(1200);
+    const linha = p.locator("tbody tr").first();
+    if (await linha.count()) {
+      await linha.locator("td").first().dblclick();
+      await p.waitForTimeout(2000);
+      if (!(await p.locator(".dialog-body.order-detail").count())) {
+        throw new Error("dois cliques na linha da lista não abriram a OS");
+      }
+      await fecharQualquerDialogo();
+      await p.waitForTimeout(1000);
+    }
+    const paraCartoes = p.locator(".view-switch button", { hasText: /^Cartões$/ }).first();
+    if (await paraCartoes.count()) { await paraCartoes.click(); await p.waitForTimeout(900); }
+  }
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();
