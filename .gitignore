@@ -18,3 +18,9 @@ dist-emulador/
 *.log
 npm-debug.log*
 .DS_Store
+
+# Fotos e exportações que o roteiro ponta a ponta gera a cada rodada. São
+# resultado de teste, não fonte: mudam a cada execução e já escapou uma vez
+# um arquivo de rascunho para o repositório por causa de `git add -A`.
+scripts/emulador/*.png
+scripts/emulador/*.csv
