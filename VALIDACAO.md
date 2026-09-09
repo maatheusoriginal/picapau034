@@ -80,3 +80,56 @@ o campo, que é justamente o que a versão 3 aumentou de propósito.
 A decisão é da oficina: ler mais fácil ou não rolar. Enquanto ela não for
 tomada, os três passos ficam reprovando de propósito — é o jeito de a conta
 não sumir.
+
+## Atualização: o atendimento em três etapas (09/09/2026)
+
+A oficina recebeu de outra fonte uma reescrita da tela de novo atendimento e
+preferiu ela. Esta entrega traz essa reescrita para cima da versão que já
+estava publicada, sem perder o que veio antes: a permissão de receber e
+entregar, o "pegar peça" do mecânico, o lançamento de OS antiga, o número da OS
+do parceiro e os ajustes da tela do mecânico no celular continuam como estavam.
+
+Encaixou sem conflito porque os territórios não se cruzam: a reescrita não
+tocou em `app/globals.css`, e os dois últimos commits anteriores foram só nele.
+Conferido antes de copiar, não depois.
+
+### O que mudou para quem usa
+
+A abertura passou a ser dois cartões — ordem de serviço e serviço rápido —, com
+o lançamento de OS antiga como opção secundária. O preenchimento voltou a ser
+passo a passo, agora em três etapas (identificação, serviço, conferência), e a
+conferência mostra cliente, moto, placa e forma de pagamento antes de gravar.
+
+### O roteiro de ponta a ponta
+
+Foi reescrito para o fluxo novo, e é isso que dá confiança de que a operação do
+dia a dia continua fechando. Cinco diferenças travavam os passos, e nenhuma
+delas aparecia no typecheck nem nas conferências de função pura:
+
+1. O botão "Cadastrar cliente" saiu do aviso de "nada encontrado" e virou ação
+   fixa ao lado de "Atender sem cadastrar agora".
+2. A versão da moto deixou de ser lista e virou campo escrito: são dois
+   selects agora, e pedir o terceiro trava.
+3. Quilometragem, prazo e mecânicos foram para dentro de "Equipe e detalhes da
+   recepção", que abre recolhida.
+4. No serviço rápido, "Cliente e motocicleta" também vem recolhido.
+5. O total saiu de `.os-single-total` para `.intake-footer-total`.
+
+As duas gavetas recolhidas merecem nota: os campos EXISTEM no documento mesmo
+fechados, então o roteiro os encontrava e travava em "element is not visible" —
+erro que não diz que faltou abrir a gaveta. É o tipo de coisa que só aparece
+abrindo o navegador de verdade.
+
+### Duas conferências que mudaram de lugar, e não sumiram
+
+Os passos 20 e 38 mediam "tudo cabe numa tela só". Essa forma foi trocada por
+escolha da oficina, mas a razão dela continua valendo, então a exigência mudou
+de lugar em vez de ser apagada:
+
+- O passo 20 cobra que a PRIMEIRA etapa resolva quem responde pela OS. Se essa
+  escolha migrasse para o fim, o balcão preencheria moto e serviço para só
+  então descobrir quem paga.
+- O passo 38 mede as três etapas, uma a uma: se cada uma rolar, o balcão volta
+  a perder de vista o que preenche — o problema original repetido três vezes.
+  Também cobra que a conferência mostre o total e a placa, porque conferência
+  sem valor não responde "está tudo certo?".
