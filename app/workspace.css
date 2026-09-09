@@ -203,10 +203,17 @@ table td strong, table td span { font-size: .875rem; }
 .activity-record { border-top: 1px solid var(--line); }.activity-row { display: flex; align-items: center; gap: 16px; width: 100%; border: 0; background: white; padding: 18px 22px; text-align: left; }.activity-row:hover { background: #f9fbf5; }.activity-record-icon { width: 39px; height: 42px; display: grid; place-items: center; background: #eef3e5; border-radius: 8px; color: #6f8258; }.activity-person { flex: 1; min-width: 0; }.activity-person strong { display: block; font-size: .9375rem; margin: 3px 0; }.activity-person small,.activity-person > span { display: block; font-size: .8125rem; color: var(--muted); }.activity-total { font-size: 1rem; white-space: nowrap; }.activity-details { padding: 0 22px 18px; background: #fbfcf9; }.activity-details footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 15px; font-size: .8125rem; color: var(--muted); }.activity-details p { font-size: .875rem; }.sale-payment-lines { display: flex; flex-wrap: wrap; gap: 15px; font-size: .875rem; padding: 15px 0; }
 /* All forms keep the same readable scale. */
 .dialog-layer, .dialog-backdrop { z-index: 100; }
-.dialog-header h2, .dialog-head h2 { font-size: 1.35rem; }.dialog-header p { color: var(--muted); font-size: .875rem; }.dialog-body { font-size: .9375rem; }.dialog-footer { min-height: 76px; gap: 12px; }.dialog-footer .primary-button { min-height: 44px; }
+.dialog-header h2, .dialog-head h2 { font-size: 1.35rem; }.dialog-header p { color: var(--muted); font-size: .875rem; }.dialog-body { font-size: .9375rem; }.dialog-footer { min-height: 60px; gap: 12px; }.dialog-footer .primary-button { min-height: 44px; }
 .workshop-v3 .field input, .workshop-v3 .field select, .workshop-v3 .field textarea, .workshop-v3 .pdv-form input, .workshop-v3 .pdv-form select, .workshop-v3 .pdv-form textarea, .workshop-v3 .dialog-input { font-size: .9375rem; min-height: 41px; }
+/* Dentro do cadastro de peça o campo baixa para 34px. Continua alvo confortável
+   de mouse, e no celular a regra de 560px devolve os 43px para o dedo. */
+.workshop-v3 .pdv-form input, .workshop-v3 .pdv-form select, .workshop-v3 .pdv-form .dialog-input { min-height: 34px; }
 .workshop-v3 .field > span, .workshop-v3 .pdv-label, .workshop-v3 .field-label { font-size: .875rem; color: #58604f; }.workshop-v3 .field small, .workshop-v3 .field-help { font-size: .8125rem; color: #68725e; }
-.workshop-v3 .pdv-row, .workshop-v3 .pdv-form .field-group { min-height: 42px; }
+/* O cadastro de peça é o formulário mais cheio do sistema, e com 42px por linha
+   ele não cabia na tela: 870px de conteúdo numa área de 764px, obrigando a
+   rolar para chegar no botão de salvar. O que encolhe aqui é ESPAÇO, nunca
+   letra — o texto continua em .9375rem, do jeito que a oficina pediu. */
+.workshop-v3 .pdv-row, .workshop-v3 .pdv-form .field-group { min-height: 36px; }
 .workshop-v3 .dialog-os .field { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }.workshop-v3 .dialog-os .field > span { text-align: left; }.workshop-v3 .dialog-os .field textarea { min-height: 78px; }
 .settings-fields { border: 0; min-width: 0; padding: 0; margin: 0; }.settings-fields:disabled { opacity: .9; }.readonly-notice { padding: 13px 16px; border-radius: 8px; margin-bottom: 17px; background: #eef2e8; color: #627452; font-size: .875rem; }
 .registry-count { font-size: .875rem; color: var(--muted); }.registry-row { min-height: 79px; }.registry-row strong { font-size: .9375rem; }.registry-row small { font-size: .8125rem; color: var(--muted); }.registry-history-button { font-size: .875rem; }.stock-table td { height: 48px; }.stock-table td strong { font-size: .875rem; }
