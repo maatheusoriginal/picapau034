@@ -478,6 +478,13 @@ await passo("serviço rápido de R$ 80 recebido em dinheiro", async () => {
   // botão de fechar passa a mostrar o valor ("Confirmar · R$ 80,00").
   await p.getByPlaceholder("Ex.: TROCA DE ÓLEO").fill("REGULAGEM DE VÁLVULA");
   await p.locator('.dialog input[placeholder="0,00"]').first().fill("80");
+  // "Cliente e motocicleta" é opcional no serviço rápido e vem recolhido: o
+  // campo existe no documento, então o roteiro o achava e travava em
+  // "element is not visible".
+  if (!(await p.getByPlaceholder("Nome do cliente").isVisible().catch(() => false))) {
+    await p.locator(".dialog summary, .dialog button").filter({ hasText: /Cliente e motocicleta/i }).first().click().catch(() => {});
+    await p.waitForTimeout(900);
+  }
   await p.getByPlaceholder("Nome do cliente").fill("Cliente do balcão");
   await p.waitForTimeout(400);
   const pagamento = p.locator(".dialog select").filter({ has: p.locator('option:text-is("Dinheiro")') }).first();
@@ -910,33 +917,33 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
     if (daFrota.partnerName !== "Flash Entregas") problemas.push(`responsável gravado: "${daFrota.partnerName}"`);
   }
 
-  // 3. a OS começa escolhendo a parceira, e tudo cabe numa tela só.
+  // 3. a OS começa escolhendo a parceira, na primeira etapa.
   await ir("Ordens de serviço");
   await abrirNovaOS();
-  if (await p.locator(".stepper").count()) problemas.push("a OS voltou a ser por etapas");
-  if ((await p.locator(".os-single-columns").count()) !== 1) problemas.push("a OS não abriu na tela única");
-  // Quem, qual moto, a recepção e os itens: tudo à vista de uma vez.
-  const naTela = await p.locator(".os-single").innerText();
-  // A versão 3 renomeou os botões do editor de itens: "Adicionar peças" virou
-  // "Adicionar peça" e "Adicionar mão de obra" virou "Adicionar serviço".
-  for (const pedaco of ["Quem responde por esta OS", "Motocicleta", "Quilometragem", "Adicionar peça", "Adicionar serviço"]) {
-    if (!naTela.includes(pedaco)) problemas.push(`a tela única não traz "${pedaco}"`);
+  // A oficina escolheu o passo a passo com conferência no fim, então a
+  // exigência de "tudo numa tela só" morreu. O que continua valendo é que a
+  // primeira etapa resolva QUEM responde pela OS — sem isso, o balcão escolhe
+  // a parceira depois de já ter preenchido a moto e o serviço.
+  if ((await p.locator(`${CAMADA} .intake-steps`).count()) !== 1) problemas.push("o atendimento perdeu o passo a passo");
+  const naEtapa1 = await p.locator(`${CAMADA} .intake-step-panel`).innerText();
+  for (const pedaco of ["Cliente", "Empresa parceira", "Motocicleta"]) {
+    if (!naEtapa1.includes(pedaco)) problemas.push(`a identificação não traz "${pedaco}"`);
   }
-  if ((await p.locator(".os-party-switch button").count()) !== 2) problemas.push("não dá para escolher entre cliente e parceira");
+  if ((await p.locator(`${CAMADA} .os-party-switch button`).count()) !== 2) problemas.push("não dá para escolher entre cliente e parceira");
 
-  await p.locator(".os-party-switch button", { hasText: /parceira/i }).click();
+  await p.locator(`${CAMADA} .os-party-switch button`, { hasText: /parceira/i }).click();
   await p.waitForTimeout(1000);
-  const escolhida = await p.locator(".os-partner-pick select").first().locator("option:checked").innerText();
+  const escolhida = await p.locator(`${CAMADA} .os-partner-pick select`).first().locator("option:checked").innerText();
   if (!/Flash Entregas/.test(escolhida)) problemas.push(`a parceira não veio selecionada: ${JSON.stringify(escolhida)}`);
 
   // A frota dela aparece para escolher. O <select> mostrava a primeira parceira
   // com o estado ainda vazio, e o filtro procurava por id vazio: a lista da
   // parceira vinha sempre vazia.
-  const motosNaTela = await p.locator(".vehicle-choice-list > button").allInnerTexts();
+  const motosNaTela = await p.locator(`${CAMADA} .vehicle-choice-list > button`).allInnerTexts();
   if (!motosNaTela.some((texto) => /FLA-2C34/.test(texto))) problemas.push(`as motos da parceira não apareceram: ${JSON.stringify(motosNaTela)}`);
-  await p.locator(".vehicle-choice-list > button", { hasText: "FLA-2C34" }).click();
+  await p.locator(`${CAMADA} .vehicle-choice-list > button`, { hasText: "FLA-2C34" }).click();
   await p.waitForTimeout(800);
-  if ((await p.locator(".os-block.done").count()) !== 2) problemas.push("os dois blocos deviam ficar prontos");
+  if ((await p.locator(`${CAMADA} .os-block.done`).count()) !== 2) problemas.push("os dois blocos deviam ficar prontos");
 
   await irParaServico();
   await abrirDetalhesDaRecepcao();
@@ -1082,12 +1089,12 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   if (!/1 moto cadastrada/.test(achado)) problemas.push(`não contou as motos dele: ${JSON.stringify(achado)}`);
 
   // A moto dele aparece para escolher, e não um formulário em branco.
-  const motos = await p.locator(".vehicle-choice-list > button").allInnerTexts();
+  const motos = await p.locator(`${CAMADA} .vehicle-choice-list > button`).allInnerTexts();
   if (!motos.some((t) => /TES-1D23/.test(t))) problemas.push(`as motos do cliente não apareceram: ${JSON.stringify(motos)}`);
   if (!motos.some((t) => /Outra moto/.test(t))) problemas.push("falta a opção de cadastrar outra moto");
   await p.locator(".vehicle-choice-list > button", { hasText: "TES-1D23" }).first().click();
   await p.waitForTimeout(700);
-  if ((await p.locator(".os-block.done").count()) !== 2) problemas.push("os dois blocos deviam estar marcados como prontos");
+  if ((await p.locator(`${CAMADA} .os-block.done`).count()) !== 2) problemas.push("os dois blocos deviam estar marcados como prontos");
 
   // "Outra moto" abre o cadastro rápido com as listas do catálogo.
   await p.locator(".vehicle-choice-list > button", { hasText: "Outra moto" }).click();
@@ -2054,7 +2061,7 @@ await passo("OS de parceira: acha a moto pela placa sem hífen, e a que já est�
 
   await ir("Ordens de serviço");
   await abrirNovaOS();
-  await p.locator(".os-party-switch button", { hasText: /parceira/i }).click();
+  await p.locator(`${CAMADA} .os-party-switch button`, { hasText: /parceira/i }).click();
   await p.waitForTimeout(1200);
 
   const busca = p.locator(".os-partner-bike-search input").first();
@@ -2099,62 +2106,56 @@ await passo("OS de parceira: acha a moto pela placa sem hífen, e a que já est�
   if (problemas.length) throw new Error("moto na OS de parceira:\n      - " + problemas.join("\n      - "));
 });
 
-await passo("a nova OS cabe numa tela só, sem rolar atrás do problema e dos mecânicos", async () => {
-  // O formato anterior gastava mais da metade da tela com moldura: cabeçalho de
-  // três linhas, um ícone decorativo de 42px por seção, círculo numerado por
-  // bloco, campo de 40px e linha de peça de 51px. Dava 960px de conteúdo numa
-  // área de 688px — quem abre a OS rolava para chegar no problema relatado e
-  // nos mecânicos, que são os campos que ele mais preenche.
+await passo("cada etapa do atendimento cabe na tela, sem rolar atrás do que se preenche", async () => {
+  // A oficina trocou a tela única pelo passo a passo com conferência. A
+  // exigência mudou de lugar, mas não sumiu: se CADA etapa rolar, o balcão
+  // volta a perder de vista o que está preenchendo — que era o problema
+  // original, só que agora repetido três vezes.
   const problemas = [];
   await ir("Ordens de serviço");
   await abrirNovaOS();
-  const medida = await p.evaluate(() => {
-    const corpo = document.querySelector(".dialog-body.os-single");
-    const cabecalho = document.querySelector(".dialog-os .dialog-header");
-    const campo = document.querySelector(".dialog-os .field input");
-    const peca = document.querySelector(".dialog-os .os-piece-list > button");
-    if (!corpo) return null;
-    return {
-      corpo: Math.round(corpo.getBoundingClientRect().height),
-      conteudo: corpo.scrollHeight,
-      cabecalho: cabecalho ? Math.round(cabecalho.getBoundingClientRect().height) : 0,
-      campo: campo ? Math.round(campo.getBoundingClientRect().height) : 0,
-      peca: peca ? Math.round(peca.getBoundingClientRect().height) : 0,
-      // A régua: rótulo à esquerda do campo, alinhado à direita, como no
-      // cadastro de peça e no sistema que a oficina usa todo dia.
-      regua: (() => {
-        const linha = document.querySelector(".dialog-os .form-grid > .field");
-        const rotulo = linha?.querySelector("span");
-        const dele = linha?.querySelector("input, select, textarea");
-        if (!rotulo || !dele) return null;
-        return Math.abs(rotulo.getBoundingClientRect().top - dele.getBoundingClientRect().top) < 14
-          && rotulo.getBoundingClientRect().right <= dele.getBoundingClientRect().left + 1
-          && getComputedStyle(rotulo).textAlign === "right";
-      })(),
-      // Os campos que ficavam abaixo da dobra.
-      textoTodo: corpo.innerText,
-    };
-  });
-  if (!medida) throw new Error("a OS não abriu na tela única");
-  // Numa tela de 950px o conteúdo tem de caber; sobra é o que o navegador
-  // devolve como scrollHeight igual à altura visível.
-  if (medida.conteudo > medida.corpo + 12) problemas.push(`a OS ainda rola: ${medida.conteudo}px de conteúdo numa área de ${medida.corpo}px`);
-  if (medida.cabecalho > 60) problemas.push(`o cabeçalho da OS voltou a ${medida.cabecalho}px (era 150px em três linhas)`);
-  // A versão 3 aumentou os campos de propósito ("campos maiores", no
-  // MELHORIAS-V3). O teto sobe junto, mas continua existindo: o que não pode
-  // voltar é o formulário deixar de caber na tela, conferido logo acima.
-  if (medida.campo > 44) problemas.push(`o campo da OS está com ${medida.campo}px, esperado no máximo 44`);
-  if (medida.peca && medida.peca > 42) problemas.push(`a linha de peça está com ${medida.peca}px, esperado no máximo 42`);
-  if (medida.regua !== true) problemas.push("o rótulo da OS voltou a ficar em cima do campo, fora do formato dos cadastros");
-  // A versão 3 renomeou os dois botões do editor de itens: "Adicionar peças"
-  // virou "Adicionar peça" e "Adicionar mão de obra" virou "Adicionar
-  // serviço". O que importa é que os dois cabem na tela única, não o nome.
-  for (const pedaco of ["Problema relatado", "Mecânicos responsáveis", "Adicionar peça", "Adicionar serviço"]) {
-    if (!medida.textoTodo.includes(pedaco)) problemas.push(`"${pedaco}" sumiu da tela única`);
+
+  const medir = async (nome) => {
+    const m = await p.evaluate((sel) => {
+      const painel = document.querySelector(`${sel} .intake-step-panel`);
+      if (!painel) return null;
+      return { visivel: Math.round(painel.getBoundingClientRect().height), conteudo: painel.scrollHeight };
+    }, CAMADA);
+    if (!m) { problemas.push(`a etapa "${nome}" não abriu`); return; }
+    // 12px de tolerância: arredondamento de sub-pixel não é rolagem.
+    if (m.conteudo > m.visivel + 12) problemas.push(`a etapa "${nome}" rola: ${m.conteudo}px numa área de ${m.visivel}px`);
+  };
+
+  await medir("identificação");
+  // As três etapas existem e dizem em qual delas se está.
+  const etapas = await p.locator(`${CAMADA} .intake-steps`).innerText().catch(() => "");
+  for (const nome of ["Cliente e moto", "Serviço", "Conferir"]) {
+    if (!etapas.includes(nome)) problemas.push(`o passo a passo não mostra "${nome}"`);
   }
-  await p.locator(".dialog-footer .ghost-button", { hasText: /Cancelar/ }).first().click().catch(() => {});
-  await p.waitForTimeout(1200);
-  if (problemas.length) throw new Error("densidade da nova OS:\n      - " + problemas.join("\n      - "));
+
+  await preencherEtapa1({ nome: "Cliente da Densidade", telefone: "34988887777", placa: "DEN-5S55", marca: "Honda", modelo: "CG 160" });
+  await irParaServico();
+  await medir("serviço");
+  // O que o mecânico mais preenche tem de estar à vista, sem abrir gaveta.
+  const noServico = await p.locator(`${CAMADA} .intake-step-panel`).innerText();
+  for (const pedaco of ["Problema relatado", "Adicionar peça", "Adicionar serviço"]) {
+    if (!noServico.includes(pedaco)) problemas.push(`a etapa do serviço não traz "${pedaco}"`);
+  }
+
+  await p.locator(`${CAMADA} textarea`).first().fill("Barulho na relação");
+  await incluirMaoDeObra("REVISÃO", "100");
+  await avancar(/Conferir atendimento/);
+  await medir("conferência");
+  // A conferência existe para responder "está tudo certo?" — sem o valor, ela
+  // não responde nada.
+  const naConferencia = await p.locator(`${CAMADA} .intake-step-panel`).innerText();
+  if (!/100,00/.test(naConferencia)) problemas.push("a conferência não mostra o total antes de gravar");
+  for (const pedaco of ["DEN-5S55", "Honda"]) {
+    if (!naConferencia.includes(pedaco)) problemas.push(`a conferência não mostra "${pedaco}"`);
+  }
+
+  await fecharQualquerDialogo();
+  if (problemas.length) throw new Error("densidade do atendimento:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("excluir cadastro: some quem nunca foi usado, e desativa quem tem histórico", async () => {
