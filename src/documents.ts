@@ -64,11 +64,20 @@ export type PrintFormat = "Cupom 80mm" | "A4" | string;
  * porque impressora se configura uma vez e fica anos assim, e não dá para
  * saber em que navegador o balcão vai estar.
  *
+ * A quebra é pedida DUAS VEZES, e não por descuido: uma depois de cada via e
+ * outra antes de toda via que tem uma antes dela. São a mesma quebra vista dos
+ * dois lados, e quem imprime não perde nada se as duas valerem — mas quando o
+ * navegador engole uma (acontece ao mandar imprimir de dentro de uma moldura,
+ * que é como o sistema faz), a outra ainda separa as vias. Sem isso, três vias
+ * curtas cabem juntas numa folha e saem grudadas: foi exatamente a queixa da
+ * oficina, e só aparece quando a OS é curta o bastante para caber.
+ *
  * O `.feed` é o espaço em branco no fim de cada via. A lâmina fica alguns
  * milímetros ACIMA da cabeça de impressão, então sem essa sobra o corte passa
  * por cima da última linha — que é justamente a assinatura do cliente.
  */
 const CUT = `.via { break-after: page; page-break-after: always; }
+       .via + .via { break-before: page; page-break-before: always; }
        .via .feed { height: 14mm; }`;
 
 /** O cupom térmico é estreito e sem margem; o A4 é uma folha comum. */
@@ -79,8 +88,14 @@ function documentStyle(format: PrintFormat): string {
   // continuam grandes, o resto encolhe um ponto para não quebrar em duas
   // linhas a cada item.
   const base = paperWidth === 58 ? 13 : 14;
+  // `size: 80mm auto` PARECE certo e o Chrome descarta a declaração inteira:
+  // a regra do CSS aceita ou dois comprimentos, ou a palavra `auto` sozinha,
+  // nunca os dois misturados. Ou seja, o cupom já vinha saindo no tamanho de
+  // papel que a impressora manda — e o papel da impressora térmica é o certo,
+  // porque só o driver sabe o comprimento da bobina. Aqui fica só a margem, e
+  // a largura continua vindo do `body` logo abaixo, que é onde ela funciona.
   return thermal
-    ? `@page { size: ${paperWidth}mm auto; margin: 4mm; }
+    ? `@page { margin: 4mm; }
        body { width: ${paperWidth - 8}mm; margin: 0; font-family: "Courier New", monospace; font-size: ${base}px; line-height: 1.35; color: #000; }
        h1 { font-size: ${base + 5}px; margin: 0 0 2px; }
        .label { font-size: ${base - 2}px; }
