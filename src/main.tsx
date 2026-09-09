@@ -3,6 +3,7 @@ import Home from "../app/page";
 import { ErrorBoundary } from "../app/ErrorBoundary";
 import "../app/globals.css";
 import "../app/workspace.css";
+import "./components/attendance.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Elemento #root não encontrado.");

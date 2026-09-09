@@ -1,0 +1,335 @@
+/* Reception workspace. One scroll area, readable controls and a stable action bar. */
+.workshop-v3 .attendance-dialog {
+  --intake-border: #dfe4e2;
+  --intake-muted: #5c6863;
+  width: min(1080px, 100%);
+  height: min(860px, calc(100dvh - 48px));
+  max-height: calc(100dvh - 48px);
+  border: 1px solid #d7dedb;
+  border-radius: 18px;
+  background: #f5f7f6;
+  color: #202c27;
+}
+.workshop-v3 .attendance-dialog *, .workshop-v3 .attendance-dialog *::before, .workshop-v3 .attendance-dialog *::after { box-sizing: border-box; }
+.workshop-v3 .attendance-dialog [hidden] { display: none !important; }
+.workshop-v3 .attendance-dialog .dialog-header {
+  flex: 0 0 auto; padding: 20px 26px 18px; align-items: flex-start; gap: 18px;
+  border-bottom: 1px solid var(--intake-border); background: white;
+}
+.workshop-v3 .attendance-dialog .dialog-header > div { display: block; min-width: 0; }
+.workshop-v3 .attendance-dialog .dialog-header > div > span { display: block; color: var(--red-dark); font-size: .75rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.workshop-v3 .attendance-dialog .dialog-header h2 { margin: 4px 0 5px; font-size: 1.4rem; line-height: 1.3; letter-spacing: -.025em; color: #202c27; }
+.workshop-v3 .attendance-dialog .dialog-header p { display: block; margin: 0; color: var(--intake-muted); font-size: .875rem; line-height: 1.45; }
+.workshop-v3 .attendance-dialog .dialog-header > button { width: 44px; height: 44px; flex: 0 0 44px; border: 1px solid var(--intake-border); background: #f5f7f6; border-radius: 10px; font-size: 1.65rem; color: #52615a; }
+.workshop-v3 .attendance-dialog .dialog-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 24px; }
+.workshop-v3 .attendance-dialog .dialog-footer { flex: 0 0 auto; margin: 0; padding: 16px 24px; border-top: 1px solid var(--intake-border); background: #fff; gap: 16px; }
+.workshop-v3 .attendance-dialog .primary-button, .workshop-v3 .attendance-dialog .outline-button, .workshop-v3 .attendance-dialog .ghost-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; height: auto; padding: 10px 16px; font-size: .875rem; line-height: 1.4; border-radius: 9px; }
+.workshop-v3 .attendance-dialog .primary-button { background: #bf3028; color: white; border-color: #bf3028; }
+.workshop-v3 .attendance-dialog .primary-button:hover:not(:disabled) { background: #a62720; }
+.workshop-v3 .attendance-dialog .ghost-button { color: #58665f; }
+.workshop-v3 .attendance-dialog .dialog-error-strip { flex: 0 0 auto; max-height: 130px; overflow: auto; margin: 0; padding: 12px 24px; border-radius: 0; border: 0; border-top: 1px solid #f0cfca; background: #fff1ee; color: #9b2923; font-size: .875rem; line-height: 1.5; }
+.workshop-v3 .attendance-dialog :is(h2,h3,div)[tabindex="-1"]:focus { outline: none; }
+.workshop-v3 .attendance-dialog :is(input,select,textarea)[aria-invalid="true"] { border-color: #b83129; box-shadow: 0 0 0 3px #b8312914; }
+/* Choosing the right kind of arrival. */
+.workshop-v3 .attendance-osChoice { width: min(840px, 100%); height: auto; }
+.attendance-choices { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.attendance-option { display: flex; flex-direction: column; gap: 22px; padding: 24px; min-width: 0; text-align: left; border: 1px solid #dce2de; border-radius: 13px; background: white; transition: border-color .15s, box-shadow .15s; }
+.attendance-option:hover { border-color: #bd817c; box-shadow: 0 4px 16px #23322908; }
+.attendance-option-primary { border-color: #d79590; box-shadow: inset 0 3px 0 #bf3028; }
+.attendance-option .attendance-icon { width: 48px; height: 48px; border-radius: 12px; }
+.attendance-option-copy { display: flex; flex: 1; flex-direction: column; gap: 10px; }
+.attendance-option-copy small { font-size: .75rem; font-weight: 750; letter-spacing: .08em; color: #69766f; }
+.attendance-option-copy strong { font-size: 1.25rem; line-height: 1.3; color: #223029; }
+.attendance-option-copy > span { font-size: 1rem; line-height: 1.55; color: #59675f; }
+.attendance-option-copy em { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 17px; color: #ab2e27; font-size: .875rem; font-weight: 750; font-style: normal; }
+.attendance-history { grid-column: 1/-1; display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid #dce2de; border-radius: 11px; background: #edf1ef; text-align: left; }
+.attendance-history > span:nth-child(2) { flex: 1; min-width: 0; }
+.attendance-history strong, .attendance-history small { display: block; }
+.attendance-history strong { font-size: 1rem; color: #35483d; }
+.attendance-history small { font-size: .875rem; line-height: 1.5; margin-top: 3px; color: #5c6b62; }
+.choice-footer > span { flex: 1; font-size: .875rem; color: #647068; }
+/* Three short stages with a persistent summary on wide screens. */
+.intake-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); flex: 0 0 auto; padding: 0 26px; background: white; border-bottom: 1px solid #dfe4e2; }
+.intake-steps > button { display: flex; gap: 12px; align-items: center; min-height: 78px; padding: 12px 8px; border: 0; border-bottom: 3px solid transparent; background: transparent; text-align: left; color: #68766e; }
+.intake-step-number { display: grid; place-items: center; width: 31px; height: 31px; flex: 0 0 31px; border: 1px solid #cbd4cf; border-radius: 50%; background: #fff; font-size: .875rem; font-weight: 750; }
+.intake-steps strong, .intake-steps small { display: block; }
+.intake-steps strong { font-size: .9375rem; line-height: 1.4; }
+.intake-steps small { font-size: .75rem; margin-top: 3px; color: #68766e; }
+.intake-steps > button.active { color: #a72e26; border-bottom-color: #bf3028; }
+.intake-steps > button.active .intake-step-number { background: #bf3028; border-color: #bf3028; color: white; }
+.intake-steps > button.complete .intake-step-number { background: #e7f2ed; border-color: #c0d7cc; color: #287351; }
+.intake-layout { display: grid; grid-template-columns: minmax(0,1fr) 268px; align-items: start; gap: 24px; }
+.intake-main { min-width: 0; margin: 0; padding: 0; border: 0; }
+.intake-step-panel { min-width: 0; display: grid; gap: 20px; }
+.intake-section-heading { margin-bottom: 0; }
+.intake-section-heading > span { color: #66796e; font-size: .75rem; font-weight: 750; letter-spacing: .08em; }
+.intake-section-heading h3 { margin: 4px 0 5px; font-size: 1.2rem; line-height: 1.4; color: #25362c; letter-spacing: -.02em; }
+.intake-section-heading p { font-size: .875rem; line-height: 1.5; color: #5c6c61; margin: 0; }
+.workshop-v3 .attendance-dialog .form-section { padding: 20px; background: white; border: 1px solid var(--intake-border); border-radius: 12px; }
+.workshop-v3 .attendance-dialog .os-step-blocks { gap: 16px; }
+.workshop-v3 .attendance-dialog .os-block { padding: 20px; border: 1px solid var(--intake-border); border-radius: 12px; background: white; }
+.workshop-v3 .attendance-dialog .os-block.done { border-color: #bdd5c9; }
+.workshop-v3 .attendance-dialog .os-block.waiting { background: #eef2ef; }
+.workshop-v3 .attendance-dialog .os-block-head { gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.workshop-v3 .attendance-dialog .os-block-head > div { min-width: 160px; }
+.workshop-v3 .attendance-dialog .os-block-head strong { font-size: 1rem; color: #25382d; }
+.workshop-v3 .attendance-dialog .os-block-head small { margin-top: 4px; font-size: .875rem; color: #637067; }
+.workshop-v3 .attendance-dialog .os-block-number { display: none; }
+.workshop-v3 .attendance-dialog .os-block-badge { font-size: .75rem; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.workshop-v3 .attendance-dialog .os-party-switch { grid-template-columns: 1fr 1fr; gap: 8px; padding: 4px; margin-bottom: 18px; background: #eff3f0; border: 1px solid #e0e6e2; border-radius: 10px; }
+.workshop-v3 .attendance-dialog .os-party-switch > button { min-height: 44px; height: auto; padding: 9px; border: 1px solid transparent; background: transparent; font-size: .875rem; line-height: 1.4; }
+.workshop-v3 .attendance-dialog .os-party-switch > button.selected { background: white; border-color: #b7c9bd; color: #294333; box-shadow: 0 1px 3px #203a2310; }
+.workshop-v3 .attendance-dialog .field, .workshop-v3 .attendance-dialog .os-inline-form .field { display: flex; flex-direction: column; align-items: stretch; gap: 7px; min-width: 0; }
+.workshop-v3 .attendance-dialog .field > span { text-align: left; font-size: .875rem; line-height: 1.45; color: #3d5145; }
+.workshop-v3 .attendance-dialog .field:has(textarea) > span { padding-top: 0; }
+.workshop-v3 .attendance-dialog .field input, .workshop-v3 .attendance-dialog .field select, .workshop-v3 .attendance-dialog .field textarea { width: 100%; min-width: 0; min-height: 46px; padding: 10px 12px; border: 1px solid #cbd5ce; border-radius: 8px; background: white; font-size: 1rem; line-height: 1.4; color: #26362d; }
+.workshop-v3 .attendance-dialog .field textarea { min-height: 104px; resize: vertical; }
+.workshop-v3 .attendance-dialog .field input:disabled, .workshop-v3 .attendance-dialog .field select:disabled { background: #f1f4f2; }
+.workshop-v3 .attendance-dialog .field-help, .workshop-v3 .attendance-dialog .os-inline-hint { font-size: .8125rem; line-height: 1.5; color: #617469; }
+.workshop-v3 .attendance-dialog .form-grid, .workshop-v3 .attendance-dialog .os-inline-form, .workshop-v3 .attendance-dialog .os-inline-form.vehicle, .workshop-v3 .attendance-dialog .os-partner-pick { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+.workshop-v3 .attendance-dialog .field-full, .intake-duplicate { grid-column: 1/-1; }
+.workshop-v3 .attendance-dialog .mini-search { display: flex; width: 100%; min-width: 0; max-width: none; min-height: 48px; height: auto; padding: 0 12px; border: 1px solid #cbd5ce; border-radius: 9px; background: white; }
+.workshop-v3 .attendance-dialog .mini-search input { min-height: 46px; padding: 10px 0; border: 0; background: transparent; box-shadow: none; font-size: 1rem; }
+.workshop-v3 .attendance-dialog .mini-search:focus-within { border-color: #bf3028; box-shadow: 0 0 0 3px #bf302810; }
+.workshop-v3 .attendance-dialog .os-search-hint { border: 0; border-radius: 8px; background: #f1f5f2; color: #526b5b; font-size: .875rem; padding: 12px; }
+.workshop-v3 .attendance-dialog .os-search-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.workshop-v3 .attendance-dialog .os-search-actions .ghost-button { padding: 8px 0; text-align: left; justify-content: flex-start; text-decoration: underline; text-underline-offset: 4px; }
+.workshop-v3 .attendance-dialog .os-search-results { display: grid; gap: 8px; max-height: none; overflow: visible; }
+.workshop-v3 .attendance-dialog .os-search-results > button { min-height: 72px; padding: 12px; border-color: #d8e2dc; gap: 12px; }
+.workshop-v3 .attendance-dialog .os-search-results strong, .workshop-v3 .attendance-dialog .os-picked strong { font-size: 1rem; overflow-wrap: anywhere; }
+.workshop-v3 .attendance-dialog .os-search-results small, .workshop-v3 .attendance-dialog .os-picked small { font-size: .8125rem; white-space: normal; overflow-wrap: anywhere; color: #526a5b; }
+.workshop-v3 .attendance-dialog .os-search-results .os-search-hit { display: none; }
+.workshop-v3 .attendance-dialog .os-picked { flex-wrap: wrap; padding: 14px; gap: 10px; }
+.workshop-v3 .attendance-dialog .os-picked > div { flex: 1 1 170px; }
+.workshop-v3 .attendance-dialog .os-picked-change { min-height: 42px; height: auto; padding: 9px 12px; color: #3f654c; font-size: .875rem; }
+.workshop-v3 .attendance-dialog .os-pending-card { flex-wrap: wrap; }
+.workshop-v3 .attendance-dialog .os-pending-card > div { flex-basis: 190px; }
+.workshop-v3 .attendance-dialog .os-search-empty { display: grid; gap: 12px; padding: 14px; font-size: .875rem; overflow-wrap: anywhere; }
+.workshop-v3 .attendance-dialog .vehicle-choice-list { display: grid; gap: 10px; margin-top: 10px; }
+.workshop-v3 .attendance-dialog .vehicle-choice-list > button { min-height: 68px; padding: 12px; gap: 12px; align-items: center; border-radius: 9px; }
+.workshop-v3 .attendance-dialog .vehicle-choice-list > button > div { min-width: 0; }
+.workshop-v3 .attendance-dialog .vehicle-choice-list strong, .workshop-v3 .attendance-dialog .vehicle-choice-list small { white-space: normal; overflow-wrap: anywhere; }
+.workshop-v3 .attendance-dialog .vehicle-choice-list strong { font-size: .9375rem; }
+.workshop-v3 .attendance-dialog .vehicle-choice-list small { font-size: .8125rem; color: #596e60; }
+.workshop-v3 .attendance-dialog .info-strip { padding: 12px; font-size: .875rem; line-height: 1.55; }
+.intake-duplicate { display: flex; gap: 12px; padding: 14px; border: 1px solid #dfc58d; background: #fff8e9; border-radius: 9px; color: #77581b; font-size: .875rem; }
+.intake-duplicate > svg { flex-shrink: 0; }
+.intake-duplicate p { margin: 5px 0 10px; }
+.workshop-v3 .attendance-dialog .form-intro { margin-bottom: 18px; }
+.workshop-v3 .attendance-dialog .form-intro h3 { font-size: 1rem; }
+.workshop-v3 .attendance-dialog .form-intro p { font-size: .875rem; color: #637469; }
+.workshop-v3 .attendance-dialog .mechanic-assignment { margin-top: 20px; }
+.workshop-v3 .attendance-dialog .mechanic-assignment > div > strong { font-size: .9375rem; }
+.workshop-v3 .attendance-dialog .mechanic-assignment > div > small { font-size: .8125rem; color: #607266; }
+.workshop-v3 .attendance-dialog .mechanic-picker { max-height: none; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.workshop-v3 .attendance-dialog .mechanic-picker > button { min-height: 58px; padding: 10px; min-width: 0; }
+.workshop-v3 .attendance-dialog .mechanic-picker strong { white-space: normal; overflow-wrap: anywhere; font-size: .875rem; }
+/* Summary and final review use the same totals. */
+.intake-summary { position: sticky; top: 0; overflow: hidden; background: white; border: 1px solid #d7e1da; border-radius: 12px; }
+.intake-summary-title { display: flex; align-items: center; gap: 9px; padding: 16px 18px; background: #eaf0ec; border-bottom: 1px solid #d7e1da; color: #395b44; }
+.intake-summary-title h3 { margin: 0; font-size: .9375rem; }
+.intake-summary-bike { display: grid; gap: 8px; padding: 20px 18px 16px; }
+.intake-summary-bike .plate { justify-self: start; font-size: .875rem; padding: 5px 8px; background: #f0f3f1; border: 1px solid #dce3dd; color: #324d3c; }
+.intake-summary-bike strong { font-size: 1rem; line-height: 1.5; overflow-wrap: anywhere; }
+.intake-summary-bike > span:last-child { font-size: .875rem; color: #617068; overflow-wrap: anywhere; }
+.intake-facts { display: grid; gap: 14px; margin: 0; padding: 0 18px 20px; }
+.intake-facts dt, .intake-review-facts dt { margin: 0 0 4px; font-size: .8125rem; color: #63766b; }
+.intake-facts dd, .intake-review-facts dd { margin: 0; font-size: .875rem; color: #283e30; overflow-wrap: anywhere; }
+.intake-totals { display: grid; gap: 11px; margin: 0; padding: 18px; border-top: 1px solid #dfe7e1; font-size: .875rem; }
+.intake-totals > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.intake-totals dt { color: #617369; }
+.intake-totals dd { margin: 0; color: #253d2f; font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; }
+.intake-totals .intake-discount :is(dt,dd) { color: #27724c; }
+.intake-totals .intake-grand-total { padding-top: 14px; border-top: 1px dashed #cfdad2; }
+.intake-grand-total dt { font-weight: 650; font-size: .875rem; }
+.intake-grand-total dd { font-size: 1.35rem; letter-spacing: -.02em; }
+.intake-summary-note { margin: 0; padding: 0 18px 18px; font-size: .8125rem; line-height: 1.6; color: #64766a; }
+.intake-review { display: grid; gap: 18px; }
+.intake-review-card { overflow: hidden; border: 1px solid #d9e2dc; border-radius: 12px; background: white; }
+.intake-review-card > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #e3e9e5; }
+.intake-review-card h4 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; font-size: .9375rem; line-height: 1.4; color: #314b3b; }
+.intake-review-card > header > button { display: flex; align-items: center; gap: 6px; padding: 8px; min-height: 42px; border: 0; background: transparent; color: #9e342b; font-size: .875rem; }
+.intake-review-facts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; padding: 18px; margin: 0; }
+.intake-problem { margin: 0; padding: 18px 18px 0; font-size: 1rem; white-space: pre-wrap; overflow-wrap: anywhere; color: #334d3c; line-height: 1.6; }
+.intake-notice, .intake-confirm-note { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px; margin: 0; font-size: .875rem; line-height: 1.55; color: #536c5d; background: #eaf1ec; border-radius: 9px; }
+.intake-notice { border-radius: 0; background: #fff7e5; color: #84621e; }
+.intake-notice > svg, .intake-confirm-note > svg { flex: 0 0 auto; margin-top: 2px; }
+.intake-review-items { list-style: none; padding: 0; margin: 0; }
+.intake-review-items li { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 18px; border-bottom: 1px solid #eef1ee; }
+.intake-review-items li > span { min-width: 0; }
+.intake-review-items strong { display: block; font-weight: 600; font-size: .9375rem; overflow-wrap: anywhere; }
+.intake-review-items small { display: block; font-size: .8125rem; color: #5e7365; margin-top: 5px; }
+.intake-review-items b { font-size: .9375rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.intake-review-card > .intake-summary-note { padding-top: 18px; }
+.workshop-v3 .attendance-dialog .intake-footer { display: flex; align-items: center; justify-content: space-between; }
+.intake-footer-total { min-width: 0; }
+.intake-footer-total span { display: block; color: #65756b; font-size: .8125rem; }
+.intake-footer-total strong { display: block; color: #294632; font-size: 1.45rem; font-variant-numeric: tabular-nums; line-height: 1.4; }
+.intake-footer-actions { display: flex; align-items: center; gap: 12px; }
+/* Items: labeled, editable unit prices and a clear total on each row. */
+.order-items-editor > header p { font-size: .875rem; }
+.order-add-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 0 18px 16px; }
+.order-add-actions > button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; height: auto; padding: 10px; font-size: .875rem; border: 1px solid #d6dfd8; border-radius: 8px; color: #3a5845; background: #f8faf8; }
+.order-add-actions > button.selected { border-color: #acbfb1; background: #e9f1eb; color: #2a573a; }
+.order-item-picker { padding: 0 18px 16px; }
+.order-item-picker .field { display: grid; gap: 7px; }
+.order-item-picker .field > span { font-size: .875rem; }
+.order-item-results { margin-top: 10px; }
+.order-item-result { width: 100%; min-height: 68px; padding: 12px 10px; gap: 12px; }
+.order-item-result > span { min-width: 0; }
+.order-item-result strong { white-space: normal; overflow-wrap: anywhere; font-size: .9375rem; }
+.order-item-result small { font-size: .8125rem; white-space: normal; }
+.order-item-result > b { white-space: nowrap; }
+.order-item-picker p { font-size: .875rem; line-height: 1.5; }
+.order-picker-empty { display: grid; justify-items: center; gap: 9px; padding: 22px 14px; color: #607567; text-align: center; }
+.order-picker-empty p { margin: 0; }
+.order-labor-fields { display: grid; grid-template-columns: minmax(0,1fr) 140px; gap: 14px; padding: 0 18px 18px; }
+.order-labor-actions { display: flex; justify-content: flex-end; gap: 8px; grid-column: 1/-1; }
+.order-pending-note { font-size: .875rem; margin: 0; padding: 12px 18px; color: #7a601f; background: #fff7e4; }
+.order-pending-note button { min-height: 44px; padding: 8px; border: 0; background: transparent; text-decoration: underline; color: #875f13; font: inherit; }
+.order-item-feedback { margin: 0; color: #2a7149; font-size: .875rem; line-height: 1.5; }
+.order-item-feedback:not(:empty) { padding: 0 18px 16px; }
+.editable-order-line { display: grid; grid-template-columns: minmax(0,1fr) 64px 100px auto 40px; gap: 10px; padding: 16px 18px; }
+.editable-item-name { min-width: 0; }
+.editable-item-name > .item-type { display: inline-block; margin-bottom: 6px; padding: 2px 6px; font-size: .75rem; line-height: 1.5; }
+.editable-item-name strong { font-size: .9375rem; line-height: 1.45; overflow-wrap: anywhere; }
+.editable-item-quantity, .editable-item-price { display: grid; gap: 6px; min-width: 0; font-size: .75rem; color: #607568; }
+.editable-item-quantity input, .editable-item-price input { width: 100%; min-width: 0; min-height: 44px; padding: 9px 7px; border: 1px solid #cfdacf; border-radius: 7px; background: white; color: #2c4734; font-size: 1rem; }
+.editable-line-total small { display: block; font-size: .75rem; color: #617568; margin-bottom: 8px; }
+.editable-line-total b { display: block; font-size: .9375rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.editable-order-line .remove-item { width: 40px; min-height: 44px; border-radius: 8px; }
+.editable-order-line .remove-item:hover { background: #fff0ec; color: #b53128; }
+.order-items-empty { min-height: 126px; gap: 14px; padding: 20px; border-top: 1px solid #e1e8e2; background: #fafcfb; }
+.order-items-empty > svg { flex-shrink: 0; }
+.order-items-empty strong, .order-items-empty small { display: block; }
+.order-items-empty strong { font-size: .9375rem; font-weight: 650; color: #546f5b; }
+.order-items-empty small { margin-top: 5px; font-size: .8125rem; line-height: 1.5; }
+.order-items-editor > .field-error { padding: 0 18px 12px; }
+/* Express work and historical entry share the same comfortable form rhythm. */
+.workshop-v3 .attendance-quick, .workshop-v3 .attendance-osPast { width: min(780px,100%); }
+.intake-quick .intake-main { display: grid; gap: 20px; }
+.intake-quick-section { padding: 20px; border: 1px solid #dce5de; border-radius: 12px; background: white; }
+.intake-quick-section .intake-section-heading { margin-bottom: 18px; }
+.workshop-v3 .attendance-dialog .quick-service-options { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin-bottom: 18px; }
+.workshop-v3 .attendance-dialog .quick-service-options:empty { display: none; }
+.workshop-v3 .attendance-dialog .quick-service-options button { min-height: 102px; gap: 8px; padding: 14px 10px; font-size: .875rem; }
+.workshop-v3 .attendance-dialog .quick-service-options small { color: #617166; font-size: .75rem; }
+.intake-optional { border: 1px solid #dce5de; border-radius: 10px; background: white; }
+.intake-optional summary { min-height: 50px; padding: 15px 20px; cursor: pointer; color: #3b5443; font-size: .9375rem; }
+.intake-optional summary > span { font-size: .75rem; color: #63796a; margin-left: 8px; }
+.intake-optional > .form-grid { padding: 6px 20px 20px; }
+.workshop-v3 .attendance-dialog .quick-service-total { margin: 0; background: #263e30; min-height: 86px; padding: 18px 20px; gap: 16px; }
+.workshop-v3 .attendance-dialog .quick-service-total small { font-size: .8125rem; color: #c1d1c6; }
+.workshop-v3 .attendance-dialog .quick-service-total strong { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+.workshop-v3 .attendance-osPast .form-grid { padding: 22px 0; }
+/* Completion confirms what was persisted and offers the next real action. */
+.workshop-v3 .attendance-success { width: min(560px,100%); height: auto; background: white; }
+.attendance-success .dialog-body { text-align: center; }
+.attendance-success-icon { display: grid; place-items: center; margin: 8px auto 20px; width: 70px; height: 70px; border: 1px solid #bfd9c7; border-radius: 50%; background: #e9f5ed; color: #27714a; }
+.attendance-success-id { margin: 0 0 6px; color: #427452; font-size: .875rem; font-weight: 750; letter-spacing: .06em; }
+.attendance-success h2 { margin: 0 0 10px; font-size: 1.6rem; line-height: 1.3; color: #263f2d; }
+.attendance-success h2 + p { margin: 0 auto; max-width: 350px; color: #627266; font-size: 1rem; line-height: 1.55; }
+.attendance-success-detail { display: grid; gap: 7px; margin-top: 24px; padding: 20px; border-radius: 11px; background: #f2f6f3; color: #365440; overflow-wrap: anywhere; }
+.attendance-success-detail strong { font-size: 1rem; }
+.attendance-success-detail span { font-size: .875rem; color: #617567; }
+.attendance-success-detail b { margin-top: 5px; font-size: 1.45rem; }
+.workshop-v3 .attendance-success .dialog-footer > button { flex: 1; }
+@media(max-width: 900px) {
+  .intake-layout { grid-template-columns: minmax(0,1fr); }
+  .intake-summary { display: none; }
+  .workshop-v3 .attendance-dialog { width: min(740px,100%); }
+  .workshop-v3 .attendance-osChoice { width: min(800px,100%); }
+  .workshop-v3 .attendance-success { width: min(560px,100%); }
+}
+@media(max-width: 600px) {
+  .attendance-layer { padding: 0; align-items: stretch; }
+  .workshop-v3 .attendance-dialog { width: 100%; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .workshop-v3 .attendance-dialog .dialog-header { padding: calc(14px + env(safe-area-inset-top)) 16px 14px; gap: 10px; }
+  .workshop-v3 .attendance-dialog .dialog-header h2 { font-size: 1.2rem; margin-top: 5px; }
+  .workshop-v3 .attendance-dialog .dialog-header p { font-size: .8125rem; }
+  .workshop-v3 .attendance-dialog .dialog-body { padding: 18px 14px 24px; scrollbar-gutter: auto; }
+  .workshop-v3 .attendance-dialog .dialog-footer { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); gap: 10px; }
+  .workshop-v3 .attendance-dialog .primary-button, .workshop-v3 .attendance-dialog .outline-button, .workshop-v3 .attendance-dialog .ghost-button { min-height: 48px; font-size: .875rem; padding: 11px 13px; }
+  .workshop-v3 .attendance-dialog .dialog-error-strip { padding: 10px 16px; max-height: 108px; }
+  .attendance-choices { grid-template-columns: minmax(0,1fr); gap: 14px; }
+  .attendance-option { flex-direction: row; align-items: flex-start; padding: 19px 17px; gap: 16px; }
+  .attendance-option-copy strong { font-size: 1.125rem; }
+  .attendance-option-copy > span { font-size: .9375rem; }
+  .attendance-option-copy em { padding-top: 5px; line-height: 1.5; }
+  .attendance-option .attendance-icon { width: 42px; height: 42px; }
+  .attendance-history { padding: 16px; gap: 12px; }
+  .attendance-history > .attendance-icon { display: none; }
+  .attendance-history small { font-size: .875rem; }
+  .choice-footer > span { font-size: .8125rem; }
+  .intake-steps { padding: 0 12px; gap: 4px; }
+  .intake-steps > button { gap: 7px; padding: 10px 1px; min-height: 65px; }
+  .intake-steps strong { font-size: .875rem; }
+  .intake-steps small { display: none; }
+  .intake-step-number { width: 26px; height: 26px; flex-basis: 26px; font-size: .8125rem; }
+  .intake-section-heading h3 { font-size: 1.125rem; }
+  .workshop-v3 .attendance-dialog .os-block, .workshop-v3 .attendance-dialog .form-section, .intake-quick-section { padding: 16px; border-radius: 11px; }
+  .workshop-v3 .attendance-dialog .form-grid, .workshop-v3 .attendance-dialog .os-inline-form, .workshop-v3 .attendance-dialog .os-inline-form.vehicle, .workshop-v3 .attendance-dialog .os-partner-pick { grid-template-columns: minmax(0,1fr); gap: 16px; }
+  .workshop-v3 .attendance-dialog .field input, .workshop-v3 .attendance-dialog .field select { min-height: 48px; font-size: 1rem; }
+  .workshop-v3 .attendance-dialog .os-party-switch > button { min-height: 48px; gap: 6px; }
+  .workshop-v3 .attendance-dialog .os-party-switch > button > svg { display: none; }
+  .workshop-v3 .attendance-dialog .os-search-actions { gap: 6px; }
+  .workshop-v3 .attendance-dialog .os-search-actions > button:first-child { width: 100%; }
+  .workshop-v3 .attendance-dialog .os-search-results .registry-avatar { display: none; }
+  .workshop-v3 .attendance-dialog .os-picked-change { min-height: 44px; }
+  .workshop-v3 .attendance-dialog .os-inline-actions { align-items: stretch; gap: 10px; }
+  .workshop-v3 .attendance-dialog .mechanic-picker { grid-template-columns: minmax(0,1fr); }
+  .intake-review-facts { gap: 16px; }
+  .intake-review-card h4 { font-size: .875rem; }
+  .intake-review-card > header { padding: 12px 14px; }
+  .intake-review-card h4 > svg { display: none; }
+  .intake-review-card > header > button { flex-shrink: 0; }
+  .intake-review-items li { padding: 14px; gap: 12px; }
+  .intake-review-items strong { font-size: .875rem; }
+  .workshop-v3 .attendance-dialog .intake-footer { display: grid; grid-template-columns: minmax(0,1fr); gap: 10px; }
+  .intake-footer-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .intake-footer-total strong { font-size: 1.25rem; }
+  .intake-footer-total span { font-size: .75rem; }
+  .workshop-v3 .attendance-dialog .intake-footer-actions { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 10px; }
+  .intake-footer-actions .primary-button { width: 100%; }
+  .editable-order-line { grid-template-columns: minmax(0,.8fr) minmax(0,1.2fr) auto 44px; gap: 12px 8px; padding: 16px 14px; }
+  .editable-item-name { grid-column: 1/-1; }
+  .editable-item-name strong { display: inline; margin-left: 8px; }
+  .editable-item-name > .item-type { margin: 0; }
+  .editable-item-quantity { margin: 0; }
+  .editable-item-price input, .editable-item-quantity input { min-height: 48px; width: 100%; }
+  .editable-line-total b { font-size: .875rem; }
+  .editable-order-line .remove-item { width: 44px; min-height: 48px; }
+  .order-add-actions { gap: 8px; padding: 0 14px 16px; }
+  .order-add-actions > button { font-size: .875rem; min-height: 48px; padding: 10px 7px; }
+  .order-add-actions > button > svg { width: 16px; }
+  .order-item-picker { padding: 0 14px 16px; }
+  .order-labor-fields { grid-template-columns: minmax(0,1fr); padding: 0 14px 16px; }
+  .order-labor-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .order-item-result { padding: 12px 4px; }
+  .order-item-result strong { font-size: .875rem; }
+  .order-item-result > b { font-size: .875rem; }
+  .workshop-v3 .attendance-dialog .quick-service-options { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .workshop-v3 .attendance-dialog .quick-service-total { flex-wrap: wrap; padding: 18px; }
+  .workshop-v3 .attendance-dialog .quick-service-total strong { margin-left: auto; font-size: 1.4rem; }
+  .workshop-v3 .attendance-quick .dialog-footer, .workshop-v3 .attendance-osPast .dialog-footer { display: grid; grid-template-columns: auto minmax(0,1fr); }
+  .workshop-v3 .attendance-quick .dialog-footer > div, .workshop-v3 .attendance-osPast .dialog-footer > div { display: flex; min-width: 0; }
+  .workshop-v3 .attendance-quick .dialog-footer .primary-button, .workshop-v3 .attendance-osPast .dialog-footer .primary-button { width: 100%; }
+  .workshop-v3 .attendance-success .dialog-body { display: flex; flex-direction: column; justify-content: center; }
+  .workshop-v3 .attendance-success .dialog-footer { display: grid; grid-template-columns: minmax(0,1fr); }
+}
+@media(max-width: 360px) {
+  .attendance-option { flex-direction: column; gap: 12px; }
+  .intake-steps > button { flex-direction: column; justify-content: center; gap: 4px; }
+  .intake-steps strong { font-size: .8125rem; }
+  .intake-review-facts { grid-template-columns: minmax(0,1fr); }
+  .intake-grand-total dd { font-size: 1.2rem; }
+  .order-add-actions > button > svg { display: none; }
+}
+@media(prefers-reduced-motion: reduce) { .attendance-dialog, .attendance-layer { animation: none; } .attendance-dialog *, .attendance-dialog *::before { scroll-behavior: auto; transition: none; } }
+
+.editable-order-line.is-readonly { grid-template-columns: minmax(0,1fr) auto auto; }
+@media(max-width:600px) { .editable-order-line.is-readonly .editable-item-name { grid-column: 1/-1; } }
+
+.intake-reception summary > small { display: block; margin-top: 5px; font-size: .8125rem; color: #617769; line-height: 1.5; }
+.intake-reception-details { padding: 4px 20px 20px; }
+@media(max-width:600px) { .intake-reception-details { padding: 4px 16px 16px; } }

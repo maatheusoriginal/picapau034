@@ -203,8 +203,9 @@ export function buildSaleDocument(sale: SaleRecord, settings: Partial<SettingsCo
     <div class="rule"></div>
     <div class="row"><strong>${escapeHtml(sale.id)}</strong><span>${escapeHtml(sale.date)}</span></div>
     <div class="row"><span class="label">Origem</span><span>${escapeHtml(sale.origin)}</span></div>
-    ${sale.customer || sale.mechanicName ? `<div class="facts">
+    ${sale.customer || sale.vehicle || sale.mechanicName ? `<div class="facts">
       ${sale.customer ? `<div class="fact"><span class="label">Cliente</span><b>${escapeHtml(sale.customer)}</b></div>` : ""}
+      ${sale.vehicle ? `<div class="fact"><span class="label">Motocicleta / placa</span><b>${escapeHtml(sale.vehicle)}</b></div>` : ""}
       ${sale.mechanicName ? `<div class="fact"><span class="label">Mecânico</span><b>${escapeHtml(sale.mechanicName)}</b></div>` : ""}
     </div>` : ""}
     <div class="rule"></div>

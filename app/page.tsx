@@ -8,6 +8,8 @@ import { WorkspaceSearch, type SearchEntry } from "../src/components/WorkspaceSe
 import { RecordPreview } from "../src/components/RecordPreview";
 import { canVisit, destinationForPath, routePaths, workspacePermissions, lowStock, matchesSearch, orderIsLate, calendarDay, type ParkedSale } from "../src/workspace";
 import { useModalFocus } from "../src/use-modal-focus";
+import { attendanceIdentityIssue, attendanceItemsIssue, type AttendanceIssue } from "../src/attendance";
+import { AttendanceSummary, AttendanceReview, type AttendanceSummaryProps } from "../src/components/AttendanceSummary";
 import { OrderItemsEditor } from "../src/components/OrderItemsEditor";
 import { Icon } from "../src/components/WorkshopIcon";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1506,6 +1508,7 @@ function UserAccessWorkspace({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [dialogError, setDialogError] = useState("");
+
   const [sourceMode, setSourceMode] = useState<"checking" | "cloud" | "fallback" | "error">("checking");
   const [dialogMode, setDialogMode] = useState<AccessDialogMode>(null);
   const [selectedUser, setSelectedUser] = useState<FirebaseManagedUser | null>(null);
@@ -2548,6 +2551,7 @@ export function AppDialog({
   dialog,
   canOperate,
   canCreateCategory,
+  onAttendanceSaved,
   canCreatePartBrand,
   canCheckoutOrders,
   step,
@@ -2588,6 +2592,7 @@ export function AppDialog({
 }: {
   dialog: DialogKind;
   canOperate: boolean;
+  onAttendanceSaved?: () => void;
   /** Pode criar categoria de peça sem sair do cadastro. */
   canCreateCategory: boolean;
   /** Pode criar marca de peça. Ela vive em settings/lists, e a regra libera essa chave para quem gerencia estoque. */
@@ -2682,6 +2687,8 @@ export function AppDialog({
   const [orderSolution, setOrderSolution] = useState("");
   const [quickService, setQuickService] = useState(quickServices[0]?.name ?? "Serviço rápido");
   const [quickProduct, setQuickProduct] = useState("Sem produto");
+  const [quickCustomer, setQuickCustomer] = useState("");
+  const [quickVehicle, setQuickVehicle] = useState("");
   const [quickServiceValue, setQuickServiceValue] = useState(String(quickServices[0]?.laborPrice ?? 0));
   const [quickPartValue, setQuickPartValue] = useState("0");
   const [quickQuantity, setQuickQuantity] = useState(1);
@@ -2729,7 +2736,7 @@ export function AppDialog({
   const [osProblem, setOsProblem] = useState("");
   const [osPriority, setOsPriority] = useState("Normal");
   const [osFuel, setOsFuel] = useState("");
-  const [osMileageChecked, setOsMileageChecked] = useState("Sim");
+  const [osMileageChecked, setOsMileageChecked] = useState("Não");
   const [quickAccount, setQuickAccount] = useState("");
   const [osDelivery, setOsDelivery] = useState("");
   // Cadastro rápido da etapa 1, quando o cliente ou a moto ainda não existem.
@@ -2769,6 +2776,52 @@ export function AppDialog({
   const [newVehicleVersion, setNewVehicleVersion] = useState("");
   const [saving, setSaving] = useState(false);
   const [dialogError, setDialogError] = useState("");
+  const [intakeFieldError, setIntakeFieldError] = useState("");
+  const [osItemDraft, setOsItemDraft] = useState(false);
+  const [attendanceSaved, setAttendanceSaved] = useState<{ id: string; kind: "os" | "quick"; total: number; customer: string; bike: string; plate: string } | null>(null);
+  const attendanceSaving = useRef(false);
+  const pendingOrder = useRef<{ id: string; items: ReservedPart[] } | null>(null);
+  const intakeFocusTarget = useRef("");
+  const attendanceBody = useRef<HTMLDivElement>(null);
+
+  // Every entry point (including Novo orçamento) starts a clean attendance.
+  useEffect(() => {
+    setDialogError(""); setIntakeFieldError(""); setAttendanceSaved(null);
+    if (dialog === "os") {
+      setStep(1); setOsOrigin("direct"); setOsPayer("owner"); setSelectedPartnerId(partners.find((item) => item.active)?.id || "");
+      setOsItems([]); setOsItemDraft(false); setPieceSearch(""); setLaborDescription(""); setLaborValue("");
+      setSelectedMechanicIds(mechanicsForOrders(users).slice(0, 1).map((item) => item.id));
+      setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false);
+      setOsNewCustomer(false); setOsSkipCustomer(false); setNewCustomerName(""); setVerHistorico(false); setPartnerBikeSearch("");
+      setNewVehicleBrand(systemList(lists, "motorcycleBrands")[0] || "Honda"); setNewVehicleModel(""); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setNewVehicleYear(""); setNewVehicleColor("");
+      setOsMileage(""); setOsMileageChecked("Não"); setOsFuel(""); setOsProblem(""); setOsPriority("Normal"); setOsDelivery(""); setOsPartnerOrderId("");
+      pendingOrder.current = null;
+    }
+    if (dialog === "quick") {
+      const service = quickServices.find((item) => item.active);
+      setQuickService(service?.name || ""); setQuickServiceValue(service ? String(service.laborPrice) : "");
+      setQuickProduct("Sem produto"); setQuickPartValue("0"); setQuickQuantity(1); setQuickCustomer(""); setQuickVehicle("");
+      setSelectedQuickMechanicId(mechanicsForOrders(users)[0]?.id || "");
+      const methods = orDefault(paymentMethods.filter((item) => item.active), defaultPaymentMethods);
+      setQuickPayment(methods.find((item) => item.name === "PIX")?.name || methods.find((item) => item.name !== "Faturamento parceiro")?.name || "PIX");
+      setQuickAccount(""); setPaymentInstallments(1); setSelectedMachineId(paymentMachines.find((item) => item.active && item.primary)?.id || "");
+    }
+    if (dialog === "osPast") {
+      setAntigaData(""); setAntigaPlaca(""); setAntigaMoto(""); setAntigaCliente(""); setAntigaServico(""); setAntigaValor(""); setAntigaParceiroId(""); setAntigaOsDoParceiro("");
+    }
+  }, [dialog]);
+
+  useEffect(() => {
+    if (!["os", "quick", "osPast", "osChoice"].includes(dialog || "")) return;
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(intakeFocusTarget.current || (attendanceSaved ? "attendance-success-title" : dialog === "os" ? `intake-step-title-${step}` : "dialog-title"));
+      target?.focus({ preventScroll: true });
+      if (intakeFocusTarget.current) target?.scrollIntoView({ block: "center" });
+      else attendanceBody.current?.scrollTo({ top: 0 });
+      intakeFocusTarget.current = "";
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [dialog, step, attendanceSaved, dialogError]);
   // Importação de planilha: a prévia fica em pé até a pessoa confirmar, para
   // ela conferir o que vai entrar antes de mexer no estoque.
   // Movimentação de dinheiro lançada à mão.
@@ -3126,7 +3179,7 @@ export function AppDialog({
             ? motosDele.find((motorcycle) => normalizePlate(motorcycle.plate).includes(lookupPlaca))
             : undefined;
           const porTelefone = lookupDigits.length >= 3 && onlyDigits(client.phone).includes(lookupDigits);
-          const porNome = lookupTexto.length >= 2 && client.name.toLowerCase().includes(lookupTexto);
+          const porNome = lookupTexto.length >= 2 && matchesSearch(lookupTexto, client.name);
           if (!porPlaca && !porTelefone && !porNome) return null;
           return { client, motoDaBusca: porPlaca ?? null, motos: motosDele };
         })
@@ -3178,9 +3231,9 @@ export function AppDialog({
   const selectedMachine = activePaymentMachines.find((machine) => machine.id === selectedMachineId) ?? activePaymentMachines.find((machine) => machine.primary) ?? activePaymentMachines[0];
   const partsTotal = osItems.filter((item) => item.type === "Peça").reduce((sum, item) => sum + item.price, 0);
   const laborTotal = osItems.filter((item) => item.type === "Mão de obra").reduce((sum, item) => sum + item.price, 0);
-  const partnerDiscount = osOrigin === "partner" ? laborTotal * ((selectedPartner?.laborDiscount ?? 0) / 100) : 0;
-  const osTotal = partsTotal + laborTotal - partnerDiscount;
-  const quickTotal = valorDigitado(quickServiceValue) + (quickProduct === "Sem produto" ? 0 : valorDigitado(quickPartValue) * quickQuantity);
+  const partnerDiscount = osOrigin === "partner" && osPayer === "partner" ? Math.round(laborTotal * Math.min(100, Math.max(0, selectedPartner?.laborDiscount ?? 0))) / 100 : 0;
+  const osTotal = round2(partsTotal + laborTotal - partnerDiscount);
+  const quickTotal = round2(valorDigitado(quickServiceValue) + (quickProduct === "Sem produto" ? 0 : valorDigitado(quickPartValue) * quickQuantity));
   const expenseCost = valorDigitado(expenseAmount);
   const expenseCharged = valorDigitado(expenseSale);
   const expenseMargin = expenseCharged - expenseCost;
@@ -3212,8 +3265,8 @@ export function AppDialog({
   // primeira opção válida.
   const pick = (list: string[], current: string) => (list.includes(current) ? current : list[0] ?? "");
   const currentPriority = pick(orderPriorities, osPriority);
-  const currentFuel = pick(fuelLevels, osFuel);
-  const currentCashAccount = pick(cashAccounts, quickAccount);
+  const currentFuel = osFuel ? pick(fuelLevels, osFuel) : "";
+  const currentCashAccount = pick([...cashAccounts, ...activePaymentMachines.map((machine) => machine.name)], quickAccount);
   const currentAccountTarget = currentCashAccount;
   // Os filtros do catálogo e as categorias de gasto vinham escritos no JSX e
   // ignoravam o cadastro de categorias da própria oficina.
@@ -3294,6 +3347,9 @@ export function AppDialog({
   const orderStatusTone = statusTone(orderStatus);
   // Digitar só procura: quem escolhe o cliente é a pessoa, clicando no
   // resultado. Antes o próprio campo já selecionava o primeiro que batesse.
+  const clearVehicleDraft = () => {
+    setNewVehicleModel(""); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setNewVehicleYear(""); setNewVehicleColor("");
+  };
   const handleCustomerLookup = (value: string) => {
     // "TES1D23" tem dígitos, mas não é telefone: formatar como telefone
     // transformava a placa em "(12) 3" e a busca por placa nunca achava nada.
@@ -3309,6 +3365,7 @@ export function AppDialog({
     }
   };
   const escolherCliente = (client: ClientRecord, motoDaBusca?: MotorcycleRecord | null) => {
+    clearVehicleDraft();
     setSelectedCustomerId(client.id);
     setOsNewCustomer(false);
     setOsSkipCustomer(false);
@@ -3316,24 +3373,24 @@ export function AppDialog({
     setNewVehicleMode(false);
     // Achou pela placa? Já é essa a moto. Senão, cliente de uma moto só também
     // vem escolhida — que é o caso mais comum no balcão.
-    const doDono = motorcycles.filter((motorcycle) => motorcycle.ownerId === client.id);
+    const doDono = motosAtivas.filter((motorcycle) => motorcycle.ownerId === client.id);
     const escolhida = motoDaBusca ?? (doDono.length === 1 ? doDono[0] : null);
     setSelectedMotorcycleId(escolhida?.id ?? "");
     setOsPlate(escolhida?.plate ?? "");
   };
   const handleOsPlate = (value: string) => {
-    const formatted = formatPlate(value);
-    setOsPlate(formatted);
-    const found = motorcycles.find((motorcycle) => normalizePlate(motorcycle.plate) === normalizePlate(formatted));
-    if (!found) {
-      if (normalizePlate(formatted).length === 7) setNewVehicleMode(true);
-      return;
+    setOsPlate(formatPlate(value)); setSelectedMotorcycleId(""); setNewVehicleMode(true);
+  };
+  const existingPlateMatch = newVehicleMode && normalizePlate(osPlate).length === 7
+    ? motorcycles.find((item) => normalizePlate(item.plate) === normalizePlate(osPlate)) : undefined;
+  const useExistingPlate = () => {
+    if (!existingPlateMatch || existingPlateMatch.active === false) return;
+    const owner = clientesAtivos.find((item) => item.id === existingPlateMatch.ownerId);
+    if (osOrigin === "direct" && owner) escolherCliente(owner, existingPlateMatch);
+    else {
+      if (osOrigin === "direct") { setOsSkipCustomer(true); setOsNewCustomer(false); setSelectedCustomerId(""); setNewCustomerName(""); setCustomerLookup(""); }
+      setSelectedMotorcycleId(existingPlateMatch.id); setOsPlate(existingPlateMatch.plate); setNewVehicleMode(false);
     }
-    setSelectedMotorcycleId(found.id);
-    setSelectedCustomerId(found.ownerId);
-    const owner = clients.find((client) => client.id === found.ownerId);
-    if (owner) setCustomerLookup(owner.phone);
-    setNewVehicleMode(false);
   };
   const selectMotorcycle = (id: string) => {
     const motorcycle = motorcycles.find((item) => item.id === id);
@@ -3363,6 +3420,42 @@ export function AppDialog({
       notify("Não foi possível incluir a moto na frota.");
     }
   };
+  const useAverageCost = settings?.useAverageCost === true;
+  // "Baixar peça do estoque somente quando a OS for iniciada": durante recepção,
+  // avaliação e aprovação a OS ainda é orçamento, e reservar peça de orçamento
+  // some com o estoque de quem está vendendo no balcão.
+  const deductStockOnlyWhenStarted = settings?.deductStockOnlyWhenUsed !== false;
+  const getIdentityIssue = (): AttendanceIssue | null => {
+    const issue = attendanceIdentityIssue({ origin: osOrigin, partnerId: selectedPartner?.id, customer: osCustomer, newCustomer: osNewCustomer, skipCustomer: osSkipCustomer, name: newCustomerName, phone: customerLookup, plate: osPlate || selectedMotorcycle?.plate || "", model: newVehicleModel, motorcycle: newVehicleMode ? undefined : selectedMotorcycle });
+    if (issue) return issue;
+    if (existingPlateMatch) return { field: "intake-plate", message: existingPlateMatch.active === false ? "Esta placa pertence a uma moto desativada. Reative o cadastro em Motocicletas para continuar." : "Esta placa já está cadastrada. Confira os dados e use o botão Selecionar esta moto." };
+    return null;
+  };
+  const showIdentityIssue = (issue: AttendanceIssue) => {
+    intakeFocusTarget.current = issue.field; setIntakeFieldError(issue.field); setDialogError(issue.message); setStep(1);
+    // Also focus repeated errors when the step and message have not changed.
+    requestAnimationFrame(() => { const field = document.getElementById(issue.field); field?.focus(); field?.scrollIntoView({ block: "center" }); });
+  };
+  const goToIntakeStep = (next: number) => {
+    if (saving || pendingOrder.current) return;
+    if (next > 1) { const issue = getIdentityIssue(); if (issue) return showIdentityIssue(issue); }
+    if (next > 2) {
+      const issue = osItemDraft ? "Há um serviço em edição. Inclua o serviço ou descarte os campos antes de conferir." : attendanceItemsIssue(osItems, products, !deductStockOnlyWhenStarted && settings?.blockZeroStockSale !== false);
+      if (issue) { intakeFocusTarget.current = "intake-items"; setDialogError(issue); setStep(2); return; }
+    }
+    setDialogError(""); setIntakeFieldError(""); setStep(next);
+  };
+  const summaryProps: AttendanceSummaryProps = {
+    customer: osOrigin === "partner" ? selectedPartner?.name || "" : osSkipCustomer ? "Cliente não identificado" : osNewCustomer ? newCustomerName : osCustomer?.name || "",
+    phone: osOrigin === "partner" ? "" : osSkipCustomer ? "" : osNewCustomer ? customerLookup : osCustomer?.phone || "",
+    bike: selectedMotorcycle && !newVehicleMode ? [selectedMotorcycle.brand, selectedMotorcycle.model].filter(Boolean).join(" ") : newVehicleModel.trim() ? [newVehicleBrand, newVehicleModel].filter(Boolean).join(" ") : "",
+    plate: osPlate, payer: osOrigin === "partner" && osPayer === "partner" ? `${selectedPartner?.name || "Parceira"} · fatura mensal` : "No ato da entrega",
+    mechanics: selectedMechanics.map((item) => item.name).join(", "), problem: osProblem, delivery: osDelivery ? osDelivery.split("-").reverse().join("/") : "", priority: currentPriority,
+    mileage: osMileage, fuel: currentFuel, mileageChecked: osMileageChecked === "Sim", partnerOrder: osOrigin === "partner" ? osPartnerOrderId : "",
+    items: osItems, parts: partsTotal, labor: laborTotal, discount: partnerDiscount, total: osTotal,
+    pendingCustomer: osOrigin === "direct" && osSkipCustomer, reserveNow: !deductStockOnlyWhenStarted, onEdit: goToIntakeStep,
+  };
+
   const toggleMechanic = (id: string, target: "new" | "existing") => {
     const selected = target === "new" ? selectedMechanicIds : orderMechanicIds;
     const update = target === "new" ? setSelectedMechanicIds : setOrderMechanicIds;
@@ -3373,8 +3466,8 @@ export function AppDialog({
   };
   const titles: Record<Exclude<DialogKind, null>, string> = {
     changePassword: "Definir uma nova senha",
-    osChoice: "Que tipo de atendimento é?",
-    os: "Abrir nova ordem de serviço",
+    osChoice: "Como vamos atender?",
+    os: "Nova ordem de serviço",
     osPast: "Lançar OS que já aconteceu",
     takePart: "Pegar peça do estoque",
     quick: "Lançar serviço rápido",
@@ -3402,8 +3495,8 @@ export function AppDialog({
   };
   const subtitles: Record<Exclude<DialogKind, null>, string> = {
     changePassword: "Escolha a senha que você vai usar a partir de agora.",
-    osChoice: "Escolha o fluxo certo antes de começar.",
-    os: "Preencha somente o necessário. Você poderá completar depois.",
+    osChoice: "Escolha o atendimento que combina com a chegada da moto.",
+    os: "Identifique a moto, registre o serviço e confira antes de abrir.",
     osPast: "Serve para o histórico da moto. Não entra na fila, não baixa peça e não mexe no caixa.",
     takePart: "Escolha a peça e a OS. Ela entra na ordem e sai do estoque no mesmo movimento.",
     quick: "Para trocas e ajustes sem cadastro completo.",
@@ -3434,35 +3527,27 @@ export function AppDialog({
   const nextOrderNumber = highestSequence(orders, osPrefix) + 1;
 
   const createOrder = async () => {
-    // O campo de busca aceita telefone OU nome. Só serve de nome quando o que
-    // foi digitado não é um telefone — senão a OS sairia com "(34) 99999-9999"
-    // no lugar do cliente.
-    const typedIsPhone = onlyDigits(customerLookup).length >= 8;
-    // Cadastrando um cliente novo, vale o nome digitado — mesmo que o telefone
-    // por acaso caia em algum cadastro parecido.
-    const customerName = (osNewCustomer ? newCustomerName : (osCustomer?.name ?? newCustomerName)).trim()
-      || (typedIsPhone ? "" : customerLookup.trim());
-    // OS de frota não tem cliente: quem responde é a empresa parceira.
+    if (pendingOrder.current) {
+      const pending = pendingOrder.current;
+      if (pending.items.length) await saveOrderWithStock(pending.id, { deductedItems: pending.items }, stockDeltas(pending.items, []));
+      return pending.id;
+    }
+    const issue = getIdentityIssue();
+    if (issue) throw new Error(issue.message);
+    const stockIssue = attendanceItemsIssue(osItems, products, !deductStockOnlyWhenStarted && settings?.blockZeroStockSale !== false);
+    if (stockIssue) throw new Error(stockIssue);
     const daParceira = osOrigin === "partner" && Boolean(selectedPartner);
-    // A moto entra sem dono identificado: é a placa que segura a OS até alguém
-    // vir buscar. O nome fica pendente e é cobrado no encerramento.
-    const semCliente = !daParceira && osSkipCustomer && !customerName;
+    const customerName = daParceira ? (selectedMotorcycle?.ownerName || "") : osSkipCustomer ? "" : (osNewCustomer ? newCustomerName.trim() : osCustomer?.name || "");
+    const semCliente = !daParceira && osSkipCustomer;
     const plate = formatPlate(osPlate || selectedMotorcycle?.plate || "");
-    // A moto nova sai do catálogo: marca + modelo + versão viram um nome só,
-    // o mesmo texto que o cadastro completo grava.
-    const bike = (selectedMotorcycle && !newVehicleMode
+    const bike = selectedMotorcycle && !newVehicleMode
       ? [selectedMotorcycle.brand, selectedMotorcycle.model].filter(Boolean).join(" ")
-      : [newVehicleBrand, newVehicleModel].filter(Boolean).join(" ")).trim();
-    if (osOrigin === "partner" && !selectedPartner) throw new Error("Escolha a empresa parceira antes de abrir a ordem de serviço.");
-    if (!customerName && !osSkipCustomer && !daParceira) throw new Error("Informe o nome do cliente antes de abrir a ordem de serviço.");
-    if (daParceira && !plate) throw new Error("Escolha ou cadastre a moto da parceira antes de abrir a ordem de serviço.");
-    if (semCliente && !plate) throw new Error("Sem o cliente, a placa é o que identifica esta OS. Informe a placa.");
-    if (!bike && !plate) throw new Error("Informe a motocicleta ou a placa antes de abrir a ordem de serviço.");
+      : newVehicleModel.trim() ? [newVehicleBrand, newVehicleModel.trim()].filter(Boolean).join(" ") : "";
 
     // Cliente e moto digitados na hora viram cadastro de verdade — senão a
     // próxima OS do mesmo cliente não o encontraria na busca. Só para quem tem
     // permissão de gerenciar clientes; sem ela a OS guarda apenas os textos.
-    let clientId = osCustomer?.id ?? "";
+    let clientId = daParceira ? selectedMotorcycle?.ownerId || "" : osCustomer?.id || "";
     let motorcycleId = !newVehicleMode ? selectedMotorcycleId : "";
     if (canManageCustomers && !clientId && customerName && !semCliente && !daParceira) {
       // Mesmo padrão CLI-000 do cadastro de clientes, mas a partir do maior id
@@ -3471,7 +3556,7 @@ export function AppDialog({
       clientId = `CLI-${String(highestSequence(clients, "CLI") + 1).padStart(3, "0")}`;
       await saveFirestoreDoc("clients", clientId, {
         name: customerName,
-        phone: formatPhone(customerLookup),
+        phone: osNewCustomer ? formatPhone(customerLookup) : "",
         detail: bike || "Cliente cadastrado na abertura da OS",
         meta: "",
         condition: "Pagamento normal",
@@ -3539,6 +3624,7 @@ export function AppDialog({
       ...(clientId ? { clientId } : {}),
       ...(motorcycleId ? { motorcycleId } : {}),
     });
+    pendingOrder.current = { id: orderId, items: reservedOnCreate };
     if (reservedOnCreate.length) {
       // A OS nasce marcada como "nada baixado" e a reserva vai num lote só,
       // junto da marcação. Assim, se a baixa falhar, a OS fica coerente (sem
@@ -3549,11 +3635,7 @@ export function AppDialog({
     return orderId;
   };
 
-  const useAverageCost = settings?.useAverageCost === true;
-  // "Baixar peça do estoque somente quando a OS for iniciada": durante recepção,
-  // avaliação e aprovação a OS ainda é orçamento, e reservar peça de orçamento
-  // some com o estoque de quem está vendendo no balcão.
-  const deductStockOnlyWhenStarted = settings?.deductStockOnlyWhenUsed !== false;
+
   const partsOf = (items: ServiceOrderItem[] | undefined) => mergeParts((items ?? [])
     .filter((item) => item.type === "Peça" && item.productId)
     .map((item) => ({ productId: item.productId!, quantity: item.quantity ?? 1 })));
@@ -3646,6 +3728,8 @@ export function AppDialog({
     /** Partes do pagamento, quando dividido. Vazio = pagamento único. */
     payments?: Array<{ method: string; amount: number; fee?: number; machineName?: string }>;
     account?: string;
+    customer?: string;
+    vehicle?: string;
   }) => {
     const usesMachine = ["Débito", "Crédito"].includes(input.method);
     const installments = input.method === "Crédito" ? paymentInstallments : 1;
@@ -3664,6 +3748,8 @@ export function AppDialog({
     const saleId = `VEN-${String(highestSequence(sales, "VEN") + 1).padStart(4, "0")}`;
     await recordSale(saleId, {
       origin: input.origin,
+      ...(input.customer ? { customer: input.customer } : {}),
+      ...(input.vehicle ? { vehicle: input.vehicle } : {}),
       items: input.items,
       // Só grava o desconto quando houve um: o campo ausente já quer dizer
       // "venda sem desconto" e não polui os registros antigos.
@@ -3692,7 +3778,7 @@ export function AppDialog({
       // vez de derrubar o fluxo inteiro como se nada tivesse sido salvo.
       try {
         await createReceivableFor({
-          person: "Consumidor final",
+          person: input.customer || "Consumidor final",
           description: dividido ? `${input.origin} ${saleId} · parte a prazo` : `${input.origin} ${saleId}`,
           amount: aPrazo,
           origin: "Venda",
@@ -3705,6 +3791,8 @@ export function AppDialog({
     printDocument(buildSaleDocument({
       id: saleId,
       origin: input.origin,
+      ...(input.customer ? { customer: input.customer } : {}),
+      ...(input.vehicle ? { vehicle: input.vehicle } : {}),
       items: input.items,
       ...(input.discount ? { subtotal: input.subtotal ?? input.total + input.discount, discount: input.discount } : {}),
       total: input.total,
@@ -3825,7 +3913,7 @@ export function AppDialog({
   };
 
   const submit = async () => {
-    if (saving) return;
+    if (saving || attendanceSaving.current || attendanceSaved) return;
     setDialogError("");
 
     // O relatório não grava nada; dizer "registro atualizado com sucesso" era
@@ -4017,15 +4105,23 @@ export function AppDialog({
     }
 
     if (dialog === "os") {
-      setSaving(true);
+      if (!pendingOrder.current) {
+        const issue = getIdentityIssue();
+        if (issue) return showIdentityIssue(issue);
+        if (step !== 3) return goToIntakeStep(step + 1);
+      }
+      attendanceSaving.current = true; setSaving(true);
       try {
         const orderId = await createOrder();
-        return finish(`Ordem de serviço ${orderId} aberta e salva no sistema.`);
+        onAttendanceSaved?.();
+        setAttendanceSaved({ id: orderId, kind: "os", total: osTotal, customer: summaryProps.customer, bike: summaryProps.bike, plate: osPlate });
       } catch (error) {
-        return setDialogError(error instanceof Error ? error.message : "Não foi possível abrir a ordem de serviço.");
+        const detail = error instanceof Error ? error.message : "Não foi possível abrir a ordem de serviço.";
+        return setDialogError(pendingOrder.current ? `A OS ${pendingOrder.current.id} foi criada, mas a baixa das peças não foi concluída. Tente concluir novamente. ${detail}` : detail);
       } finally {
-        setSaving(false);
+        attendanceSaving.current = false; setSaving(false);
       }
+      return;
     }
 
     if (dialog === "order") {
@@ -4386,16 +4482,22 @@ export function AppDialog({
     }
 
     if (dialog === "quick") {
-      const parts = quickProduct === "Sem produto" ? [] : products.filter((product) => product.name === quickProduct);
+      const parts = quickProduct === "Sem produto" ? [] : produtosAtivos.filter((product) => product.id === quickProduct);
       const part = parts[0];
       if (quickProduct !== "Sem produto" && !part) return setDialogError("Produto não encontrado no estoque.");
       if (part && quickQuantity > part.stock) return setDialogError(`${part.name} tem apenas ${part.stock} em estoque.`);
       const mechanic = activeMechanics.find((item) => item.id === selectedQuickMechanicId) ?? activeMechanics[0];
-      if (quickTotal <= 0) return setDialogError("Escolha o serviço e informe o valor antes de lançar.");
-      setSaving(true);
+      if (!quickService.trim()) return setDialogError("Escolha ou descreva o serviço realizado.");
+      if (enabledQuickServices.find((item) => item.name === quickService)?.productRequired && !part) return setDialogError("Este serviço requer uma peça ou produto. Selecione o item utilizado.");
+      if (!Number.isFinite(quickTotal) || quickTotal <= 0 || valorDigitado(quickServiceValue) < 0 || (part && (!Number.isFinite(quickQuantity) || quickQuantity <= 0 || valorDigitado(quickPartValue) < 0))) return setDialogError("Confira a quantidade e os valores. O total precisa ser maior que zero.");
+      if (!activePaymentMethods.some((method) => method.name === quickPayment && method.name !== "Faturamento parceiro")) return setDialogError("Escolha uma forma de pagamento disponível.");
+      if (isCreditPayment(quickPayment) && !quickCustomer.trim()) return setDialogError("Informe o cliente para identificar a cobrança a prazo.");
+      attendanceSaving.current = true; setSaving(true);
       try {
         const saleId = await registerSale({
           origin: "Serviço rápido",
+          customer: quickCustomer.trim(),
+          vehicle: quickVehicle.trim(),
           method: quickPayment,
           account: currentCashAccount,
           total: quickTotal,
@@ -4407,18 +4509,19 @@ export function AppDialog({
               id: part.id,
               type: "Peça" as const,
               name: part.name,
-              price: valorDigitado(quickPartValue) * quickQuantity,
+              price: round2(valorDigitado(quickPartValue) * quickQuantity),
               quantity: quickQuantity,
               cost: parseBRL(part.cost) * quickQuantity,
             }] : []),
           ],
           stockUpdates: part ? [{ productId: part.id, quantity: quickQuantity }] : [],
         });
-        return finish(`Serviço rápido ${saleId} de ${formatBRL(quickTotal)} registrado${part ? " e estoque baixado" : ""}.`);
+        onAttendanceSaved?.();
+        return setAttendanceSaved({ id: saleId, kind: "quick", total: quickTotal, customer: quickCustomer.trim() || "Consumidor final", bike: quickVehicle, plate: "" });
       } catch (error) {
         return setDialogError(error instanceof Error ? error.message : "Não foi possível registrar o serviço rápido.");
       } finally {
-        setSaving(false);
+        attendanceSaving.current = false; setSaving(false);
       }
     }
 
@@ -4521,33 +4624,32 @@ export function AppDialog({
     record: "Fechar",
   };
 
+  if (attendanceSaved) return <div className="dialog-layer attendance-layer"><section className="dialog attendance-dialog attendance-success" role="dialog" aria-modal="true" aria-labelledby="attendance-success-title"><header className="dialog-header"><div><span>Atendimento registrado</span></div><button type="button" aria-label="Fechar confirmação" onClick={() => finish(`${attendanceSaved.id} salvo com sucesso.`)}>×</button></header><div className="dialog-body"><span className="attendance-success-icon"><Icon name="check" size={32}/></span><p className="attendance-success-id">{attendanceSaved.id}</p><h2 id="attendance-success-title" tabIndex={-1}>{attendanceSaved.kind === "os" ? "Ordem de serviço aberta!" : "Serviço rápido registrado!"}</h2><p>{attendanceSaved.kind === "os" ? "A moto já está na fila da oficina, na etapa Recepção." : "O lançamento está disponível no histórico de serviços rápidos."}</p><div className="attendance-success-detail"><strong>{attendanceSaved.customer}</strong><span>{[attendanceSaved.bike, attendanceSaved.plate].filter(Boolean).join(" · ") || "Atendimento sem motocicleta informada"}</span><b>{formatBRL(attendanceSaved.total)}</b></div></div><footer className="dialog-footer"><button type="button" className="outline-button" onClick={() => changeDialog("osChoice")}>Novo atendimento</button>{attendanceSaved.kind === "os" ? <button type="button" className="primary-button" onClick={() => changeDialog("order", attendanceSaved.id)}>Acompanhar OS <Icon name="arrow" size={18}/></button> : <button type="button" className="primary-button" onClick={() => finish(`${attendanceSaved.id} salvo com sucesso.`)}>Concluir <Icon name="check" size={18}/></button>}</footer></section></div>;
+
   return (
-    <div className="dialog-layer" role="presentation" onMouseDown={(event) => !saving && event.target === event.currentTarget && close()}>
-      <section className={`dialog ${["os", "order", "orderCheckout", "payment", "catalog", "settings", "expense"].includes(dialog) ? "dialog-wide" : ""} ${dialog === "os" ? "dialog-os" : ""} ${dialog === "orderCheckout" ? "dialog-checkout" : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+    <div className={`dialog-layer ${["os", "osChoice", "quick", "osPast"].includes(dialog) ? "attendance-layer" : ""}`} role="presentation" onMouseDown={(event) => !saving && event.target === event.currentTarget && close()}>
+      <section className={`dialog ${["os", "order", "orderCheckout", "payment", "catalog", "settings", "expense"].includes(dialog) ? "dialog-wide" : ""} ${dialog === "os" ? "dialog-os" : ""} ${dialog === "orderCheckout" ? "dialog-checkout" : ""} ${["os", "osChoice", "quick", "osPast"].includes(dialog) ? `attendance-dialog attendance-${dialog}` : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-busy={saving}>
         <header className="dialog-header">
-          <div><span>{dialog === "os" ? "Nova ordem de serviço" : dialog === "osChoice" ? "Novo atendimento" : ["order", "orderCheckout", "payment", "cash", "expense", "settleReceivable", "settlePayable", "record"].includes(dialog) ? "Operação" : "Cadastro e configuração"}</span><h2 id="dialog-title">{titles[dialog]}</h2><p>{subtitles[dialog]}</p></div>
+          <div><span>{dialog === "os" ? "Nova ordem de serviço" : dialog === "osChoice" ? "Novo atendimento" : ["order", "orderCheckout", "payment", "cash", "expense", "settleReceivable", "settlePayable", "record"].includes(dialog) ? "Operação" : "Cadastro e configuração"}</span><h2 id="dialog-title" tabIndex={-1}>{titles[dialog]}</h2><p>{subtitles[dialog]}</p></div>
           <button aria-label="Fechar" disabled={saving} onClick={close}>×</button>
         </header>
 
         {dialog === "osChoice" ? (
-          <div className="dialog-body attendance-choice">
-            <button onClick={() => changeDialog("quick")}><span className="attendance-icon fast"><Icon name="clock"/></span><div><b>É um serviço rápido</b><strong>Atendimento expresso</strong><small>Troca de óleo, lâmpada, regulagem ou ajuste concluído na hora. Cliente e moto são opcionais.</small><em>Ir para Serviço Rápido <Icon name="arrow" size={16}/></em></div></button>
-            <button onClick={() => { setStep(1); setOsOrigin("direct"); setOsItems([]); setPieceSearch(""); setLaborDescription(""); setLaborValue(""); setSelectedMechanicIds(activeMechanics.slice(0, 1).map((m) => m.id)); setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setOsMileage(""); setOsProblem(""); setOsPriority("Normal"); setOsFuel(""); setOsDelivery(""); setNewCustomerName(""); setNewVehicleModel(""); setNewVehicleYear(""); setNewVehicleColor(""); setOsNewCustomer(false); setOsSkipCustomer(false); setNewVehicleBrand("Honda"); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setOsPayer("owner"); setOsPartnerOrderId(""); setDialogError(""); changeDialog("os"); }}><span className="attendance-icon full"><Icon name="wrench"/></span><div><b>É uma OS completa</b><strong>Moto ficará na oficina</strong><small>Entrada com cliente, proprietário real, origem, recepção, peças, mão de obra e acompanhamento.</small><em>Abrir OS completa <Icon name="arrow" size={16}/></em></div></button>
-            {/* A pilha de OS em papel de motos que já passaram pela oficina.
-                Sem elas no sistema, a pergunta que se faz com a moto no portão
-                — "o que já foi feito nessa aqui?" — continua sem resposta. */}
-            <button onClick={() => { setAntigaData(""); setAntigaPlaca(""); setAntigaMoto(""); setAntigaCliente(""); setAntigaServico(""); setAntigaValor(""); setAntigaParceiroId(""); setAntigaOsDoParceiro(""); setDialogError(""); changeDialog("osPast"); }}><span className="attendance-icon past"><Icon name="clock"/></span><div><b>Já aconteceu</b><strong>Lançar no histórico</strong><small>OS em papel de moto que já passou aqui. Entra encerrada, com a data do papel, sem baixar peça nem mexer no caixa.</small><em>Lançar OS antiga <Icon name="arrow" size={16}/></em></div></button>
+          <div className="dialog-body attendance-choices">
+            <button type="button" className="attendance-option attendance-option-primary" onClick={() => changeDialog("os")}><span className="attendance-icon full"><Icon name="wrench" size={25}/></span><span className="attendance-option-copy"><small>ORDEM DE SERVIÇO</small><strong>A moto fica na oficina</strong><span>Receba a moto, registre o pedido e acompanhe cada etapa até a entrega.</span><em>Abrir ordem de serviço <Icon name="arrow" size={18}/></em></span></button>
+            <button type="button" className="attendance-option" onClick={() => changeDialog("quick")}><span className="attendance-icon fast"><Icon name="clock" size={25}/></span><span className="attendance-option-copy"><small>SERVIÇO RÁPIDO</small><strong>Resolver e receber na hora</strong><span>Troca de óleo, lâmpada ou ajuste. Lance o serviço, a peça e o pagamento.</span><em>Iniciar serviço rápido <Icon name="arrow" size={18}/></em></span></button>
+            <button type="button" className="attendance-history" onClick={() => changeDialog("osPast")}><span className="attendance-icon past"><Icon name="file"/></span><span><strong>O serviço já aconteceu?</strong><small>Registre uma OS antiga no histórico, sem movimentar caixa ou estoque.</small></span><Icon name="arrow" size={18}/></button>
           </div>
         ) : null}
 
         {dialog === "osPast" ? (
           <div className="dialog-body os-past">
-            <div className="info-strip"><Icon name="check" size={17}/><span>Este lançamento serve para o <b>histórico da moto</b>. Ele nasce encerrado, não entra na fila da oficina, não baixa peça do estoque e <b>não conta no caixa nem no faturamento</b> — o dinheiro dele já foi contado do jeito que a oficina fazia antes.</span></div>
+            <div className="info-strip"><Icon name="check" size={17}/><span>A OS entra encerrada no <b>histórico da moto</b>, com a data informada. Não altera a fila da oficina, o estoque, o caixa ou o faturamento.</span></div>
             <div className="form-grid">
               <label className="field"><span>Data do serviço <b className="req">*</b></span>
                 <input type="date" value={antigaData} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setAntigaData(event.target.value)}/></label>
               <label className="field"><span>Placa <b className="req">*</b></span>
-                <input value={antigaPlaca} onChange={(event) => setAntigaPlaca(formatPlate(event.target.value))} placeholder="ABC-1234"/></label>
+                <input value={antigaPlaca} maxLength={8} autoCapitalize="characters" spellCheck={false} onChange={(event) => setAntigaPlaca(formatPlate(event.target.value))} placeholder="ABC-1234"/></label>
               <label className="field"><span>Motocicleta</span>
                 <input value={antigaMoto} onChange={(event) => setAntigaMoto(event.target.value)} placeholder="Ex.: Honda CB 600F Hornet"/></label>
               <label className="field"><span>Cliente</span>
@@ -4615,43 +4717,20 @@ export function AppDialog({
           );
         })() : null}
 
-        {dialog === "os" ? (
-          <>
-            {/*
-              Uma tela só.
-              O passo a passo pedia quatro telas para abrir uma OS que o balcão
-              preenche em trinta segundos: cliente e moto, avançar, recepção,
-              avançar, itens, avançar, conferir, confirmar. Três dos quatro
-              cliques eram só para chegar no campo seguinte, e a etapa de
-              revisão repetia o que já estava preenchido logo acima.
-
-              Agora é uma tela dividida em duas colunas: à esquerda quem e qual
-              moto, e a recepção; à direita as peças e a mão de obra. O total
-              fica fixo no rodapé, sempre visível enquanto se monta a OS.
-            */}
-            <div className="dialog-body os-single">
-              <div className="os-single-columns">
-                <div className="os-single-column">
-                <div className="form-section">
-                  {/*
-                    Esta etapa tinha três caminhos sobrepostos na mesma tela:
-                    uma busca por cliente, outra por placa, um formulário
-                    embutido que aparecia sozinho quando a busca não achava
-                    nada, e ainda os botões de cadastro completo. Quem abria a
-                    OS não sabia por onde começar nem em qual dos campos
-                    digitar.
-
-                    Agora são dois blocos, na ordem em que a oficina trabalha:
-                    primeiro o cliente, depois a moto dele. Cada um tem um
-                    estado só de cada vez — procurando, encontrado, ou
-                    cadastrando — e o de cadastrar aparece só quando a pessoa
-                    pede.
-                  */}
+        {dialog === "os" ? <>
+          <nav className="intake-steps" aria-label="Etapas do novo atendimento">
+            {[{ name: "Cliente e moto", detail: "Identificação", icon: "bike" }, { name: "Serviço", detail: "Recepção e itens", icon: "wrench" }, { name: "Conferir", detail: "Abrir a OS", icon: "check" }].map((item, index) => <button type="button" key={item.name} disabled={saving || Boolean(pendingOrder.current)} className={step === index + 1 ? "active" : step > index + 1 ? "complete" : ""} aria-current={step === index + 1 ? "step" : undefined} onClick={() => goToIntakeStep(index + 1)}><span className="intake-step-number">{step > index + 1 ? <Icon name="check" size={17}/> : index + 1}</span><span><strong>{item.name}</strong><small>{item.detail}</small></span></button>)}
+          </nav>
+          <div className="dialog-body intake-body" ref={attendanceBody}>
+            <div className="intake-layout">
+              <fieldset className="intake-main" disabled={saving || Boolean(pendingOrder.current)}>
+                <div hidden={step !== 1} className="intake-step-panel">
+                  <div className="intake-section-heading"><span>01 / IDENTIFICAÇÃO</span><h3 id="intake-step-title-1" tabIndex={-1}>Quem chegou à oficina?</h3><p>Busque pela placa, WhatsApp ou nome do cliente.</p></div>
                   <div className="os-step-blocks">
                     <section className={`os-block ${osOrigin === "partner" ? (selectedPartner ? "done" : "") : osSkipCustomer || osCustomer || (osNewCustomer && newCustomerName.trim()) ? "done" : ""}`}>
                       <header className="os-block-head">
                         <span className="os-block-number">1</span>
-                        <div><strong>Quem responde por esta OS</strong><small>Um cliente da casa ou uma empresa parceira. A moto vem depois.</small></div>
+                        <div><strong>Cliente ou empresa</strong><small>Selecione um cadastro ou informe um novo cliente.</small></div>
                         {osOrigin === "partner" && selectedPartner ? <span className="os-block-badge ok">Parceira</span>
                           : osSkipCustomer ? <span className="os-block-badge pendente">Pendente</span>
                           : osCustomer ? <span className="os-block-badge ok">Encontrado</span> : null}
@@ -4666,10 +4745,10 @@ export function AppDialog({
                         existia.
                       */}
                       <div className="os-party-switch">
-                        <button className={osOrigin === "direct" ? "selected" : ""} onClick={() => { setOsOrigin("direct"); setOsPayer("owner"); setSelectedMotorcycleId(""); setOsPlate(""); }}>
+                        <button className={osOrigin === "direct" ? "selected" : ""} aria-pressed={osOrigin === "direct"} onClick={() => { if (osOrigin === "direct") return; clearVehicleDraft(); setOsOrigin("direct"); setOsPayer("owner"); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setPartnerBikeSearch(""); }}>
                           <Icon name="users" size={16}/><span>Cliente</span>
                         </button>
-                        <button className={osOrigin === "partner" ? "selected" : ""} onClick={() => { setOsOrigin("partner"); setOsPayer("partner"); setOsNewCustomer(false); setOsSkipCustomer(false); setSelectedMotorcycleId(""); setOsPlate(""); if (!activePartners.some((item) => item.id === selectedPartnerId)) setSelectedPartnerId(activePartners[0]?.id ?? ""); }} disabled={activePartners.length === 0}>
+                        <button className={osOrigin === "partner" ? "selected" : ""} aria-pressed={osOrigin === "partner"} onClick={() => { if (osOrigin === "partner") return; clearVehicleDraft(); setSelectedCustomerId(""); setCustomerLookup(""); setNewCustomerName(""); setNewVehicleMode(false); setPartnerBikeSearch(""); setOsOrigin("partner"); setOsPayer("partner"); setOsNewCustomer(false); setOsSkipCustomer(false); setSelectedMotorcycleId(""); setOsPlate(""); if (!activePartners.some((item) => item.id === selectedPartnerId)) setSelectedPartnerId(activePartners[0]?.id ?? ""); }} disabled={activePartners.length === 0}>
                           <Icon name="wallet" size={16}/><span>Empresa parceira</span>
                         </button>
                       </div>
@@ -4678,7 +4757,7 @@ export function AppDialog({
                         <div className="os-partner-pick">
                           <label className="field">
                             <span>Empresa parceira <b className="req">*</b></span>
-                            <select value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)}>
+                            <select id="intake-partner" aria-invalid={intakeFieldError === "intake-partner"} aria-describedby={intakeFieldError === "intake-partner" ? "intake-error" : undefined} value={selectedPartner?.id || ""} onChange={(event) => { setSelectedPartnerId(event.target.value); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false); setPartnerBikeSearch(""); }}>
                               {activePartners.length ? activePartners.map((parceira) => <option value={parceira.id} key={parceira.id}>{parceira.name} · {parceira.laborDiscount}% mão de obra</option>) : <option value="">Nenhuma empresa parceira cadastrada</option>}
                             </select>
                           </label>
@@ -4697,7 +4776,7 @@ export function AppDialog({
                             </select>
                           </label>
                           <div className="info-strip"><Icon name="check" size={17}/><span>{osPayer === "partner"
-                            ? <>Vai para a fatura com vencimento em <b>{nextBillingDate()}</b>. Desconto de {selectedPartner?.laborDiscount ?? 0}% só na mão de obra; peça mantém o preço. A baixa do estoque acontece normalmente na entrega.</>
+                            ? <>Vai para a fatura com vencimento em <b>{nextBillingDate()}</b>. Desconto de {selectedPartner?.laborDiscount ?? 0}% só na mão de obra; peça mantém o preço. A baixa segue a configuração de estoque da oficina.</>
                             : <>A parceira encaminhou a moto, mas o pagamento é no ato, na entrega.</>}</span></div>
                         </div>
                       ) : osSkipCustomer ? (
@@ -4731,17 +4810,17 @@ export function AppDialog({
                         </>
                       ) : osNewCustomer ? (
                         <div className="os-inline-form">
-                          <label className="field"><span>Nome completo <b className="req">*</b></span><input value={newCustomerName} onChange={(event) => setNewCustomerName(emMaiusculo(event.target.value))} placeholder="Nome do cliente" autoFocus/></label>
-                          <label className="field"><span>WhatsApp</span><input value={customerLookup} onChange={(event) => setCustomerLookup(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label>
+                          <label className="field"><span>Nome completo <b className="req">*</b></span><input id="intake-name" autoComplete="name" aria-invalid={intakeFieldError === "intake-name"} aria-describedby={intakeFieldError === "intake-name" ? "intake-error" : undefined} value={newCustomerName} onChange={(event) => setNewCustomerName(emMaiusculo(event.target.value))} placeholder="Nome do cliente" autoFocus/></label>
+                          <label className="field"><span>WhatsApp</span><input id="intake-phone" type="tel" autoComplete="tel" aria-invalid={intakeFieldError === "intake-phone"} aria-describedby={intakeFieldError === "intake-phone" ? "intake-error" : undefined} value={customerLookup} onChange={(event) => setCustomerLookup(formatPhone(event.target.value))} placeholder="(34) 99999-9999"/></label>
                           <div className="os-inline-actions">
                             <button className="ghost-button" onClick={() => { setOsNewCustomer(false); setNewCustomerName(""); setCustomerLookup(""); }}>Voltar para a busca</button>
                             {canManageCustomers ? <button className="outline-button" onClick={() => setCadastroNaOs("cliente")}><Icon name="users" size={15}/>Cadastro completo</button> : null}
                           </div>
-                          <small className="os-inline-hint">O cadastro completo tem CPF, endereço e crediário. Aqui bastam nome e WhatsApp para tocar a OS.</small>
+                          <small className="os-inline-hint">O cadastro completo tem CPF, endereço e crediário. O nome é obrigatório; o WhatsApp pode ser informado depois.</small>
                         </div>
                       ) : (
                         <div className="os-search">
-                          <label className="mini-search"><Icon name="search" size={17}/><input value={customerLookup} onChange={(event) => handleCustomerLookup(event.target.value)} placeholder="Placa, WhatsApp ou nome do cliente"/></label>
+                          <label className="field intake-customer-search"><span>Placa, WhatsApp ou nome</span><span className="mini-search"><Icon name="search" size={19}/><input id="intake-search" aria-label="Buscar cliente por placa, WhatsApp ou nome" autoComplete="off" aria-invalid={intakeFieldError === "intake-search"} aria-describedby={intakeFieldError === "intake-search" ? "intake-error" : undefined} value={customerLookup} onChange={(event) => handleCustomerLookup(event.target.value)} placeholder="Ex.: ABC-1D23 ou João"/></span></label>
                           {/*
                             A lista de quem bateu com a busca. Mostrar telefone e
                             quantas motos tem é o que deixa escolher entre dois
@@ -4762,19 +4841,19 @@ export function AppDialog({
                                   </button>
                                 ))}
                               </div>
-                              <small className="os-search-count">{clientesEncontrados.length === 1 ? "1 cliente encontrado" : `${clientesEncontrados.length} clientes encontrados`}. Clique em quem é o dono desta OS.</small>
+                              <small className="os-search-count">{clientesEncontrados.length === 1 ? "1 cliente encontrado" : `${clientesEncontrados.length} clientes exibidos`}. Clique em quem é o dono desta OS.</small>
                             </>
                           ) : customerLookup.trim().length >= 2 ? (
                             <div className="os-search-empty">
                               <span>Nenhum cliente com "{customerLookup.trim()}".</span>
-                              <button className="primary-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); setNewCustomerName(onlyDigits(customerLookup) ? "" : customerLookup.trim()); if (onlyDigits(customerLookup)) setCustomerLookup(formatPhone(customerLookup)); else setCustomerLookup(""); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
+                              <small>Confira a busca ou use Cadastrar cliente abaixo.</small>
                             </div>
                           ) : (
                             <div className="os-search-hint"><Icon name="users" size={17}/><span>Busque pela <b>placa</b>, telefone ou nome — pela placa a moto já vem escolhida.</span></div>
                           )}
                           <div className="os-search-actions">
-                            <button className="outline-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
-                            <button className="ghost-button" onClick={() => { setOsSkipCustomer(true); setOsNewCustomer(false); setCustomerLookup(""); setNewCustomerName(""); setSelectedCustomerId(""); }}>Atender sem cadastrar agora</button>
+                            <button className="outline-button" onClick={() => { setOsNewCustomer(true); setOsSkipCustomer(false); setNewCustomerName(/\p{L}/u.test(customerLookup) && !/\d/.test(customerLookup) ? customerLookup.trim() : ""); if (/\p{L}/u.test(customerLookup)) setCustomerLookup(""); }}><Icon name="plus" size={15}/>Cadastrar cliente</button>
+                            <button className="ghost-button" onClick={() => { setOsSkipCustomer(true); setOsNewCustomer(false); setCustomerLookup(""); setNewCustomerName(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(true); }}>Atender sem cadastrar agora</button>
                           </div>
                         </div>
                       )}
@@ -4810,7 +4889,7 @@ export function AppDialog({
                                   <div className="os-list-label"><b>Frota {selectedPartner ? `da ${selectedPartner.name}` : "da parceira"}</b><span>{buscaDaFrota.daFrota.length}</span></div>
                                   <div className="vehicle-choice-list">
                                     {buscaDaFrota.daFrota.slice(0, 24).map((motorcycle) => (
-                                      <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
+                                      <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} aria-pressed={selectedMotorcycleId === motorcycle.id} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
                                         <span className="catalog-code">{(motorcycle.model || "MT").slice(0, 2).toUpperCase()}</span>
                                         <div><strong>{[motorcycle.brand, motorcycle.model].filter(Boolean).join(" ")}</strong><small>{formatPlate(motorcycle.plate)} · {motorcycle.year || "ano não informado"}</small></div>
                                         {selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}
@@ -4825,7 +4904,7 @@ export function AppDialog({
                                   <div className="os-list-label fora"><b>Já no sistema, fora desta frota</b><span>{buscaDaFrota.foraDaFrota.length}</span></div>
                                   <div className="vehicle-choice-list">
                                     {buscaDaFrota.foraDaFrota.slice(0, 12).map((motorcycle) => (
-                                      <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
+                                      <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} aria-pressed={selectedMotorcycleId === motorcycle.id} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
                                         <span className="catalog-code">{(motorcycle.model || "MT").slice(0, 2).toUpperCase()}</span>
                                         <div><strong>{[motorcycle.brand, motorcycle.model].filter(Boolean).join(" ")}</strong><small>{formatPlate(motorcycle.plate)} · {motorcycle.ownerName || motorcycle.partnerName || "sem dono cadastrado"}</small></div>
                                         {selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}
@@ -4838,7 +4917,7 @@ export function AppDialog({
                               {avisoDaMotoDeFora ? (
                                 <div className="os-outside-fleet">
                                   <Icon name="alert" size={17}/>
-                                  <span>{avisoDaMotoDeFora} A OS abre normalmente com a {selectedPartner?.name ?? "parceira"} pagando.</span>
+                                  <span>{avisoDaMotoDeFora} {osPayer === "partner" ? `A cobrança fica com a ${selectedPartner?.name || "parceira"}.` : "O pagamento será no ato da entrega."}</span>
                                   {canManageCustomers && motoEscolhidaEDeFora ? <button className="outline-button" onClick={() => void incluirNaFrota()}>Incluir na frota</button> : null}
                                 </div>
                               ) : null}
@@ -4861,7 +4940,7 @@ export function AppDialog({
                           {osOrigin !== "partner" && motosParaEscolher.length > 0 && !newVehicleMode ? (
                             <div className="vehicle-choice-list">
                               {motosParaEscolher.slice(0, 24).map((motorcycle) => (
-                                <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
+                                <button className={selectedMotorcycleId === motorcycle.id ? "selected" : ""} aria-pressed={selectedMotorcycleId === motorcycle.id} key={motorcycle.id} onClick={() => selectMotorcycle(motorcycle.id)}>
                                   <span className="catalog-code">{(motorcycle.model || "MT").slice(0, 2).toUpperCase()}</span>
                                   <div><strong>{[motorcycle.brand, motorcycle.model].filter(Boolean).join(" ")}</strong><small>{motorcycle.plate} · {motorcycle.year || "ano não informado"}</small></div>
                                   {selectedMotorcycleId === motorcycle.id ? <i>✓</i> : null}
@@ -4874,9 +4953,11 @@ export function AppDialog({
                             </div>
                           ) : null}
 
-                          {(osOrigin !== "partner" && motosParaEscolher.length === 0) || newVehicleMode ? (
+                          {osOrigin !== "partner" && selectedMotorcycle && !newVehicleMode && !motosParaEscolher.length ? <div className="os-picked"><Icon name="bike"/><div><strong>{selectedMotorcycle.brand} {selectedMotorcycle.model}</strong><small>{selectedMotorcycle.plate}</small></div><button type="button" className="os-picked-change" onClick={() => { setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(true); }}>Trocar moto</button></div> : null}
+                          {(osOrigin !== "partner" && motosParaEscolher.length === 0 && !selectedMotorcycle) || newVehicleMode ? (
                             <div className="os-inline-form vehicle">
-                              <label className="field"><span>Placa <b className="req">*</b></span><input value={osPlate} onChange={(event) => handleOsPlate(event.target.value)} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(osPlate)}</small></label>
+                              <label className="field"><span>Placa {(osSkipCustomer || osOrigin === "partner") && <b className="req">*</b>}</span><input id="intake-plate" autoCapitalize="characters" autoComplete="off" spellCheck={false} aria-invalid={intakeFieldError === "intake-plate"} aria-describedby={intakeFieldError === "intake-plate" ? "intake-error" : undefined} value={osPlate} onChange={(event) => handleOsPlate(event.target.value)} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(osPlate)}</small></label>
+                              {existingPlateMatch && <div className="intake-duplicate"><Icon name="alert" size={20}/><div><strong>Esta placa já está cadastrada</strong><p>{existingPlateMatch.brand} {existingPlateMatch.model} · {existingPlateMatch.ownerName || existingPlateMatch.partnerName || "Sem proprietário identificado"}</p>{existingPlateMatch.active === false ? <p>Reative a moto em Motocicletas para usá-la.</p> : <button type="button" className="outline-button" onClick={useExistingPlate}>Selecionar esta moto</button>}</div></div>}
                               <label className="field"><span>Marca</span>
                                 <select value={newVehicleBrand} onChange={(event) => { setNewVehicleBrand(event.target.value); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setNewVehicleModel(""); }}>
                                   {systemList(lists, "motorcycleBrands").map((marca) => <option key={marca}>{marca}</option>)}
@@ -4889,7 +4970,7 @@ export function AppDialog({
                                     {modelsOf(newVehicleBrand).map((modelo) => <option key={modelo} value={modelo}>{modelo}</option>)}
                                   </select>
                                 ) : (
-                                  <input value={newVehicleModel} onChange={(event) => setNewVehicleModel(emMaiusculo(event.target.value))} placeholder="Ex.: CG 160 Fan"/>
+                                  <input value={newVehicleCatalogModel} onChange={(event) => { const model = emMaiusculo(event.target.value); setNewVehicleCatalogModel(model); setNewVehicleModel(fullModelName(model, newVehicleVersion)); }} placeholder="Ex.: CG 160 Fan"/>
                                 )}
                               </label>
                               <label className="field"><span>Versão</span>
@@ -4899,7 +4980,7 @@ export function AppDialog({
                                     {versionsOf(newVehicleBrand, newVehicleCatalogModel).map((versao) => <option key={versao} value={versao}>{versao}</option>)}
                                   </select>
                                 ) : (
-                                  <input value={newVehicleVersion} onChange={(event) => { const versao = emMaiusculo(event.target.value); setNewVehicleVersion(versao); setNewVehicleModel(fullModelName(newVehicleCatalogModel || newVehicleModel, versao)); }} placeholder="Ex.: ESDI" disabled={!newVehicleCatalogModel && modelsOf(newVehicleBrand).length > 0}/>
+                                  <input value={newVehicleVersion} onChange={(event) => { const versao = emMaiusculo(event.target.value); setNewVehicleVersion(versao); setNewVehicleModel(fullModelName(newVehicleCatalogModel, versao)); }} placeholder="Ex.: ESDI" disabled={!newVehicleCatalogModel && modelsOf(newVehicleBrand).length > 0}/>
                                 )}
                               </label>
                               <label className="field"><span>Ano / modelo</span><input value={newVehicleYear} onChange={(event) => setNewVehicleYear(emMaiusculo(event.target.value))} placeholder="2024 / 2025"/></label>
@@ -4916,12 +4997,16 @@ export function AppDialog({
                     </section>
                   </div>
                 </div>
-                <div className="form-section">
-                  <div className="form-intro"><span className="form-icon"><Icon name="wrench"/></span><div><h3>Dados da recepção</h3><p>Registre a reclamação e escolha um ou mais mecânicos responsáveis.</p></div></div>
-                  <div className="form-grid">
-                    <label className="field"><span>Quilometragem</span><input value={osMileage} onChange={(event) => setOsMileage(event.target.value)} placeholder="Ex.: 38.420 km"/></label>
-                    <label className="field"><span>Nível de combustível</span><select value={currentFuel} onChange={(event) => setOsFuel(event.target.value)}>{fuelLevels.map((level) => <option key={level}>{level}</option>)}</select></label>
+                <div hidden={step !== 2} className="intake-step-panel">
+                  <div className="intake-section-heading"><span>02 / SERVIÇO</span><h3 id="intake-step-title-2" tabIndex={-1}>O que precisa ser feito?</h3><p>Registre o pedido e inclua os itens que já souber.</p></div>
+                  <section className="form-section intake-request">
                     <label className="field field-full"><span>Problema relatado</span><textarea value={osProblem} onChange={(event) => setOsProblem(event.target.value)} placeholder="Descreva o problema relatado ou serviço solicitado"/></label>
+                  </section>
+                  <div id="intake-items" tabIndex={-1}><OrderItemsEditor items={osItems} onChange={setOsItems} products={products} onPendingChange={setOsItemDraft}/></div>
+                  <details className="intake-optional intake-reception"><summary>Equipe e detalhes da recepção<small>{selectedMechanics.map((item) => item.name).join(", ") || "Mecânico a definir"} · {osDelivery ? osDelivery.split("-").reverse().join("/") : "Prazo a combinar"}</small></summary><div className="intake-reception-details">
+                  <div className="form-grid">
+                    <label className="field"><span>Quilometragem (km)</span><input inputMode="numeric" value={osMileage} onChange={(event) => setOsMileage(event.target.value)} placeholder="Ex.: 38.420 km"/></label>
+                    <label className="field"><span>Nível de combustível</span><select value={currentFuel} onChange={(event) => setOsFuel(event.target.value)}><option value="">Não conferido</option>{fuelLevels.map((level) => <option key={level}>{level}</option>)}</select></label>
                     <label className="field"><span>Prioridade</span><select value={currentPriority} onChange={(event) => setOsPriority(event.target.value)}>{orderPriorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
                     <label className="field"><span>Previsão de entrega</span><input type="date" value={osDelivery} onChange={(event) => setOsDelivery(event.target.value)}/>{settings?.defaultDeliveryDays ? <small className="field-help">Prazo padrão da oficina: {settings.defaultDeliveryDays}</small> : null}</label>
                     <label className="field"><span>Odômetro conferido?</span><select value={osMileageChecked} onChange={(event) => setOsMileageChecked(event.target.value)}><option>Sim</option><option>Não</option></select></label>
@@ -4931,7 +5016,7 @@ export function AppDialog({
                     {activeMechanics.length > 0 ? (
                       <div className="mechanic-picker">
                         {activeMechanics.map((mechanic) => (
-                          <button className={selectedMechanicIds.includes(mechanic.id) ? "selected" : ""} key={mechanic.id} onClick={() => toggleMechanic(mechanic.id, "new")}>
+                          <button className={selectedMechanicIds.includes(mechanic.id) ? "selected" : ""} aria-pressed={selectedMechanicIds.includes(mechanic.id)} key={mechanic.id} onClick={() => toggleMechanic(mechanic.id, "new")}>
                             <span className="mechanic-avatar">{mechanic.name[0]}</span>
                             <div><strong>{mechanic.name}</strong><small>{mechanic.position}{showWorkload ? ` · ${mechanic.currentOrders || 0} OS` : ""}</small></div>
                             <i>{selectedMechanicIds.includes(mechanic.id) ? "✓" : "+"}</i>
@@ -4945,34 +5030,28 @@ export function AppDialog({
                       </div>
                     )}
                   </div>
+                  </div></details>
                 </div>
-                </div>
-                <div className="os-single-column">
-                  <OrderItemsEditor items={osItems} onChange={setOsItems} products={products}/>
-                </div>
-              </div>
+                <div hidden={step !== 3} className="intake-step-panel" id="intake-step-title-3" tabIndex={-1}><AttendanceReview {...summaryProps}/></div>
+              </fieldset>
+              <AttendanceSummary {...summaryProps}/>
             </div>
-          </>
-        ) : null}
+          </div>
+        </> : null}
 
         {dialog === "quick" ? (
-          <div className="dialog-body form-section">
-            <div className="quick-service-banner"><span><Icon name="clock"/></span><div><strong>Atendimento sem cadastro completo</strong><small>Ideal para serviços concluídos na hora.</small></div></div>
-            <div className="quick-service-options">
-              {enabledQuickServices.map((service) => <button className={quickService === service.name ? "selected" : ""} key={service.id} onClick={() => { setQuickService(service.name); setQuickServiceValue(String(service.laborPrice)); if (!service.productRequired) setQuickProduct("Sem produto"); }}><Icon name={service.name.toLowerCase().includes("óleo") ? "wallet" : "wrench"} size={17}/><span>{service.name}</span><small>{service.duration} min</small>{quickService === service.name ? <i>✓</i> : null}</button>)}
-            </div>
-            <div className="form-grid">
-              <label className="field"><span>Valor do serviço</span><MoneyField value={quickServiceValue} onChange={setQuickServiceValue} placeholder="0,00"/></label>
-              <label className="field"><span>Mecânico</span><select value={activeMechanics.some((mechanic) => mechanic.id === selectedQuickMechanicId) ? selectedQuickMechanicId : activeMechanics[0]?.id ?? ""} onChange={(event) => setSelectedQuickMechanicId(event.target.value)}>{activeMechanics.map((mechanic) => <option value={mechanic.id} key={mechanic.id}>{mechanic.name} · {mechanic.currentOrders} OS</option>)}</select></label>
-              <label className="field field-full"><span>Produto ou peça utilizada</span><select value={quickProduct} onChange={(event) => setQuickProduct(event.target.value)}><option value="Sem produto">Sem produto</option>{products.map((p) => <option value={p.name} key={p.id}>{p.name}</option>)}</select></label>
-              {quickProduct !== "Sem produto" ? <><label className="field"><span>Quantidade</span><NumberField min={1} fallback={1} value={quickQuantity} onChange={setQuickQuantity}/></label><label className="field"><span>Preço da peça</span><MoneyField value={quickPartValue} onChange={setQuickPartValue} placeholder="0,00"/></label></> : null}
-              <label className="field"><span>Cliente</span><input placeholder="Nome ou telefone"/></label>
-              <label className="field"><span>Moto / placa</span><input placeholder="Ex.: CG 160 · ABC-1234"/></label>
-              <label className="field"><span>Pagamento</span><select value={quickPayment} onChange={(event) => setQuickPayment(event.target.value)}>{activePaymentMethods.filter((method) => method.name !== "Faturamento parceiro").map((method) => <option key={method.id}>{method.name}</option>)}</select></label>
-              <label className="field"><span>Conta de entrada</span><select value={currentCashAccount} onChange={(event) => setQuickAccount(event.target.value)}>{cashAccounts.map((account) => <option key={account}>{account}</option>)}{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label>
-            </div>
-            <div className="quick-service-total"><div><span>{quickService}</span><small>{quickProduct === "Sem produto" ? "Somente mão de obra" : `${quickQuantity}x ${quickProduct} · ${quickPayment}`}</small></div><strong>{formatBRL(quickTotal)}</strong></div>
-            <div className="info-strip"><Icon name="check" size={18}/><span>Ao finalizar, o produto será baixado do estoque, o recebimento entra no caixa e um cupom não fiscal fica pronto para impressão.</span></div>
+          <div className="dialog-body intake-quick" ref={attendanceBody}>
+            <fieldset disabled={saving} className="intake-main">
+              <section className="intake-quick-section"><div className="intake-section-heading"><span>01 / SERVIÇO</span><h3>Qual serviço foi realizado?</h3></div>
+                <div className="quick-service-options">{enabledQuickServices.map((service) => <button type="button" className={quickService === service.name ? "selected" : ""} aria-pressed={quickService === service.name} key={service.id} onClick={() => { setQuickService(service.name); setQuickServiceValue(String(service.laborPrice)); if (!service.productRequired) { setQuickProduct("Sem produto"); setQuickPartValue("0"); } }}><Icon name="wrench" size={18}/><span>{service.name}</span><small>{service.duration} min · {formatBRL(service.laborPrice)}</small></button>)}</div>
+                <div className="form-grid"><label className="field field-full"><span>Descrição do serviço <b className="req">*</b></span><input value={quickService} onChange={(event) => setQuickService(emMaiusculo(event.target.value))} placeholder="Ex.: TROCA DE ÓLEO"/></label><label className="field"><span>Valor da mão de obra</span><MoneyField value={quickServiceValue} onChange={setQuickServiceValue} placeholder="0,00"/></label><label className="field"><span>Mecânico</span><select value={activeMechanics.some((mechanic) => mechanic.id === selectedQuickMechanicId) ? selectedQuickMechanicId : activeMechanics[0]?.id ?? ""} onChange={(event) => setSelectedQuickMechanicId(event.target.value)}>{!activeMechanics.length && <option value="">Não definido</option>}{activeMechanics.map((mechanic) => <option value={mechanic.id} key={mechanic.id}>{mechanic.name}</option>)}</select></label></div>
+              </section>
+              <section className="intake-quick-section"><div className="intake-section-heading"><span>02 / PEÇA OU PRODUTO</span><h3>O que foi utilizado?</h3></div><div className="form-grid"><label className="field field-full"><span>Peça ou produto</span><select value={quickProduct} onChange={(event) => { setQuickProduct(event.target.value); setQuickQuantity(1); const part = produtosAtivos.find((item) => item.id === event.target.value); setQuickPartValue(String(part ? toAmount(part.price) : 0)); }}><option value="Sem produto">Sem produto · somente serviço</option>{produtosAtivos.map((part) => <option value={part.id} key={part.id}>{part.name} · {part.code} · {part.stock} em estoque</option>)}</select></label>{quickProduct !== "Sem produto" && <><label className="field"><span>Quantidade</span><NumberField min={0.001} step="any" fallback={1} value={quickQuantity} onChange={setQuickQuantity}/></label><label className="field"><span>Preço unitário da peça</span><MoneyField value={quickPartValue} onChange={setQuickPartValue} placeholder="0,00"/></label></>}</div></section>
+              <details className="intake-optional" open={isCreditPayment(quickPayment) || undefined}><summary>Cliente e motocicleta <span>Opcional</span></summary><div className="form-grid"><label className="field"><span>Cliente</span><input autoComplete="name" value={quickCustomer} onChange={(event) => setQuickCustomer(emMaiusculo(event.target.value))} placeholder="Nome do cliente"/></label><label className="field"><span>Motocicleta / placa</span><input value={quickVehicle} onChange={(event) => setQuickVehicle(emMaiusculo(event.target.value))} placeholder="Ex.: CG 160 · ABC-1D23"/></label></div></details>
+              <section className="intake-quick-section"><div className="intake-section-heading"><span>03 / PAGAMENTO</span><h3>Como o cliente vai pagar?</h3></div><div className="form-grid"><label className="field"><span>Forma de pagamento</span><select value={quickPayment} onChange={(event) => setQuickPayment(event.target.value)}>{activePaymentMethods.filter((method) => method.name !== "Faturamento parceiro").map((method) => <option key={method.id}>{method.name}</option>)}</select></label><label className="field"><span>Conta de entrada</span><select value={currentCashAccount} onChange={(event) => setQuickAccount(event.target.value)}>{cashAccounts.map((account) => <option key={account}>{account}</option>)}{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label>{["Crédito", "Débito"].includes(quickPayment) && <label className="field field-full"><span>Maquininha</span><select value={selectedMachine?.id || ""} onChange={(event) => setSelectedMachineId(event.target.value)}>{activePaymentMachines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>}</div></section>
+              <div className="quick-service-total"><div><span>Total a receber</span><small>Mão de obra {formatBRL(valorDigitado(quickServiceValue))} · peças {formatBRL(quickTotal - valorDigitado(quickServiceValue))}</small></div><strong>{formatBRL(quickTotal)}</strong></div>
+              <p className="intake-confirm-note"><Icon name="check" size={19}/><span>Ao confirmar, o serviço será registrado{isCreditPayment(quickPayment) ? " com uma conta a receber" : " com o pagamento informado"}. As peças utilizadas sairão do estoque e o cupom será preparado para impressão.</span></p>
+            </fieldset>
           </div>
         ) : null}
 
@@ -5563,28 +5642,17 @@ export function AppDialog({
           </div>
         ) : null}
 
-        {dialogError ? <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>{dialogError}</span></div> : null}
+        {dialogError ? <div className="dialog-error-strip" id="intake-error" role="alert"><Icon name="alert" size={17}/><span>{dialogError}</span></div> : null}
 
-        {dialog !== "osChoice" ? <footer className="dialog-footer">
+        {dialog === "os" ? <footer className="dialog-footer intake-footer">
+          <div className="intake-footer-total"><span>{osItems.length} {osItems.length === 1 ? "item incluído" : "itens incluídos"} · total previsto</span><strong>{formatBRL(osTotal)}</strong></div>
+          <div className="intake-footer-actions"><button type="button" className="outline-button" disabled={saving || Boolean(pendingOrder.current)} onClick={() => step === 1 ? close() : goToIntakeStep(step - 1)}>{step === 1 ? "Cancelar" : "Voltar"}</button><button type="button" className="primary-button" disabled={saving || !canOperate} onClick={() => step < 3 ? goToIntakeStep(step + 1) : void submit()}>{saving ? "Salvando..." : pendingOrder.current ? "Concluir baixa das peças" : step === 1 ? "Ir para serviço" : step === 2 ? "Conferir atendimento" : "Abrir ordem de serviço"}<Icon name={step === 3 ? "check" : "arrow"} size={18}/></button></div>
+        </footer> : dialog !== "osChoice" ? <footer className="dialog-footer">
           <button className="ghost-button" onClick={close} disabled={saving}>Cancelar</button>
-          {/*
-            O total no rodapé, fixo: montando a OS numa tela só, o valor que
-            está sendo formado precisa estar à vista o tempo todo — era a única
-            coisa que a etapa de revisão dava e que a tela única não daria.
-          */}
-          {dialog === "os" ? (
-            <div className="os-single-total">
-              <span>Peças <b>{formatBRL(partsTotal)}</b></span>
-              <span>Mão de obra <b>{formatBRL(laborTotal)}</b></span>
-              {partnerDiscount > 0 ? <span className="discount">Parceiro <b>− {formatBRL(partnerDiscount)}</b></span> : null}
-              <strong>Total <b>{formatBRL(osTotal)}</b></strong>
-            </div>
-          ) : null}
-          <div>
-            {dialog === "order" && currentOrder && !currentOrder.closed && orderStatus === "Entrega" && canCheckoutOrders && <button className="outline-button" disabled={saving} onClick={() => void receiveOrder()}>Receber e entregar <Icon name="wallet" size={16}/></button>}
-            {canOperate && !(dialog === "order" && currentOrder?.closed) ? <button className="primary-button" disabled={saving} onClick={() => void submit()}>{saving ? "Salvando..." : dialog === "os" ? "Abrir ordem de serviço" : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button> : <span className="readonly-footer">Somente consulta</span>}
-          </div>
-        </footer> : <footer className="dialog-footer choice-footer"><button className="ghost-button" onClick={close}>Cancelar</button></footer>}
+          <div>{dialog === "order" && currentOrder && !currentOrder.closed && orderStatus === "Entrega" && canCheckoutOrders && <button className="outline-button" disabled={saving} onClick={() => void receiveOrder()}>Receber e entregar <Icon name="wallet" size={16}/></button>}
+          {canOperate && !(dialog === "order" && currentOrder?.closed) ? <button className="primary-button" disabled={saving} onClick={() => void submit()}>{saving ? "Salvando..." : dialog === "quick" ? `Confirmar · ${formatBRL(quickTotal)}` : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button> : <span className="readonly-footer">Somente consulta</span>}</div>
+        </footer> : <footer className="dialog-footer choice-footer"><span>Escolha uma opção para começar.</span><button className="ghost-button" onClick={close}>Cancelar</button></footer>}
+
       </section>
 
       {/*
@@ -5604,9 +5672,9 @@ export function AppDialog({
             onCreateBrand={(nome) => criarItemDeLista("motorcycleBrands", nome)}
             defaultMotorcycle={{ plate: osPlate, brand: newVehicleBrand, model: newVehicleCatalogModel, version: newVehicleVersion, year: newVehicleYear, color: newVehicleColor }}
             onSaved={(cliente) => {
-              setSelectedCustomerId(cliente.id);
-              setCustomerLookup(cliente.phone || cliente.name);
-              setNewCustomerName(cliente.name);
+              escolherCliente(cliente);
+              setCustomerLookup(cliente.phone || "");
+              setNewCustomerName("");
               setCadastroNaOs(null);
               notify?.(`Cliente "${cliente.name}" cadastrado e selecionado nesta OS.`);
             }}
@@ -5633,7 +5701,9 @@ export function AppDialog({
               // Sem isto a busca anterior continua filtrando e a moto recém
               // cadastrada não aparece selecionada na lista.
               setPartnerBikeSearch("");
-              if (moto.ownerId) setSelectedCustomerId(moto.ownerId);
+              if (osOrigin === "direct") {
+                setSelectedCustomerId(moto.ownerId || ""); setOsNewCustomer(false); setOsSkipCustomer(!moto.ownerId); setNewCustomerName(""); setCustomerLookup("");
+              }
               setCadastroNaOs(null);
               notify?.(`Moto placa ${moto.plate} cadastrada e selecionada nesta OS.`);
             }}
@@ -6081,7 +6151,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const badges: Record<string, number> = { "Ordens de serviço": orders.filter((order) => !order.closed).length, "Orçamentos": orders.filter((order) => !order.closed && order.status === "Aprovação").length, "Produtos e estoque": products.filter(lowStock).length, "Contas a pagar": summary.overdueCount, "PDV Balcão": cart.length + parked.length };
 
   return (
-    <main className={`app-shell workshop-v3 ${sidebarHidden ? "sidebar-hidden" : ""}`} onClickCapture={(event) => { if (dialog && (event.target as HTMLElement).closest(".ready-action, .mechanic-picker button, .order-progress button, .editable-order-line button, .order-item-result")) dirtyDialog.current = true; }} onInputCapture={() => { if (dialog) dirtyDialog.current = true; }} onChangeCapture={() => { if (dialog) dirtyDialog.current = true; }}>
+    <main className={`app-shell workshop-v3 ${sidebarHidden ? "sidebar-hidden" : ""}`} onClickCapture={(event) => { if (dialog && (event.target as HTMLElement).closest(".ready-action, .mechanic-picker button, .order-progress button, .editable-order-line button, .order-item-result, .attendance-dialog .os-search-results button, .attendance-dialog .vehicle-choice-list button, .attendance-dialog .os-search-actions button, .attendance-dialog .os-party-switch button, .attendance-dialog .quick-service-options button, .attendance-dialog .intake-duplicate button")) dirtyDialog.current = true; }} onInputCapture={() => { if (dialog) dirtyDialog.current = true; }} onChangeCapture={() => { if (dialog) dirtyDialog.current = true; }}>
       <a className="skip-link" href="#workspace-content">Ir para o conteúdo</a>
       <aside className={`sidebar ${mobileMenu ? "sidebar-open" : ""}`}>
         <div className="brand">
@@ -6182,7 +6252,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
       </section>
       <nav className="mobile-bottom-nav" aria-label="Atalhos no celular">{directNav.slice(0, 3).map((item) => <button key={item.label} aria-current={active === item.label ? "page" : undefined} onClick={() => setActive(item.label)}><Icon name={item.icon} size={21}/><span>{item.short}</span></button>)}<button onClick={() => setMobileMenu(true)} aria-label="Abrir todas as opções"><Icon name="menu" size={21}/><span>Menu</span></button></nav>
       {recordPreview && <RecordPreview entry={recordPreview} products={products} clients={clients} motorcycles={motorcycles} suppliers={suppliers} orders={orders} close={() => setRecordPreview(null)}/>}
-      <AppDialog dialog={dialog} canCreateCategory={canManageInventory || canManageSettings} canCreatePartBrand={canManageInventory || canManageSettings} canCheckoutOrders={canCheckoutOrders} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={requestCloseDialog} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog onAttendanceSaved={() => { dirtyDialog.current = false; }} dialog={dialog} canCreateCategory={canManageInventory || canManageSettings} canCreatePartBrand={canManageInventory || canManageSettings} canCheckoutOrders={canCheckoutOrders} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={requestCloseDialog} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {helpOpen ? (
         <div className="dialog-layer" role="presentation" onMouseDown={(evento) => evento.target === evento.currentTarget && setHelpOpen(false)}>
           <section className="dialog dialog-wide help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">
