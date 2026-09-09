@@ -1057,6 +1057,35 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: .875rem; }
 .os-past .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
 .os-past .field-full { grid-column: 1 / -1; }
 .os-past textarea { min-height: 84px; }
+
+/* ===== A tela do mecânico =====
+   Os dois movimentos do dia inteiro — abrir a moto que chegou e lançar a peça
+   que ele pegou — ficam do tamanho do dedo e ANTES da lista. No celular, com a
+   mão suja, alvo pequeno no meio da lista não é usado. */
+.mechanic-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-bottom: 15px; }
+.mechanic-actions .action-tile { display: flex; align-items: center; gap: 12px; min-height: 66px; padding: 13px 15px; border: 1px solid var(--line, #e6e4e0); border-radius: 12px; background: #fff; text-align: left; }
+.mechanic-actions .action-tile:hover { border-color: #cfd3c8; background: #fbfcf9; }
+.mechanic-actions .action-tile strong { display: block; font-size: .9375rem; }
+.mechanic-actions .action-tile small { color: var(--muted, #77787c); font-size: .8125rem; }
+/* O que já foi lançado na OS: sem isso ele não sabe se a peça de ontem entrou
+   na conta, e o cliente sai pagando a menos. */
+.row-items { color: #6b795e; font-size: .8125rem; }
+.row-items.empty { color: var(--muted, #8a8b8f); font-style: italic; }
+@media (max-width: 560px) { .mechanic-actions { grid-template-columns: 1fr; } }
+
+/* "Pegar peça": busca em cima, resultado embaixo, e a confirmação dizendo o
+   saldo antes e depois — é o número que o mecânico confere de cabeça. */
+.take-part { display: grid; gap: 13px; }
+.take-part .form-grid { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 13px; }
+.take-part-results { display: grid; gap: 6px; max-height: 232px; overflow-y: auto; }
+.take-part-results > button { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 46px; padding: 8px 12px; border: 1px solid var(--line, #e6e4e0); border-radius: 9px; background: #fff; text-align: left; }
+.take-part-results > button:hover { border-color: #cfd3c8; background: #fbfcf9; }
+.take-part-results strong { display: block; font-size: .9375rem; }
+.take-part-results small { color: var(--muted, #77787c); font-size: .8125rem; }
+.take-part-results > button > b { font-variant-numeric: tabular-nums; font-size: 1rem; }
+.take-part-chosen { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; border: 1px solid #cfd8c4; border-radius: 10px; background: #f4f7ef; }
+.take-part-chosen strong { display: block; font-size: .9375rem; }
+.take-part-chosen small { color: #5f6a54; font-size: .8125rem; }
 .attendance-choice > button > div { flex: 1; }
 .attendance-choice b, .attendance-choice strong, .attendance-choice small, .attendance-choice em { display: block; }
 .attendance-choice b { color: #96969a; text-transform: uppercase; letter-spacing: .07em; font-size: .875rem; }

@@ -25,6 +25,7 @@ import { atalhosDePeriodo, nomeDoArquivo, paraCSV, pecasMaisVendidas, periodoAnt
 import { pendenciasRecorrentes, periodicidades, proximaConta, serieDe, textoDaPendencia, type Periodicidade } from "../src/recurring";
 import { emMaiusculo } from "../src/text-case";
 import { dataBrasileira, problemasDaOSAntiga, registroDaOSAntiga, separarMarcaEModelo } from "../src/backfill";
+import { acharPecas, itensDepoisDePegar, osQuePodemReceber, problemasDoPedido, rotuloDaOS, textoDoLancamento, totalDepoisDePegar } from "../src/take-part";
 import { mensagemDoErro } from "../src/firebase-errors";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
@@ -397,6 +398,12 @@ function useFirebaseSession() {
   // uid e o e-mail dentro; `mensagemDoErro` é quem garante que isso não sobe
   // para a tela.
   const reportSyncError = (firebaseError: unknown) => {
+    // A tela recebe a frase em português, sem uid nem e-mail. O detalhe cru —
+    // que diz QUAL coleção foi negada — vai para o console do navegador, onde
+    // só chega quem abriu as ferramentas de desenvolvedor para investigar.
+    // Sem isso, "não foi possível carregar" não diz onde procurar, e a única
+    // saída é adivinhar permissão por permissão.
+    console.error("[picapau] falha ao sincronizar:", firebaseError);
     setError(mensagemDoErro(firebaseError, { acao: "carregar os dados da oficina" }));
   };
 
@@ -1422,7 +1429,8 @@ const accessPermissionGroups: Array<{
     permissions: [
       { key: "orders.view", label: "Ver ordens de serviço", help: "Consulta OS, clientes, motos e andamento." },
       { key: "orders.create", label: "Abrir nova OS", help: "Permite criar OS rápida ou completa." },
-      { key: "orders.update", label: "Atualizar OS atribuídas", help: "Muda situação e marca o serviço como pronto." },
+      { key: "orders.update", label: "Atualizar OS atribuídas", help: "Muda situação, marca como pronta e pega peça do estoque para a OS." },
+      { key: "orders.checkout", label: "Receber e entregar a moto", help: "Cobra o cliente e encerra a OS. Não abre contas a pagar, contas a receber nem a conferência do caixa." },
       { key: "budgets.view", label: "Ver orçamentos", help: "Consulta propostas e aprovações." },
     ],
   },
@@ -2119,6 +2127,7 @@ export function ModuleWorkspace({
   movements,
   viewerEmployeeId,
   viewerIsMechanic,
+  canCheckoutOrders,
   onAdvanceOrder,
   openSettings,
   settingsTab,
@@ -2164,6 +2173,8 @@ export function ModuleWorkspace({
   movements: MovementRecord[];
   viewerEmployeeId: string;
   viewerIsMechanic: boolean;
+  /** Pode cobrar o cliente e encerrar a OS sem abrir o financeiro. */
+  canCheckoutOrders: boolean;
   onAdvanceOrder: (order: OrderRecord, status: ServiceOrderStatus, mechanicIds: string[]) => Promise<void>;
   openSettings: (tab: SettingsTab) => void;
   settingsTab: SettingsTab;
@@ -2232,10 +2243,20 @@ export function ModuleWorkspace({
             <strong>{order.customer}</strong>
             <small>{order.id} · {order.bike}{order.plate ? ` · ${order.plate}` : ""}{!row.mine && equipe.length ? ` · ${equipe.join(" + ")}` : ""}</small>
             <small className="row-problem">{resumoDoServico(order)}</small>
+            {/* Quanto já foi lançado: sem isso ele não sabe se a peça que
+                pegou ontem entrou na conta, e o cliente é cobrado a menos. */}
+            {(order.items ?? []).length
+              ? <small className="row-items">{(order.items ?? []).filter((item) => item.type === "Peça").length} peça(s) · {(order.items ?? []).filter((item) => item.type === "Mão de obra").length} serviço(s) · {formatBRL(order.total ?? 0)}</small>
+              : <small className="row-items empty">Nada lançado ainda</small>}
             <span className={`status ${statusTone(order.status)}`}><i/>{order.status}</span>
           </span>
           <div className="order-actions">
             <button onClick={() => openDialog("order", order.id)}>Abrir</button>
+            {/* A moto está pronta e ele pode receber: o caminho antigo era
+                abrir a OS e procurar o botão lá dentro. Com a mão suja, no
+                celular, isso é um toque a mais em cima de outro. */}
+            {order.status === "Entrega" && canCheckoutOrders
+              ? <button className="primary-button" onClick={() => openDialog("order", order.id)}>Receber</button> : null}
             {row.actions.filter(() => canOperate).map((action) => (
               <button key={action.label} onClick={() => void onAdvanceOrder(order, action.target, mechanicsAfterTaking(order, viewerEmployeeId, allowMultiple))
                 .then(() => notify(row.mine ? `${order.id}: ${action.target}.` : `${order.id} agora é sua.`))
@@ -2253,6 +2274,24 @@ export function ModuleWorkspace({
         <div className="module-heading">
           <div><p>Oficina</p><h1>Minhas ordens</h1><span>O que está com você e o que a oficina tem para pegar.</span></div>
           <span className="system-healthy"><i/><b>{resumo.working} na bancada agora</b></span>
+        </div>
+
+        {/* Os dois movimentos que ele faz o dia inteiro, do tamanho do dedo e
+            antes da lista: abrir a moto que acabou de chegar e lançar a peça
+            que ele pegou na prateleira. Estavam ambos fora da tela dele. */}
+        <div className="mechanic-actions">
+          {canCreateOrders ? (
+            <button className="action-tile" onClick={() => openDialog("osChoice")}>
+              <Icon name="plus" size={20}/>
+              <div><strong>Abrir atendimento</strong><small>Moto que acabou de chegar</small></div>
+            </button>
+          ) : null}
+          {canOperate ? (
+            <button className="action-tile" onClick={() => openDialog("takePart")}>
+              <Icon name="box" size={20}/>
+              <div><strong>Pegar peça</strong><small>Tirar do estoque e lançar na OS</small></div>
+            </button>
+          ) : null}
         </div>
 
         {!viewerEmployeeId ? (
@@ -2790,6 +2829,18 @@ export function AppDialog({
   const [antigaValor, setAntigaValor] = useState("");
   const [antigaParceiroId, setAntigaParceiroId] = useState("");
   const [antigaOsDoParceiro, setAntigaOsDoParceiro] = useState("");
+
+  /**
+   * "Pegar peça": o mecânico está com a moto na bancada e vai na prateleira.
+   *
+   * O lançamento tem de acontecer NA HORA. Se depender de o balcão abrir a OS
+   * e editar os itens depois, não acontece: no fim do mês o estoque não bate,
+   * a peça não foi cobrada, e ninguém sabe em qual moto ela entrou.
+   */
+  const [pecaBusca, setPecaBusca] = useState("");
+  const [pecaEscolhidaId, setPecaEscolhidaId] = useState("");
+  const [pecaQuantidade, setPecaQuantidade] = useState(1);
+  const [pecaOsId, setPecaOsId] = useState("");
   // Os campos de entregador saíram junto com a etapa de origem: quem abre a OS
   // já escolhe a parceira e a moto, e anotar quem foi buscar não mudava nada no
   // atendimento. O campo continua no tipo para as OS antigas seguirem legíveis.
@@ -3325,6 +3376,7 @@ export function AppDialog({
     osChoice: "Que tipo de atendimento é?",
     os: "Abrir nova ordem de serviço",
     osPast: "Lançar OS que já aconteceu",
+    takePart: "Pegar peça do estoque",
     quick: "Lançar serviço rápido",
     product: "Adicionar produto",
     import: "Importar cadastro de estoque",
@@ -3353,6 +3405,7 @@ export function AppDialog({
     osChoice: "Escolha o fluxo certo antes de começar.",
     os: "Preencha somente o necessário. Você poderá completar depois.",
     osPast: "Serve para o histórico da moto. Não entra na fila, não baixa peça e não mexe no caixa.",
+    takePart: "Escolha a peça e a OS. Ela entra na ordem e sai do estoque no mesmo movimento.",
     quick: "Para trocas e ajustes sem cadastro completo.",
     product: "Cadastre a peça e já defina o saldo inicial.",
     import: "Use o modelo CSV preenchido no Google Sheets.",
@@ -3780,6 +3833,35 @@ export function AppDialog({
     if (dialog === "record") return close();
     if (!canOperate) return setDialogError("Seu perfil pode consultar, mas não alterar esta operação.");
     if ((dialog === "order" || dialog === "orderCheckout") && (!currentOrder || currentOrder.closed)) return setDialogError("Esta OS não está disponível para alteração. Atualize a lista.");
+
+    // "Pegar peça": acrescenta o item à OS e baixa o saldo no MESMO movimento.
+    // Os dois têm de acontecer juntos — peça lançada sem baixa deixa o estoque
+    // mentindo, e baixa sem lançamento tira a peça da prateleira sem ninguém
+    // cobrar. `saveOrderWithStock` faz isso numa transação.
+    if (dialog === "takePart") {
+      const escolhida = products.find((item) => item.id === pecaEscolhidaId) ?? null;
+      const ordem = osQuePodemReceber(orders).find((item) => item.id === pecaOsId) ?? null;
+      const pedido = { peca: escolhida, quantidade: pecaQuantidade, ordem };
+      const problemas = problemasDoPedido(pedido, settings?.blockZeroStockSale !== false);
+      if (problemas.length) return setDialogError(problemas.join(" "));
+      setSaving(true);
+      try {
+        const itens = itensDepoisDePegar(ordem!, escolhida!, pecaQuantidade);
+        // A baixa vai pela diferença entre o que a OS já tinha reservado e o
+        // que ela passa a ter: assim pegar a mesma peça duas vezes não baixa
+        // a primeira de novo.
+        await saveOrderWithStock(ordem!.id, {
+          items: itens,
+          total: totalDepoisDePegar(itens),
+          deductedItems: partsOf(itens),
+        }, []);
+        return finish(textoDoLancamento(escolhida!, pecaQuantidade, ordem!));
+      } catch (falha) {
+        return setDialogError(mensagemDoErro(falha, { acao: "lançar a peça na OS", temPermissao: canOperate }));
+      } finally {
+        setSaving(false);
+      }
+    }
 
     // A OS que já aconteceu: entra encerrada, com a data do papel, e o
     // `backfilled` do registro é o que mantém o financeiro fora disso.
@@ -4368,6 +4450,7 @@ export function AppDialog({
       osChoice: "Atendimento selecionado.",
       os: "Nova ordem de serviço aberta com sucesso.",
       osPast: "OS antiga lançada no histórico da moto.",
+      takePart: "Peça lançada na OS e baixada do estoque.",
       quick: "Serviço rápido lançado e pronto para recebimento.",
       product: "Produto adicionado ao estoque.",
       import: "Planilha recebida e pronta para importação.",
@@ -4411,6 +4494,7 @@ export function AppDialog({
   const primaryLabels: Partial<Record<Exclude<DialogKind, null>, string>> = {
     quick: "Finalizar e receber",
     osPast: "Lançar no histórico",
+    takePart: "Lançar peça na OS",
     // Depois da prévia o botão diz o que vai acontecer, e não "conferir" —
     // a conferência já é a tela que está na frente da pessoa.
     import: importPlan ? `Importar ${importPlan.create.length + importPlan.update.length} peça(s)` : "Escolher planilha",
@@ -4482,6 +4566,54 @@ export function AppDialog({
             </div>
           </div>
         ) : null}
+
+        {dialog === "takePart" ? (() => {
+          const achadas = acharPecas(products, pecaBusca);
+          const escolhida = products.find((item) => item.id === pecaEscolhidaId) ?? null;
+          const disponiveis = osQuePodemReceber(orders);
+          const ordem = disponiveis.find((item) => item.id === pecaOsId) ?? null;
+          const quantidade = pecaQuantidade;
+          return (
+            <div className="dialog-body take-part">
+              <label className="field"><span>Peça <b className="req">*</b></span>
+                <input autoFocus value={pecaBusca} placeholder="Nome, código ou bipe o código de barras"
+                  onChange={(event) => { setPecaBusca(event.target.value); setPecaEscolhidaId(""); }}/></label>
+              {escolhida ? (
+                <div className="take-part-chosen">
+                  <div><strong>{escolhida.name}</strong><small>{escolhida.code} · {formatBRL(toAmount(escolhida.price))} · <b className={Number(escolhida.stock ?? 0) <= 0 ? "danger-text" : ""}>{escolhida.stock ?? 0} em estoque</b></small></div>
+                  <button className="ghost-button" onClick={() => { setPecaEscolhidaId(""); setPecaBusca(""); }}>Trocar</button>
+                </div>
+              ) : (
+                <div className="take-part-results">
+                  {pecaBusca.trim() && !achadas.length ? <div className="pdv-empty"><span><Icon name="box" size={20}/></span><strong>Nenhuma peça encontrada</strong><p>Confira o nome ou o código. Peça que não existe no cadastro precisa ser cadastrada antes.</p></div> : null}
+                  {achadas.map((item) => (
+                    <button key={item.id} onClick={() => { setPecaEscolhidaId(item.id); setPecaBusca(item.name); }}>
+                      <span><strong>{item.name}</strong><small>{item.code} · {formatBRL(toAmount(item.price))}</small></span>
+                      <b className={Number(item.stock ?? 0) <= 0 ? "danger-text" : ""}>{item.stock ?? 0}</b>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="form-grid">
+                <label className="field"><span>Quantidade <b className="req">*</b></span>
+                  <NumberField value={pecaQuantidade} onChange={setPecaQuantidade} min={1} fallback={1}/></label>
+                <label className="field"><span>Para qual OS <b className="req">*</b></span>
+                  <select value={pecaOsId} onChange={(event) => setPecaOsId(event.target.value)}>
+                    <option value="">Escolha a moto</option>
+                    {disponiveis.map((item) => <option value={item.id} key={item.id}>{rotuloDaOS(item)}</option>)}
+                  </select></label>
+              </div>
+
+              {escolhida && ordem && quantidade > 0 ? (
+                <div className="info-strip"><Icon name="check" size={17}/><span>
+                  Vai lançar <b>{quantidade}x {escolhida.name}</b> na <b>{ordem.id}</b> ({ordem.plate || "sem placa"}) por {formatBRL(toAmount(escolhida.price) * quantidade)}. O estoque cai de {escolhida.stock ?? 0} para <b>{Number(escolhida.stock ?? 0) - quantidade}</b>.
+                </span></div>
+              ) : null}
+              {!disponiveis.length ? <div className="admin-pending"><Icon name="alert" size={20}/><div><strong>Nenhuma OS aberta</strong><small>A peça precisa ir para alguma moto. Abra a OS antes de pegar a peça.</small></div></div> : null}
+            </div>
+          );
+        })() : null}
 
         {dialog === "os" ? (
           <>
@@ -5697,6 +5829,14 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const canManageCustomers = hasPermission("customers.manage");
   const canSeeFinance = hasPermission("finance.view");
   const canManageFinance = hasPermission("finance.manage");
+  /**
+   * Cobrar o cliente e encerrar a OS, sem abrir o financeiro.
+   *
+   * O mecânico que termina o serviço é quem entrega a moto. Antes isso exigia
+   * `finance.manage`, que dá contas a pagar, contas a receber, conferência de
+   * caixa e o poder de apagar lançamento — muito mais do que receber uma OS.
+   */
+  const canCheckoutOrders = canManageFinance || hasPermission("orders.checkout");
   const canViewTeam = hasPermission("team.view");
   // Configurações deixou de ser "só Super Admin": quem toca o balcão cadastra
   // categoria, forma de pagamento e serviço rápido o dia inteiro, e antes
@@ -5772,15 +5912,20 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
     || (["Clientes", "Motocicletas"].includes(active) && canManageCustomers)
     || (["Financeiro", "Contas a receber", "Contas a pagar", "Relatórios"].includes(active) && canManageFinance);
   const canOperateDialog = firebaseAdmin
-    || (["osChoice", "os"].includes(dialog ?? "") && canCreateOrders)
+    || (["osChoice", "os", "osPast"].includes(dialog ?? "") && canCreateOrders)
     || (dialog === "order" && canUpdateOrders)
+    // Pegar peça é mexer na OS e no saldo: quem atualiza OS pode.
+    || (dialog === "takePart" && canUpdateOrders)
     || (dialog === "quick" && canUseQuickService)
     || (dialog === "payment" && canUsePdv)
     || (dialog === "cash" && canManageFinance)
     || (dialog === "employee" && hasPermission("team.manage"))
     || (["product", "import", "nfe", "catalog", "supplier", "purchase"].includes(dialog ?? "") && canManageInventory)
     || (["client", "motorcycle"].includes(dialog ?? "") && canManageCustomers)
-    || (["finance", "expense", "receivable", "payable", "settleReceivable", "settlePayable", "orderCheckout"].includes(dialog ?? "") && canManageFinance);
+    // O recebimento da OS sai do bolo do financeiro: quem tem 'orders.checkout'
+    // cobra e entrega a moto sem enxergar contas a pagar nem o caixa.
+    || (dialog === "orderCheckout" && canCheckoutOrders)
+    || (["finance", "expense", "receivable", "payable", "settleReceivable", "settlePayable"].includes(dialog ?? "") && canManageFinance);
   const [orders] = useFirebaseSyncedCollection("serviceOrders", initialOrders, firebaseEnabled && (canViewOrders || canViewBudgets), canCreateOrders || canUpdateOrders, firebaseSession.reportSyncError);
   const [products] = useFirebaseSyncedCollection("products", initialProducts, firebaseEnabled && canViewInventory, canManageInventory, firebaseSession.reportSyncError);
   const [clients] = useFirebaseSyncedCollection("clients", initialClients, firebaseEnabled && canViewCustomers, canManageCustomers, firebaseSession.reportSyncError);
@@ -5791,8 +5936,8 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const [quickServices, setQuickServices] = useFirebaseSyncedCollection("quickServices", initialQuickServices, firebaseEnabled && (canUseQuickService || canCreateOrders), canManageSettings, firebaseSession.reportSyncError);
   const [categories, setCategories] = useFirebaseSyncedCollection("categories", initialCategories, firebaseEnabled && canViewInventory, canManageSettings || canManageInventory, firebaseSession.reportSyncError);
   const [suppliers, setSuppliers] = useFirebaseSyncedCollection("suppliers", initialSuppliers, firebaseEnabled && canManageInventory, canManageInventory, firebaseSession.reportSyncError);
-  const [paymentMachines, setPaymentMachines] = useFirebaseSyncedCollection("paymentMachines", initialPaymentMachines, firebaseEnabled && canSeeFinance, canManageSettings, firebaseSession.reportSyncError);
-  const [paymentMethods, setPaymentMethods] = useFirebaseSyncedCollection("paymentMethods", initialPaymentMethods, firebaseEnabled && (canSeeFinance || canUsePdv), canManageSettings, firebaseSession.reportSyncError);
+  const [paymentMachines, setPaymentMachines] = useFirebaseSyncedCollection("paymentMachines", initialPaymentMachines, firebaseEnabled && (canSeeFinance || canCheckoutOrders), canManageSettings, firebaseSession.reportSyncError);
+  const [paymentMethods, setPaymentMethods] = useFirebaseSyncedCollection("paymentMethods", initialPaymentMethods, firebaseEnabled && (canSeeFinance || canUsePdv || canCheckoutOrders), canManageSettings, firebaseSession.reportSyncError);
   const [sales] = useFirebaseSyncedCollection<SaleRecord>("sales", initialSales, firebaseEnabled && (canSeeFinance || canUsePdv || canUseQuickService), false, firebaseSession.reportSyncError);
   const [stockEntries] = useFirebaseSyncedCollection<StockEntryRecord>("stockEntries", initialStockEntries, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
   const [stockAdjustments] = useFirebaseSyncedCollection<StockAdjustmentRecord>("stockAdjustments", initialStockAdjustments, firebaseEnabled && canViewInventory, false, firebaseSession.reportSyncError);
@@ -5875,7 +6020,12 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
     toastTimer.current = window.setTimeout(() => setToast(""), 5200);
   };
   const openDialog: OpenDialog = (next, recordId) => {
-    const editPermissions: Partial<Record<Exclude<DialogKind, null>, boolean>> = { product: canManageInventory, supplier: canManageInventory, client: canManageCustomers, motorcycle: canManageCustomers, employee: hasPermission("team.manage"), os: canCreateOrders, osChoice: canCreateOrders, quick: canUseQuickService, payment: canUsePdv, import: canManageInventory, nfe: canManageInventory, purchase: canManageInventory, expense: canManageFinance, finance: canManageFinance, receivable: canManageFinance, payable: canManageFinance, settleReceivable: canManageFinance, settlePayable: canManageFinance, orderCheckout: canManageFinance };
+    const editPermissions: Partial<Record<Exclude<DialogKind, null>, boolean>> = { product: canManageInventory, supplier: canManageInventory, client: canManageCustomers, motorcycle: canManageCustomers, employee: hasPermission("team.manage"), os: canCreateOrders, osChoice: canCreateOrders, quick: canUseQuickService, payment: canUsePdv, import: canManageInventory, nfe: canManageInventory, purchase: canManageInventory, expense: canManageFinance, finance: canManageFinance, receivable: canManageFinance, payable: canManageFinance, settleReceivable: canManageFinance, settlePayable: canManageFinance,
+      // Terceira e última porta do recebimento: além do botão e do rodapé, é
+      // aqui que o diálogo abre. Ficou 'canManageFinance' e o clique em
+      // "Receber e entregar" não fazia nada visível — só um aviso de que o
+      // perfil "pode consultar".
+      orderCheckout: canCheckoutOrders };
     if (editPermissions[next] === false) {
       if (recordId && ["product", "supplier", "client", "motorcycle"].includes(next)) {
         const entry = searchEntries.find((item) => item.kind === next && item.recordId === recordId);
@@ -6026,13 +6176,13 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           {active === "Visão geral" ? (
           <OperationsOverview name={currentUserName} orders={orders} products={products} summary={summary} cash={dashboardCash ?? undefined} drawer={dashboardDrawer} can={hasPermission} navigate={navigateTo} openDialog={openDialog}/>
           ) : (
-            <ModuleWorkspace key={`${active}:${navRevision}`} initialFilter={moduleFilter} initialQuery={moduleQuery} stockEntries={stockEntries} parked={parked} setParked={setParked} canManageFinance={canManageFinance} canManageSettings={canManageSettings} stockAdjustments={stockAdjustments} active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
+            <ModuleWorkspace key={`${active}:${navRevision}`} canCheckoutOrders={canCheckoutOrders} initialFilter={moduleFilter} initialQuery={moduleQuery} stockEntries={stockEntries} parked={parked} setParked={setParked} canManageFinance={canManageFinance} canManageSettings={canManageSettings} stockAdjustments={stockAdjustments} active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>
       <nav className="mobile-bottom-nav" aria-label="Atalhos no celular">{directNav.slice(0, 3).map((item) => <button key={item.label} aria-current={active === item.label ? "page" : undefined} onClick={() => setActive(item.label)}><Icon name={item.icon} size={21}/><span>{item.short}</span></button>)}<button onClick={() => setMobileMenu(true)} aria-label="Abrir todas as opções"><Icon name="menu" size={21}/><span>Menu</span></button></nav>
       {recordPreview && <RecordPreview entry={recordPreview} products={products} clients={clients} motorcycles={motorcycles} suppliers={suppliers} orders={orders} close={() => setRecordPreview(null)}/>}
-      <AppDialog dialog={dialog} canCreateCategory={canManageInventory || canManageSettings} canCreatePartBrand={canManageInventory || canManageSettings} canCheckoutOrders={canManageFinance} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={requestCloseDialog} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog dialog={dialog} canCreateCategory={canManageInventory || canManageSettings} canCreatePartBrand={canManageInventory || canManageSettings} canCheckoutOrders={canCheckoutOrders} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={requestCloseDialog} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {helpOpen ? (
         <div className="dialog-layer" role="presentation" onMouseDown={(evento) => evento.target === evento.currentTarget && setHelpOpen(false)}>
           <section className="dialog dialog-wide help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">

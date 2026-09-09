@@ -32,6 +32,11 @@ export type DialogKind =
    * Ver src/backfill.ts.
    */
   | "osPast"
+  /**
+   * "Pegar peça": o mecânico tira a peça da prateleira e diz para qual OS foi.
+   * Acrescenta o item à ordem e baixa o saldo no mesmo movimento.
+   */
+  | "takePart"
   | "quick"
   | "product"
   | "import"
@@ -118,6 +123,15 @@ export type FirebasePermission =
   | "orders.view"
   | "orders.create"
   | "orders.update"
+  /**
+   * Receber o cliente e entregar a moto, sem abrir o financeiro.
+   *
+   * O mecânico que termina o serviço muitas vezes é quem entrega a moto e
+   * recebe. Fazer isso exigia `finance.manage`, que dá muito mais do que
+   * cobrar uma OS: contas a pagar, contas a receber, conferência de caixa e o
+   * poder de apagar lançamento. Esta permissão é só o encerramento da OS.
+   */
+  | "orders.checkout"
   | "budgets.view"
   | "pos.use"
   | "quickService.use"
@@ -139,7 +153,7 @@ export type FirebasePermission =
   | "settings.manage";
 
 export const allFirebasePermissions: FirebasePermission[] = [
-  "orders.view", "orders.create", "orders.update", "budgets.view",
+  "orders.view", "orders.create", "orders.update", "orders.checkout", "budgets.view",
   "pos.use", "quickService.use", "inventory.view", "inventory.manage",
   "customers.view", "customers.manage", "finance.view", "finance.manage",
   "team.view", "team.manage", "settings.view", "settings.manage",
