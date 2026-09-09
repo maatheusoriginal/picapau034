@@ -170,7 +170,10 @@ const passo = async (nome, fn) => {
 const preencherEtapa1 = async (dados) => {
   await p.locator(`${CAMADA} .os-search input`).first().fill(dados.nome);
   await p.waitForTimeout(900);
-  await p.locator(`${CAMADA} .os-search-empty button`).first().click();
+  // O botão saiu do aviso de "nada encontrado" e virou uma ação fixa embaixo
+  // da busca, ao lado de "Atender sem cadastrar agora" — clicar no primeiro
+  // botão que aparece pegaria o errado.
+  await p.locator(`${CAMADA} .os-search-actions button`).filter({ hasText: /Cadastrar cliente/ }).first().click();
   await p.waitForTimeout(900);
   await p.locator(`${CAMADA} .os-inline-form input[placeholder="Nome do cliente"]`).fill(dados.nome);
   await p.locator(`${CAMADA} .os-inline-form input[placeholder="(34) 99999-9999"]`).fill(dados.telefone);
@@ -182,7 +185,14 @@ const preencherEtapa1 = async (dados) => {
   await p.waitForTimeout(600);
   await listas.nth(1).selectOption(dados.modelo);
   await p.waitForTimeout(600);
-  if (dados.versao) { await listas.nth(2).selectOption(dados.versao); await p.waitForTimeout(500); }
+  // A versão deixou de ser lista e virou campo escrito ("Ex.: ESDI"): o
+  // formulário tem DOIS selects agora, e pedir o terceiro trava o passo.
+  if (dados.versao) {
+    const versaoLista = listas.nth(2);
+    if (await versaoLista.count()) await versaoLista.selectOption(dados.versao).catch(() => {});
+    else await p.locator(`${CAMADA} .os-inline-form.vehicle input[placeholder*="ESDI"]`).fill(dados.versao).catch(() => {});
+    await p.waitForTimeout(500);
+  }
   await p.waitForTimeout(300);
 };
 
@@ -243,6 +253,22 @@ const abrirNovaOS = async () => {
     await cartao.click();
     await p.waitForTimeout(2000);
   }
+};
+
+/**
+ * Abre "Equipe e detalhes da recepção", na etapa do serviço.
+ *
+ * Quilometragem, combustível, prazo, prioridade e os mecânicos foram para
+ * dentro de um bloco recolhido. Os campos EXISTEM no documento mesmo fechado,
+ * então o roteiro os encontrava e travava em "element is not visible" — que
+ * não diz que faltou abrir a gaveta.
+ */
+const abrirDetalhesDaRecepcao = async () => {
+  const expansor = p.locator(`${CAMADA} summary, ${CAMADA} button`).filter({ hasText: /Equipe e detalhes/i }).first();
+  if (!(await expansor.count())) return;
+  if (await p.getByPlaceholder("Ex.: 38.420 km").isVisible().catch(() => false)) return;
+  await expansor.click();
+  await p.waitForTimeout(900);
 };
 
 /** O botão à direita do rodapé do atendimento: é ele que avança a etapa. */
@@ -390,6 +416,7 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
   // forma escolhida pela oficina, e é ela que este roteiro cobra agora.
   if ((await p.locator(`${CAMADA} .intake-steps`).count()) !== 1) throw new Error("o atendimento perdeu o passo a passo de três etapas");
   await irParaServico();
+  await abrirDetalhesDaRecepcao();
   await p.getByPlaceholder("Ex.: 38.420 km").fill("38.420 km");
   await p.locator(".dialog textarea").first().fill("Barulho na relação");
   await p.waitForTimeout(400);
@@ -906,6 +933,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
   if ((await p.locator(".os-block.done").count()) !== 2) problemas.push("os dois blocos deviam ficar prontos");
 
   await irParaServico();
+  await abrirDetalhesDaRecepcao();
   await p.getByPlaceholder("Ex.: 38.420 km").fill("12.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão da frota");
   await incluirMaoDeObra("REVISÃO COMPLETA", "200");
@@ -1123,6 +1151,7 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
   if (/JOA-1A11/.test(motoDoBloco)) problemas.push("mostrou a moto do homônimo");
 
   await irParaServico();
+  await abrirDetalhesDaRecepcao();
   await p.getByPlaceholder("Ex.: 38.420 km").fill("21.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão dos 20 mil");
   await incluirMaoDeObra("REVISÃO", "90");
@@ -1726,6 +1755,7 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   await listas.nth(1).selectOption("CG 150"); await p.waitForTimeout(600);
   await listas.nth(2).selectOption("Fan"); await p.waitForTimeout(500);
   await irParaServico();
+  await abrirDetalhesDaRecepcao();
   await p.getByPlaceholder("Ex.: 38.420 km").fill("50.000 km");
   await p.locator(".dialog textarea").first().fill("Chegou de guincho");
   await incluirMaoDeObra("REVISÃO", "120");
