@@ -40,12 +40,22 @@ const chave = (texto: string) => (texto ?? "").trim().toLocaleUpperCase("pt-BR")
 /**
  * A conta de acesso é de um mecânico?
  *
- * Vale o cargo escolhido na tela e também a permissão de atualizar OS: quem
- * pode mexer no andamento do serviço é, na prática, quem trabalha nele.
+ * Quem decide é o CARGO escolhido na tela, e mais nada.
+ *
+ * Antes valia também a permissão de atualizar OS, com o raciocínio de que quem
+ * mexe no andamento do serviço trabalha nele. O raciocínio não sobreviveu aos
+ * três cargos que o sistema tem: "Atualizar OS atribuídas" vem MARCADA por
+ * padrão no Balcão, então toda atendente virava mecânica — ganhava cadastro de
+ * funcionário com o cargo "Mecânico", passava a receber serviço e aparecia no
+ * seletor de mecânico de toda OS aberta. Como só existem Super Admin, Balcão e
+ * Mecânico, a regra antiga significava, na prática, "todo Balcão é mecânico".
+ *
+ * Quem atende o balcão e também põe a mão na moto é cadastrado como Mecânico e
+ * recebe as permissões de balcão marcadas na tela — o caminho ao contrário, e
+ * visível para quem cadastra.
  */
 export function accessIsMechanic(account: Pick<AccessAccount, "role" | "permissions">): boolean {
-  if (account.role === "Mecânico") return true;
-  return (account.permissions ?? []).includes("orders.update") && account.role !== "Super Admin";
+  return account.role === "Mecânico";
 }
 
 /**

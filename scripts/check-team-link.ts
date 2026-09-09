@@ -4,6 +4,7 @@
  * Rode com: npm run check:team-link
  */
 import { accessIsMechanic, employeeForAccount, employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount, type EmployeeLike } from "../src/team-link";
+import { defaultPermissionsForRole } from "../src/types";
 
 const conta = (partes: Partial<AccessAccount>): AccessAccount => ({
   uid: "uid-x", name: "", role: "Balcão", ...partes,
@@ -33,9 +34,16 @@ const novo = employeeFromAccount(contas[2], "USR-004");
 
 const casos: Array<[string, unknown, unknown]> = [
   ["cargo Mecânico é mecânico", accessIsMechanic(conta({ role: "Mecânico" })), true],
-  ["quem atualiza OS também é", accessIsMechanic(conta({ role: "Balcão", permissions: ["orders.update"] })), true],
-  ["Super Admin que atualiza OS não vira mecânico", accessIsMechanic(conta({ role: "Super Admin", permissions: ["orders.update"] })), false],
+  // Quem manda é o cargo. A regra antiga também aceitava a permissão de
+  // atualizar OS, e ela vem MARCADA por padrão no Balcão: toda atendente
+  // virava mecânica, ganhava cadastro de funcionário com o cargo "Mecânico" e
+  // aparecia no seletor de mecânico de toda OS. Como só existem três cargos,
+  // aquilo queria dizer "todo Balcão é mecânico".
+  ["balcão que atualiza OS NÃO é mecânico", accessIsMechanic(conta({ role: "Balcão", permissions: ["orders.update"] })), false],
+  ["e nem o balcão de fábrica, que já vem com essa permissão", accessIsMechanic(conta({ role: "Balcão", permissions: defaultPermissionsForRole("Balcão") })), false],
+  ["Super Admin não vira mecânico", accessIsMechanic(conta({ role: "Super Admin", permissions: defaultPermissionsForRole("Super Admin") })), false],
   ["balcão sem OS não é mecânico", accessIsMechanic(conta({ role: "Balcão", permissions: ["pos.use"] })), false],
+  ["mecânico de fábrica continua mecânico", accessIsMechanic(conta({ role: "Mecânico", permissions: defaultPermissionsForRole("Mecânico") })), true],
 
   ["acha o funcionário pelo vínculo", employeeForAccount(contas[0], funcionarios)?.id, "USR-001"],
   // O vínculo não existia antes; o nome é o que sobra, e o cadastro passou a
