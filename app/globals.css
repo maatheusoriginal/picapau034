@@ -1062,7 +1062,10 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: .875rem; }
    Os dois movimentos do dia inteiro — abrir a moto que chegou e lançar a peça
    que ele pegou — ficam do tamanho do dedo e ANTES da lista. No celular, com a
    mão suja, alvo pequeno no meio da lista não é usado. */
-.mechanic-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-bottom: 15px; }
+/* `auto-fit` em vez de duas colunas fixas: o mecânico sem permissão de abrir
+   OS vê só "Pegar peça", e com coluna fixa ele saía com metade da largura e um
+   buraco do lado. Sozinho, ele ocupa a linha inteira. */
+.mechanic-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 11px; margin-bottom: 15px; }
 .mechanic-actions .action-tile { display: flex; align-items: center; gap: 12px; min-height: 66px; padding: 13px 15px; border: 1px solid var(--line, #e6e4e0); border-radius: 12px; background: #fff; text-align: left; }
 .mechanic-actions .action-tile:hover { border-color: #cfd3c8; background: #fbfcf9; }
 .mechanic-actions .action-tile strong { display: block; font-size: .9375rem; }
@@ -1076,6 +1079,21 @@ td > span { margin-top: 3px; color: #8e8f92; font-size: .875rem; }
    a que não pode rolar: a primeira OS tem de caber inteira. Dois alvos de
    metade da largura ainda são maiores que qualquer dedo. */
 @media (max-width: 560px) {
+  /* O cabeçalho gastava 167px — um quinto do celular — para dizer o nome da
+     tela e repetir, num selo, o número que os cartões de resumo já mostram
+     logo abaixo. Quem abre esta tela é o mecânico com a moto na frente: ele
+     sabe onde está. Fica o título e mais nada. */
+  .mechanic-board .module-heading { display: block; margin-bottom: 11px; }
+  .mechanic-board .module-heading p,
+  .mechanic-board .module-heading span:not(.system-healthy),
+  /* O `!important` aqui não é preguiça: a regra base do selo já declara
+     `display: flex !important`, e sem igualar o peso ele continua na tela
+     repetindo o "Fazendo agora" que os cartões mostram logo abaixo. */
+  .mechanic-board .module-heading .system-healthy { display: none !important; }
+  .mechanic-board .module-heading h1 { margin: 0; font-size: 1.35rem; }
+  /* "Minhas ordens · N ABERTA(S)" logo abaixo de "Minhas ordens" é a mesma
+     frase duas vezes; no celular sobra só a contagem, que é o que muda. */
+  .mechanic-board .summary-title { padding: 9px 14px; font-size: .8125rem; }
   .mechanic-actions { gap: 9px; margin-bottom: 11px; }
   .mechanic-actions .action-tile { flex-direction: column; align-items: flex-start; justify-content: center; min-height: 52px; padding: 9px 11px; gap: 2px; }
   .mechanic-actions .action-tile strong { font-size: .875rem; }
