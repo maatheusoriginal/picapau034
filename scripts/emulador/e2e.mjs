@@ -244,6 +244,11 @@ const incluirMaoDeObra = async (descricao, valor) => {
  */
 const CAMADA = ".attendance-layer";
 
+// As três etapas ficam no documento ao mesmo tempo: as que não estão em uso vêm
+// com `hidden`. Procurar `.intake-step-panel` sem filtrar acha as três, e o
+// Playwright recusa com "strict mode violation" — ele avisando que a pergunta
+// era ambígua, e não um defeito do sistema. Daí o `:not([hidden])`.
+
 /** Abre o formulário de OS a partir da tela de ordens. */
 const abrirNovaOS = async () => {
   await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
@@ -833,7 +838,7 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
   // aparece quando a pessoa escolhe cadastrar, e não o tempo todo.
   await p.locator(`${CAMADA} .os-search input`).first().fill("Transportes Bom Dia");
   await p.waitForTimeout(900);
-  await p.locator(`${CAMADA} .os-search-empty button`).first().click();
+  await p.locator(`${CAMADA} .os-search-actions button`).filter({ hasText: /Cadastrar cliente/ }).first().click();
   await p.waitForTimeout(900);
   const atalhos = await p.locator(".os-inline-actions .outline-button").allInnerTexts();
   if (!atalhos.some((t) => /completo/i.test(t))) problemas.push(`sem atalho de cadastro completo: ${JSON.stringify(atalhos)}`);
@@ -925,7 +930,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
   // primeira etapa resolva QUEM responde pela OS — sem isso, o balcão escolhe
   // a parceira depois de já ter preenchido a moto e o serviço.
   if ((await p.locator(`${CAMADA} .intake-steps`).count()) !== 1) problemas.push("o atendimento perdeu o passo a passo");
-  const naEtapa1 = await p.locator(`${CAMADA} .intake-step-panel`).innerText();
+  const naEtapa1 = await p.locator(`${CAMADA} .intake-step-panel:not([hidden])`).innerText();
   for (const pedaco of ["Cliente", "Empresa parceira", "Motocicleta"]) {
     if (!naEtapa1.includes(pedaco)) problemas.push(`a identificação não traz "${pedaco}"`);
   }
@@ -2117,7 +2122,7 @@ await passo("cada etapa do atendimento cabe na tela, sem rolar atrás do que se 
 
   const medir = async (nome) => {
     const m = await p.evaluate((sel) => {
-      const painel = document.querySelector(`${sel} .intake-step-panel`);
+      const painel = document.querySelector(`${sel} .intake-step-panel:not([hidden])`);
       if (!painel) return null;
       return { visivel: Math.round(painel.getBoundingClientRect().height), conteudo: painel.scrollHeight };
     }, CAMADA);
@@ -2137,7 +2142,7 @@ await passo("cada etapa do atendimento cabe na tela, sem rolar atrás do que se 
   await irParaServico();
   await medir("serviço");
   // O que o mecânico mais preenche tem de estar à vista, sem abrir gaveta.
-  const noServico = await p.locator(`${CAMADA} .intake-step-panel`).innerText();
+  const noServico = await p.locator(`${CAMADA} .intake-step-panel:not([hidden])`).innerText();
   for (const pedaco of ["Problema relatado", "Adicionar peça", "Adicionar serviço"]) {
     if (!noServico.includes(pedaco)) problemas.push(`a etapa do serviço não traz "${pedaco}"`);
   }
@@ -2148,7 +2153,7 @@ await passo("cada etapa do atendimento cabe na tela, sem rolar atrás do que se 
   await medir("conferência");
   // A conferência existe para responder "está tudo certo?" — sem o valor, ela
   // não responde nada.
-  const naConferencia = await p.locator(`${CAMADA} .intake-step-panel`).innerText();
+  const naConferencia = await p.locator(`${CAMADA} .intake-step-panel:not([hidden])`).innerText();
   if (!/100,00/.test(naConferencia)) problemas.push("a conferência não mostra o total antes de gravar");
   for (const pedaco of ["DEN-5S55", "Honda"]) {
     if (!naConferencia.includes(pedaco)) problemas.push(`a conferência não mostra "${pedaco}"`);
