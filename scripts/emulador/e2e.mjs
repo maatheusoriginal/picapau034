@@ -423,7 +423,9 @@ await passo("abrir uma OS completa com placa, problema e mão de obra", async ()
   // A versão 3 monta os itens num editor próprio: primeiro se escolhe se o que
   // entra é peça ou serviço, e o serviço só é incluído ao confirmar.
   await incluirMaoDeObra("TROCA DO KIT RELAÇÃO", "150");
-  const rodape = await p.locator(".os-single-total").innerText().catch(() => "");
+  // O total saiu do rodapé da tela única e virou `.intake-footer-total`, que
+  // acompanha o passo a passo — continua à vista enquanto se monta a OS.
+  const rodape = await p.locator(`${CAMADA} .intake-footer-total`).innerText().catch(() => "");
   if (!/150,00/.test(rodape)) throw new Error(`o rodapé não mostra o total: ${JSON.stringify(rodape)}`);
   await conferirEAbrir(); await p.waitForTimeout(4000);
   const ordens = await banco("serviceOrders");
@@ -471,13 +473,17 @@ await passo("serviço rápido de R$ 80 recebido em dinheiro", async () => {
   await ir("Serviço rápido");
   await p.getByRole("button", { name: /Novo serviço rápido/i }).first().click();
   await p.waitForTimeout(2200);
-  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("80");
-  await p.getByPlaceholder("Nome ou telefone").fill("Cliente do balcão");
+  // O serviço rápido virou três blocos numerados: serviço, peça e pagamento.
+  // O cliente deixou de ser "Nome ou telefone" e virou "Nome do cliente", e o
+  // botão de fechar passa a mostrar o valor ("Confirmar · R$ 80,00").
+  await p.getByPlaceholder("Ex.: TROCA DE ÓLEO").fill("REGULAGEM DE VÁLVULA");
+  await p.locator('.dialog input[placeholder="0,00"]').first().fill("80");
+  await p.getByPlaceholder("Nome do cliente").fill("Cliente do balcão");
   await p.waitForTimeout(400);
   const pagamento = p.locator(".dialog select").filter({ has: p.locator('option:text-is("Dinheiro")') }).first();
   if (await pagamento.count()) await pagamento.selectOption({ label: "Dinheiro" });
-  await p.waitForTimeout(400);
-  await p.locator(".dialog-footer .primary-button, .dialog button", { hasText: /Finalizar e receber/ }).first().click();
+  await p.waitForTimeout(600);
+  await p.locator(".dialog footer button, .dialog-footer button").filter({ hasText: /Confirmar/ }).first().click();
   await p.waitForTimeout(4500);
   const rapidas = (await banco("sales")).filter((v) => Number(v.total) === 80);
   if (!rapidas.length) throw new Error("o serviço rápido não gravou venda de R$ 80");
