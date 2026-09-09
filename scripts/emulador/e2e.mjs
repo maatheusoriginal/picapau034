@@ -383,13 +383,7 @@ await passo("estoque baixou de 10 para 9", async () => {
 
 await passo("abrir uma OS completa com placa, problema e mão de obra", async () => {
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  // "Que tipo de atendimento é?": serviço rápido ou OS completa.
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
+  await abrirNovaOS();
   // Etapa 1 — cliente e depois a moto. Sem placa a OS é (corretamente) recusada.
   await preencherEtapa1({ nome: "Cliente de Teste", telefone: "34999998888", placa: "TES-1D23", marca: "Honda", modelo: "CG 160", versao: "Fan" });
   // O atendimento é em três etapas, com conferência antes de gravar — foi a
