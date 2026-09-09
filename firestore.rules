@@ -87,7 +87,16 @@ service cloud.firestore {
 
     match /products/{documentId} {
       allow read: if can('inventory.view') || can('pos.use') || can('orders.view');
-      allow create, update, delete: if can('inventory.manage');
+      allow create, delete: if can('inventory.manage');
+      // Quem trabalha na OS mexe no SALDO e em mais nada.
+      //
+      // Pegar peça da prateleira para a moto é o serviço do mecânico, e isso
+      // baixa o estoque. Antes, para fazer isso ele precisava de
+      // 'inventory.manage' — que também deixa mudar preço, custo e apagar peça
+      // do cadastro. A liberação é por chave, do mesmo jeito que a marca de
+      // peça em settings/lists: 'stock' e o carimbo 'updatedAt', só.
+      allow update: if can('inventory.manage')
+        || (can('orders.update') && changesOnly(['stock', 'updatedAt']));
     }
 
     match /clients/{documentId} {
@@ -130,7 +139,22 @@ service cloud.firestore {
     // quem só consulta o financeiro enxerga sem poder mexer.
     match /accounts/{documentId} {
       allow read: if can('finance.view');
-      allow create, update, delete: if can('finance.manage');
+      // Encerrar uma OS fiada ou de parceiro GERA a cobrança, então quem pode
+      // receber e entregar precisa criar a conta a receber — senão a moto sai
+      // da oficina e o dinheiro fica sem registro. Criar é o lado inofensivo:
+      // registra que alguém deve. Dar baixa e apagar continuam no financeiro,
+      // porque é aí que a dívida some.
+      allow create: if can('finance.manage') || can('orders.checkout');
+      // `get` — UM documento por vez, nunca a lista — porque a numeração da
+      // conta procura o primeiro número livre antes de gravar. Sem poder olhar,
+      // a sequência recomeçaria do 1 e o lançamento sobrescreveria uma conta
+      // que já existe, em silêncio: pior do que ler.
+      //
+      // Assumido de propósito: quem tem 'orders.checkout' consegue, tentando
+      // um id por vez, chegar às contas a receber. O que ele NÃO consegue é
+      // listar (a tela do financeiro continua fechada), dar baixa ou apagar.
+      allow get: if can('orders.checkout');
+      allow update, delete: if can('finance.manage');
     }
 
     // Movimentações de dinheiro lançadas à mão (sucata, aporte, frete pago na
@@ -195,13 +219,16 @@ service cloud.firestore {
       allow create, update, delete: if can('inventory.manage');
     }
 
+    // Quem recebe e entrega precisa LER as formas de pagamento e as
+    // maquininhas — senão a tela de cobrança abre sem opção nenhuma e a moto
+    // não sai. Ler a lista de formas de pagamento não conta dinheiro nenhum.
     match /paymentMachines/{documentId} {
-      allow read: if can('finance.view') || can('pos.use');
+      allow read: if can('finance.view') || can('pos.use') || can('orders.checkout');
       allow create, update, delete: if can('settings.manage');
     }
 
     match /paymentMethods/{documentId} {
-      allow read: if can('finance.view') || can('pos.use');
+      allow read: if can('finance.view') || can('pos.use') || can('orders.checkout');
       allow create, update, delete: if can('settings.manage');
     }
 
