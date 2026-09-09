@@ -100,18 +100,20 @@ function documentStyle(format: PrintFormat): string {
        h1 { font-size: ${base + 5}px; margin: 0 0 2px; }
        .label { font-size: ${base - 2}px; }
        .fact b, .plate { font-size: ${base + 4}px; }
-       .total { font-size: ${base + 4}px; }
+       .total, .grand-total b { font-size: ${base + 4}px; }
+       .grand-total span { font-size: ${base}px; }
        .copy { font-size: ${base + 1}px; }
-       .note { font-size: ${base - 2}px; }
+       .note, td .unit { font-size: ${base - 2}px; }
        ${CUT}`
     : `@page { size: A4; margin: 14mm; }
        body { margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.4; color: #000; }
        h1 { font-size: 22px; margin: 0 0 4px; }
        .label { font-size: 11px; }
        .fact b, .plate { font-size: 19px; }
-       .total { font-size: 19px; }
+       .total, .grand-total b { font-size: 19px; }
+       .grand-total span { font-size: 14px; }
        .copy { font-size: 15px; }
-       .note { font-size: 12px; }
+       .note, td .unit { font-size: 12px; }
        ${CUT}`;
 }
 
@@ -141,6 +143,15 @@ function documentShell(title: string, format: PrintFormat, body: string): string
     .fact { margin-bottom: 5px; }
     .fact b { display: block; font-weight: bold; line-height: 1.2; }
     .plate { display: inline-block; margin-top: 2px; padding: 1px 7px; border: 2px solid #000; border-radius: 3px; font-weight: bold; letter-spacing: .1em; }
+    /* O unitário fica embaixo do nome da peça, recuado, para a linha continuar
+       lendo "quantidade · item · total" de cima a baixo. */
+    td .unit { display: block; }
+    .items-head { margin-bottom: 2px; }
+    .discount-row { font-weight: bold; }
+    /* O total emoldurado: é o número que o cliente confere antes de pagar, e
+       ele se perdia no meio das linhas de forma de pagamento. */
+    .grand-total { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 5px 0; padding: 4px 6px; border: 2px solid #000; border-radius: 3px; font-weight: bold; }
+    .thanks { margin-top: 8px; text-align: center; font-weight: bold; }
   </style></head><body>${body}</body></html>`;
 }
 
@@ -159,7 +170,14 @@ function itemRows(items: ServiceOrderItem[]): string {
   if (!items.length) return `<tr><td colspan="3">Nenhum item lançado.</td></tr>`;
   return items.map((item) => {
     const quantity = item.quantity ?? 1;
-    return `<tr><td class="qty">${quantity}x</td><td>${escapeHtml(item.name)}</td><td class="val">${money(item.price)}</td></tr>`;
+    // `price` é o TOTAL da linha. Com quantidade maior que um, só o total
+    // deixava o cliente dividindo de cabeça no balcão para saber quanto custou
+    // a peça — e é essa a conta que ele quer conferir. O unitário sai da
+    // divisão porque é assim que a linha foi somada.
+    const unit = quantity > 1
+      ? `<small class="unit">${quantity} × ${money(Math.round((item.price / quantity) * 100) / 100)}</small>`
+      : "";
+    return `<tr><td class="qty">${quantity}x</td><td>${escapeHtml(item.name)}${unit}</td><td class="val">${money(item.price)}</td></tr>`;
   }).join("");
 }
 
@@ -211,24 +229,46 @@ export function buildOrderDocument({ order, settings, mechanics }: OrderPrintInp
   return documentShell(`OS ${order.id}`, settings?.printFormat ?? "Cupom 80mm", copies);
 }
 
+/**
+ * Dia e HORA da venda.
+ *
+ * `date` guarda só a data; a hora está em `soldAt`. O cupom saía sem ela, e a
+ * hora é o que separa duas vendas do mesmo cliente no mesmo dia — na troca, na
+ * garantia e na conferência do caixa. Venda antiga sem `soldAt` continua
+ * mostrando o que tem.
+ */
+function saleStamp(sale: SaleRecord): string {
+  const quando = new Date(sale.soldAt ?? "");
+  if (Number.isNaN(quando.getTime())) return sale.date ?? "";
+  return quando.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/** "3 itens" — o cliente confere a contagem antes de sair do balcão. */
+function saleItemCount(sale: SaleRecord): string {
+  const pecas = (sale.items ?? []).reduce((soma, item) => soma + (item.quantity ?? 1), 0);
+  return `${pecas} ${pecas === 1 ? "item" : "itens"}`;
+}
+
 /** Cupom não fiscal da venda do balcão ou do serviço rápido. */
 export function buildSaleDocument(sale: SaleRecord, settings: Partial<SettingsConfig> | null): string {
   const body = `<div class="via">
     ${workshopHead(settings)}
     <div class="rule"></div>
-    <div class="row"><strong>${escapeHtml(sale.id)}</strong><span>${escapeHtml(sale.date)}</span></div>
+    <div class="row"><strong>${escapeHtml(sale.id)}</strong><span>${escapeHtml(saleStamp(sale))}</span></div>
     <div class="row"><span class="label">Origem</span><span>${escapeHtml(sale.origin)}</span></div>
+    ${sale.operatorName ? `<div class="row"><span class="label">Atendente</span><span>${escapeHtml(sale.operatorName)}</span></div>` : ""}
     ${sale.customer || sale.vehicle || sale.mechanicName ? `<div class="facts">
       ${sale.customer ? `<div class="fact"><span class="label">Cliente</span><b>${escapeHtml(sale.customer)}</b></div>` : ""}
       ${sale.vehicle ? `<div class="fact"><span class="label">Motocicleta / placa</span><b>${escapeHtml(sale.vehicle)}</b></div>` : ""}
       ${sale.mechanicName ? `<div class="fact"><span class="label">Mecânico</span><b>${escapeHtml(sale.mechanicName)}</b></div>` : ""}
     </div>` : ""}
     <div class="rule"></div>
+    <div class="row items-head"><span class="label">Item</span><span class="label">${saleItemCount(sale)}</span></div>
     <table>${itemRows(sale.items)}</table>
     <div class="rule"></div>
     ${sale.discount ? `<div class="row"><span class="label">Subtotal</span><span>${money(sale.subtotal ?? sale.total + sale.discount)}</span></div>
-    <div class="row"><span class="label">Desconto</span><span>- ${money(sale.discount)}</span></div>` : ""}
-    <div class="row total"><span>Total</span><span>${money(sale.total)}</span></div>
+    <div class="row discount-row"><span class="label">Desconto</span><span>- ${money(sale.discount)}</span></div>` : ""}
+    <div class="grand-total"><span>Total a pagar</span><b>${money(sale.total)}</b></div>
     ${(() => {
       const parts = paymentsOf(sale).filter((part) => part.amount > 0);
       // Cupom com o pagamento dividido linha a linha: o cliente confere o que
@@ -239,7 +279,9 @@ export function buildSaleDocument(sale: SaleRecord, settings: Partial<SettingsCo
       return `<div class="row"><span class="label">Pagamento</span><span>${escapeHtml(sale.paymentMethod)}</span></div>`;
     })()}
     ${sale.machineName ? `<div class="row"><span class="label">Maquininha</span><span>${escapeHtml(sale.machineName)}</span></div>` : ""}
-    <div class="note">Documento sem valor fiscal.</div>
+    ${sale.installments && sale.installments > 1 ? `<div class="row"><span class="label">Parcelas</span><span>${sale.installments}x de ${money(Math.round((sale.total / sale.installments) * 100) / 100)}</span></div>` : ""}
+    <div class="thanks">Obrigado pela preferência!</div>
+    <div class="note">Documento sem valor fiscal. Guarde este cupom para trocas e garantia.</div>
     <div class="feed"></div>
   </div>`;
   return documentShell(`Cupom ${sale.id}`, settings?.printFormat ?? "Cupom 80mm", body);

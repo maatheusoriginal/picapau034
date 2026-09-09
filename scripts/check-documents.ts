@@ -51,6 +51,16 @@ const saleDoc = buildSaleDocument(sale, settings);
 const saleComDesconto = buildSaleDocument({ ...sale, subtotal: 100, discount: 10, total: 90 }, settings);
 const saleDividida = buildSaleDocument({ ...sale, total: 150, paymentMethod: "PIX",
   payments: [{ method: "PIX", amount: 100 }, { method: "Dinheiro", amount: 50 }] }, settings);
+// Venda com quantidade, atendente e hora: é o cupom do balcão de verdade.
+const saleDoBalcao = buildSaleDocument({
+  ...sale, total: 118, operatorName: "RAYANE", soldAt: "2026-03-12T17:32:00.000Z",
+  items: [
+    { id: "PRD-2", type: "Peça", name: "Pastilha", price: 118, quantity: 2 },
+  ],
+}, settings);
+const saleParcelada = buildSaleDocument({ ...sale, total: 300, installments: 3, paymentMethod: "Crédito" }, settings);
+// Venda antiga, gravada antes de `soldAt` existir: não pode virar "Invalid Date".
+const saleAntiga = buildSaleDocument({ ...sale, soldAt: "" } as never, settings);
 const uma = buildOrderDocument({ order, settings: { ...settings, printThreeCopies: false }, mechanics: "" });
 const a4 = buildOrderDocument({ order, settings: { ...settings, printFormat: "A4" }, mechanics: "" });
 const logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jY4QAAAAASUVORK5CYII=";
@@ -177,6 +187,30 @@ const casos: Array<[string, unknown, unknown]> = [
 
   // Cupom da venda
   ["o cupom traz o número da venda", saleDoc.includes("VEN-0003"), true],
+
+  /*
+    O cupom do balcão.
+
+    Com quantidade maior que um só saía o total da linha, e o cliente ficava
+    dividindo de cabeça para saber quanto custou a peça — que é justamente a
+    conta que ele quer conferir antes de pagar.
+  */
+  ["com quantidade, o cupom mostra o unitário", saleDoBalcao.includes("2 × R$\u00A059,00"), true],
+  ["e continua mostrando o total da linha", saleDoBalcao.includes("R$\u00A0118,00"), true],
+  ["quantidade 1 não polui a linha com unitário", saleDoc.includes("class=\"unit\""), false],
+  ["o cupom conta os itens", saleDoBalcao.includes("2 itens"), true],
+  ["um item só não vira 'itens'", saleDoc.includes("1 item<"), true],
+  // A hora separa duas vendas do mesmo cliente no mesmo dia — na troca, na
+  // garantia e na conferência do caixa.
+  ["o cupom traz a hora da venda", /\d{2}\/\d{2}\/\d{4},? \d{2}:\d{2}/.test(saleDoBalcao), true],
+  ["venda antiga sem hora não vira 'Invalid Date'", saleAntiga.includes("Invalid Date"), false],
+  ["e cai na data que ela tem", saleAntiga.includes("12/03/2026"), true],
+  ["o cupom diz quem atendeu", saleDoBalcao.includes("RAYANE"), true],
+  ["venda sem atendente não imprime linha vazia", saleDoc.includes("Atendente"), false],
+  ["o total sai emoldurado, e não perdido no meio das linhas", saleDoc.includes('class="grand-total"'), true],
+  ["o parcelamento aparece com o valor da parcela", saleParcelada.includes("3x de R$\u00A0100,00"), true],
+  ["venda à vista não fala em parcela", saleDoc.includes("Parcelas"), false],
+  ["o cupom pede para guardar, por causa da troca e da garantia", saleDoc.includes("Guarde este cupom"), true],
   ["o cupom avisa que não tem valor fiscal", saleDoc.includes("sem valor fiscal"), true],
   ["o cupom traz a forma de pagamento", saleDoc.includes("PIX"), true],
 
