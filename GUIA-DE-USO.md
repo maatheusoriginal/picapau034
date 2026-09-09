@@ -21,18 +21,47 @@ Quem possui somente consulta vê os dados e o histórico sem poder editar.
 
 ## Atender uma moto
 
-1. Clique em **Novo atendimento**.
-2. Escolha serviço rápido, se for resolver na hora, ou OS para a moto que ficará
-   na oficina. As opções respeitam os acessos do usuário.
-3. Identifique cliente ou parceiro, selecione a moto e informe o problema.
-4. Registre a recepção, o prazo e os mecânicos. Acrescente as peças e os serviços
-   que já souber usando **Adicionar peça** e **Adicionar serviço**.
-5. Confira o total e abra a OS.
+1. Clique em **Novo atendimento** e escolha **A moto fica na oficina**.
+2. Em **Cliente e moto**, busque pela placa, WhatsApp ou nome. Selecione o
+   resultado correto ou use **Cadastrar cliente**. Para frota, escolha
+   **Empresa parceira** e confira quem pagará a OS.
+3. Escolha a motocicleta. Se informar uma placa já cadastrada, confira o
+   proprietário e use **Selecionar esta moto**; a tela não troca o dono sozinha.
+4. Clique em **Ir para serviço**. Registre o problema e inclua peças ou mão de
+   obra. Quantidade, preço unitário e total ficam separados em cada linha.
+5. Abra **Equipe e detalhes da recepção** para ajustar os mecânicos, o prazo,
+   a prioridade, o combustível e a quilometragem. Esses dados podem ser
+   completados depois; o odômetro não nasce marcado como conferido.
+6. Use **Conferir atendimento**. Revise cliente, moto, pagador, recepção e
+   valores. Os botões **Editar** voltam à etapa correspondente sem apagar os dados.
+7. Clique em **Abrir ordem de serviço**. A confirmação mostra o número salvo e
+   oferece **Acompanhar OS** ou **Novo atendimento**.
 
-O cadastro do proprietário, o pagador e a origem continuam disponíveis. Nos
-atendimentos encaminhados, o desconto da empresa parceira continua restrito à
-mão de obra. Uma moto pode ser recebida com identificação pendente conforme o
-fluxo existente; o fechamento pede os dados que faltarem.
+**Atender sem cadastrar agora** exige uma placa válida. O cliente fica pendente
+até o encerramento. A OS pode nascer sem peças e serviços; o total é apenas a
+previsão, e o pagamento acontece no encerramento. O desconto da parceira se
+aplica à mão de obra quando ela é a responsável pelo pagamento.
+
+Ao editar um serviço, use **Incluir serviço** para colocá-lo na OS ou **Descartar
+campos** para abandonar apenas essa edição. A conferência avisa se há um serviço
+que ainda não foi incluído. Ao fechar um formulário alterado, o sistema pede
+confirmação; o rascunho não é um salvamento automático.
+
+### Serviço rápido
+
+Escolha **Resolver e receber na hora**. Selecione ou descreva o serviço,
+confira o valor da mão de obra e a peça utilizada. A escolha da peça preenche
+seu preço cadastrado; você pode ajustar o preço unitário e a quantidade.
+Em **Cliente e motocicleta**, preencha os dados opcionais: eles serão salvos e
+incluídos no comprovante. Para pagamento a prazo, informe o cliente da cobrança.
+Confira a forma de pagamento, a conta e a maquininha quando houver cartão.
+**Confirmar** registra o serviço, movimenta o estoque e prepara o comprovante.
+
+### Atendimento antigo
+
+Use **O serviço já aconteceu?** para registrar uma OS de papel. Informe data,
+placa e o que foi feito. O registro entra encerrado no histórico e não altera
+estoque, caixa ou faturamento.
 
 ## Acompanhar e concluir
 

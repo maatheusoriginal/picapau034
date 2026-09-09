@@ -7,6 +7,13 @@ de acesso. Interface em português, com navegação para computador e celular.
 Esta versão atualiza a aplicação enviada, mantendo React, Vite e Firebase.
 Não cria um novo banco, não apaga cadastros e não inclui dados fictícios.
 
+## Novo atendimento atualizado
+
+O atendimento agora tem três etapas: **Cliente e moto → Serviço → Conferir**.
+No computador, o resumo acompanha o formulário; no celular, a tela ocupa a
+altura disponível e mantém as ações no rodapé. O serviço rápido também foi
+reorganizado. Veja [NOVO-ATENDIMENTO.md](docs/NOVO-ATENDIMENTO.md).
+
 ## Comece por aqui
 
 - **[GUIA-DE-USO.md](GUIA-DE-USO.md):** onde encontrar e como usar as rotinas.
@@ -77,6 +84,8 @@ A conta de serviço do Firebase Admin fica somente no servidor, sem prefixo `VIT
 | `npm run dev` | Executar a interface e as APIs localmente |
 | `npm run verify` | Verificar tipos e todos os grupos de testes automáticos |
 | `npm run check:workspace` | Conferir navegação, permissões, prazos, busca e valores dos itens |
+| `npm run check:attendance` | Conferir identidade, placa, itens e comprovante |
+| `npm run check:attendance-render` | Renderizar os fluxos sem navegador ou conexão ao banco |
 | `npm run build` | Compilar a versão de produção |
 | `npm start` | Executar a versão de produção já compilada |
 

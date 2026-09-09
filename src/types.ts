@@ -661,6 +661,8 @@ export type SaleRecord = {
   account?: string;
   installments?: number;
   customer?: string;
+  /** Identificação opcional informada no serviço rápido. */
+  vehicle?: string;
   clientId?: string;
   mechanicId?: string;
   mechanicName?: string;

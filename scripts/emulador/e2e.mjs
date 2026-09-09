@@ -168,21 +168,31 @@ const passo = async (nome, fn) => {
  * digita o nome, o botão de cadastrar aparece, e só então a moto libera.
  */
 const preencherEtapa1 = async (dados) => {
-  await p.locator(".os-search input").first().fill(dados.nome);
+  await p.locator(`${CAMADA} .os-search input`).first().fill(dados.nome);
   await p.waitForTimeout(900);
-  await p.locator(".os-search-empty button").first().click();
+  // O botão saiu do aviso de "nada encontrado" e virou uma ação fixa embaixo
+  // da busca, ao lado de "Atender sem cadastrar agora" — clicar no primeiro
+  // botão que aparece pegaria o errado.
+  await p.locator(`${CAMADA} .os-search-actions button`).filter({ hasText: /Cadastrar cliente/ }).first().click();
   await p.waitForTimeout(900);
-  await p.locator('.os-inline-form input[placeholder="Nome do cliente"]').fill(dados.nome);
-  await p.locator('.os-inline-form input[placeholder="(34) 99999-9999"]').fill(dados.telefone);
+  await p.locator(`${CAMADA} .os-inline-form input[placeholder="Nome do cliente"]`).fill(dados.nome);
+  await p.locator(`${CAMADA} .os-inline-form input[placeholder="(34) 99999-9999"]`).fill(dados.telefone);
   await p.waitForTimeout(500);
-  await p.locator('.os-inline-form.vehicle input[placeholder*="ABC-1234"]').fill(dados.placa);
+  await p.locator(`${CAMADA} .os-inline-form.vehicle input[placeholder*="ABC-1234"]`).fill(dados.placa);
   await p.waitForTimeout(400);
-  const listas = p.locator(".os-inline-form.vehicle select");
+  const listas = p.locator(`${CAMADA} .os-inline-form.vehicle select`);
   await listas.nth(0).selectOption(dados.marca);
   await p.waitForTimeout(600);
   await listas.nth(1).selectOption(dados.modelo);
   await p.waitForTimeout(600);
-  if (dados.versao) { await listas.nth(2).selectOption(dados.versao); await p.waitForTimeout(500); }
+  // A versão deixou de ser lista e virou campo escrito ("Ex.: ESDI"): o
+  // formulário tem DOIS selects agora, e pedir o terceiro trava o passo.
+  if (dados.versao) {
+    const versaoLista = listas.nth(2);
+    if (await versaoLista.count()) await versaoLista.selectOption(dados.versao).catch(() => {});
+    else await p.locator(`${CAMADA} .os-inline-form.vehicle input[placeholder*="ESDI"]`).fill(dados.versao).catch(() => {});
+    await p.waitForTimeout(500);
+  }
   await p.waitForTimeout(300);
 };
 
@@ -206,14 +216,94 @@ const ATALHO_DIRETO = {
  * serviço". Preencher e sair sem confirmar deixa a OS sem mão de obra.
  */
 const incluirMaoDeObra = async (descricao, valor) => {
-  await p.locator(".order-add-actions button", { hasText: /Adicionar serviço/ }).first().click();
+  await p.locator(`${CAMADA} .order-add-actions button`, { hasText: /Adicionar serviço/ }).first().click();
   await p.waitForTimeout(700);
-  const campos = p.locator(".order-labor-fields");
+  const campos = p.locator(`${CAMADA} .order-labor-fields`);
   await campos.locator("input").first().fill(descricao);
   await campos.locator("input").last().fill(valor);
   await p.waitForTimeout(300);
   await campos.locator("button", { hasText: /Incluir serviço/ }).click();
   await p.waitForTimeout(900);
+};
+
+// ---------------------------------------------------------------------------
+// O atendimento em três etapas
+// ---------------------------------------------------------------------------
+/**
+ * A abertura de OS deixou de ser uma tela só e voltou a ser um passo a passo,
+ * agora com uma conferência no fim: identificação → serviço → conferir.
+ *
+ * A escolha na entrada também mudou de forma: em vez de um texto ("Abrir OS
+ * completa") são dois cartões, e o lançamento de OS antiga desceu para uma
+ * opção secundária embaixo deles.
+ *
+ * Tudo isso vive dentro de `.attendance-layer`. Escopar os seletores nessa
+ * camada não é preciosismo: a máscara dela cobre a tela inteira, e um seletor
+ * solto acha o botão de mesmo nome que ficou ATRÁS dela — o clique então nunca
+ * resolve, e o passo morre por tempo esgotado sem dizer o motivo.
+ */
+const CAMADA = ".attendance-layer";
+
+// As três etapas ficam no documento ao mesmo tempo: as que não estão em uso vêm
+// com `hidden`. Procurar `.intake-step-panel` sem filtrar acha as três, e o
+// Playwright recusa com "strict mode violation" — ele avisando que a pergunta
+// era ambígua, e não um defeito do sistema. Daí o `:not([hidden])`.
+
+/** Abre o formulário de OS a partir da tela de ordens. */
+const abrirNovaOS = async () => {
+  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
+  await p.waitForTimeout(1600);
+  const cartao = p.locator(`${CAMADA} .attendance-option`).filter({ hasText: /ORDEM DE SERVIÇO/i }).first();
+  if (await cartao.count()) {
+    await cartao.click();
+    await p.waitForTimeout(2000);
+  }
+};
+
+/**
+ * Abre "Equipe e detalhes da recepção", na etapa do serviço.
+ *
+ * Quilometragem, combustível, prazo, prioridade e os mecânicos foram para
+ * dentro de um bloco recolhido. Os campos EXISTEM no documento mesmo fechado,
+ * então o roteiro os encontrava e travava em "element is not visible" — que
+ * não diz que faltou abrir a gaveta.
+ */
+const abrirDetalhesDaRecepcao = async () => {
+  const expansor = p.locator(`${CAMADA} summary, ${CAMADA} button`).filter({ hasText: /Equipe e detalhes/i }).first();
+  if (!(await expansor.count())) return;
+  if (await p.getByPlaceholder("Ex.: 38.420 km").isVisible().catch(() => false)) return;
+  await expansor.click();
+  await p.waitForTimeout(900);
+};
+
+/** O botão à direita do rodapé do atendimento: é ele que avança a etapa. */
+const avancar = async (nome, espera = 1800) => {
+  const botao = p.locator(`${CAMADA} footer button`).filter({ hasText: nome }).first();
+  await botao.waitFor({ state: "visible", timeout: 15000 });
+  await botao.click();
+  await p.waitForTimeout(espera);
+};
+
+/** Da identificação para o serviço. */
+const irParaServico = () => avancar(/Ir para serviço/);
+/**
+ * Do serviço para a conferência, da conferência para a OS gravada, e daí para
+ * fora.
+ *
+ * O fluxo novo termina numa tela de confirmação ("Ordem de serviço aberta!")
+ * que fica aberta esperando o que fazer em seguida. Ela é útil para quem
+ * atende, e para o roteiro é uma máscara que engole o clique seguinte — foi o
+ * que fez o passo da frota travar tentando abrir um cartão que estava atrás
+ * dela. Fechar pelo "×" volta para a lista sem seguir para outro lugar.
+ */
+const conferirEAbrir = async () => {
+  await avancar(/Conferir atendimento/);
+  await avancar(/Abrir ordem de serviço/, 4500);
+  const fechar = p.locator(`${CAMADA} .attendance-success button[aria-label="Fechar confirmação"]`).first();
+  if (await fechar.count()) {
+    await fechar.click();
+    await p.waitForTimeout(1800);
+  }
 };
 
 const ir = async (destino) => {
@@ -338,26 +428,25 @@ await passo("estoque baixou de 10 para 9", async () => {
 
 await passo("abrir uma OS completa com placa, problema e mão de obra", async () => {
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  // "Que tipo de atendimento é?": serviço rápido ou OS completa.
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
+  await abrirNovaOS();
   // Etapa 1 — cliente e depois a moto. Sem placa a OS é (corretamente) recusada.
   await preencherEtapa1({ nome: "Cliente de Teste", telefone: "34999998888", placa: "TES-1D23", marca: "Honda", modelo: "CG 160", versao: "Fan" });
-  // Tela única: recepção, mão de obra e confirmação sem trocar de tela.
-  if (await p.locator(".stepper").count()) throw new Error("a OS voltou a ser por etapas");
+  // O atendimento é em três etapas, com conferência antes de gravar — foi a
+  // forma escolhida pela oficina, e é ela que este roteiro cobra agora.
+  if ((await p.locator(`${CAMADA} .intake-steps`).count()) !== 1) throw new Error("o atendimento perdeu o passo a passo de três etapas");
+  await irParaServico();
+  await abrirDetalhesDaRecepcao();
   await p.getByPlaceholder("Ex.: 38.420 km").fill("38.420 km");
   await p.locator(".dialog textarea").first().fill("Barulho na relação");
   await p.waitForTimeout(400);
   // A versão 3 monta os itens num editor próprio: primeiro se escolhe se o que
   // entra é peça ou serviço, e o serviço só é incluído ao confirmar.
   await incluirMaoDeObra("TROCA DO KIT RELAÇÃO", "150");
-  const rodape = await p.locator(".os-single-total").innerText().catch(() => "");
+  // O total saiu do rodapé da tela única e virou `.intake-footer-total`, que
+  // acompanha o passo a passo — continua à vista enquanto se monta a OS.
+  const rodape = await p.locator(`${CAMADA} .intake-footer-total`).innerText().catch(() => "");
   if (!/150,00/.test(rodape)) throw new Error(`o rodapé não mostra o total: ${JSON.stringify(rodape)}`);
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4000);
+  await conferirEAbrir(); await p.waitForTimeout(4000);
   const ordens = await banco("serviceOrders");
   if (ordens.length !== 1) throw new Error(`gravou ${ordens.length} OS, esperado 1`);
   const os = ordens[0];
@@ -403,13 +492,24 @@ await passo("serviço rápido de R$ 80 recebido em dinheiro", async () => {
   await ir("Serviço rápido");
   await p.getByRole("button", { name: /Novo serviço rápido/i }).first().click();
   await p.waitForTimeout(2200);
-  await p.locator(".dialog input[type=number], .dialog input[inputmode=decimal]").first().fill("80");
-  await p.getByPlaceholder("Nome ou telefone").fill("Cliente do balcão");
+  // O serviço rápido virou três blocos numerados: serviço, peça e pagamento.
+  // O cliente deixou de ser "Nome ou telefone" e virou "Nome do cliente", e o
+  // botão de fechar passa a mostrar o valor ("Confirmar · R$ 80,00").
+  await p.getByPlaceholder("Ex.: TROCA DE ÓLEO").fill("REGULAGEM DE VÁLVULA");
+  await p.locator('.dialog input[placeholder="0,00"]').first().fill("80");
+  // "Cliente e motocicleta" é opcional no serviço rápido e vem recolhido: o
+  // campo existe no documento, então o roteiro o achava e travava em
+  // "element is not visible".
+  if (!(await p.getByPlaceholder("Nome do cliente").isVisible().catch(() => false))) {
+    await p.locator(".dialog summary, .dialog button").filter({ hasText: /Cliente e motocicleta/i }).first().click().catch(() => {});
+    await p.waitForTimeout(900);
+  }
+  await p.getByPlaceholder("Nome do cliente").fill("Cliente do balcão");
   await p.waitForTimeout(400);
   const pagamento = p.locator(".dialog select").filter({ has: p.locator('option:text-is("Dinheiro")') }).first();
   if (await pagamento.count()) await pagamento.selectOption({ label: "Dinheiro" });
-  await p.waitForTimeout(400);
-  await p.locator(".dialog-footer .primary-button, .dialog button", { hasText: /Finalizar e receber/ }).first().click();
+  await p.waitForTimeout(600);
+  await p.locator(".dialog footer button, .dialog-footer button").filter({ hasText: /Confirmar/ }).first().click();
   await p.waitForTimeout(4500);
   const rapidas = (await banco("sales")).filter((v) => Number(v.total) === 80);
   if (!rapidas.length) throw new Error("o serviço rápido não gravou venda de R$ 80");
@@ -747,17 +847,12 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
   const problemas = [];
   const antes = (await banco("clients")).length;
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
+  await abrirNovaOS();
   // O cadastro completo fica dentro do bloco do cliente, como ação secundária:
   // aparece quando a pessoa escolhe cadastrar, e não o tempo todo.
-  await p.locator(".os-search input").first().fill("Transportes Bom Dia");
+  await p.locator(`${CAMADA} .os-search input`).first().fill("Transportes Bom Dia");
   await p.waitForTimeout(900);
-  await p.locator(".os-search-empty button").first().click();
+  await p.locator(`${CAMADA} .os-search-actions button`).filter({ hasText: /Cadastrar cliente/ }).first().click();
   await p.waitForTimeout(900);
   const atalhos = await p.locator(".os-inline-actions .outline-button").allInnerTexts();
   if (!atalhos.some((t) => /completo/i.test(t))) problemas.push(`sem atalho de cadastro completo: ${JSON.stringify(atalhos)}`);
@@ -789,7 +884,10 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
   await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
   await p.waitForTimeout(4000);
   if ((await banco("clients")).length !== antes + 1) problemas.push("o cliente completo não foi gravado");
-  if (!(await p.locator(".dialog", { hasText: /Abrir nova ordem/i }).count())) problemas.push("não voltou para a OS depois de cadastrar");
+  // O diálogo mudou de nome junto com o fluxo: "Abrir nova ordem de serviço"
+  // virou "Nova ordem de serviço". O que se confere é o mesmo: cadastrar o
+  // cliente por dentro não pode jogar quem atende para fora da OS.
+  if (!(await p.locator(`${CAMADA}`, { hasText: /Nova ordem de serviço/i }).count())) problemas.push("não voltou para a OS depois de cadastrar");
   await p.locator(".dialog-footer .ghost-button, .dialog button", { hasText: /Cancelar/ }).first().click().catch(() => {});
   await p.waitForTimeout(1200);
   if (problemas.length) throw new Error("cadastro dentro da OS:\n      - " + problemas.join("\n      - "));
@@ -841,44 +939,41 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
     if (daFrota.partnerName !== "Flash Entregas") problemas.push(`responsável gravado: "${daFrota.partnerName}"`);
   }
 
-  // 3. a OS começa escolhendo a parceira, e tudo cabe numa tela só.
+  // 3. a OS começa escolhendo a parceira, na primeira etapa.
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
+  await abrirNovaOS();
+  // A oficina escolheu o passo a passo com conferência no fim, então a
+  // exigência de "tudo numa tela só" morreu. O que continua valendo é que a
+  // primeira etapa resolva QUEM responde pela OS — sem isso, o balcão escolhe
+  // a parceira depois de já ter preenchido a moto e o serviço.
+  if ((await p.locator(`${CAMADA} .intake-steps`).count()) !== 1) problemas.push("o atendimento perdeu o passo a passo");
+  const naEtapa1 = await p.locator(`${CAMADA} .intake-step-panel:not([hidden])`).innerText();
+  for (const pedaco of ["Cliente", "Empresa parceira", "Motocicleta"]) {
+    if (!naEtapa1.includes(pedaco)) problemas.push(`a identificação não traz "${pedaco}"`);
   }
-  if (await p.locator(".stepper").count()) problemas.push("a OS voltou a ser por etapas");
-  if ((await p.locator(".os-single-columns").count()) !== 1) problemas.push("a OS não abriu na tela única");
-  // Quem, qual moto, a recepção e os itens: tudo à vista de uma vez.
-  const naTela = await p.locator(".os-single").innerText();
-  // A versão 3 renomeou os botões do editor de itens: "Adicionar peças" virou
-  // "Adicionar peça" e "Adicionar mão de obra" virou "Adicionar serviço".
-  for (const pedaco of ["Quem responde por esta OS", "Motocicleta", "Quilometragem", "Adicionar peça", "Adicionar serviço"]) {
-    if (!naTela.includes(pedaco)) problemas.push(`a tela única não traz "${pedaco}"`);
-  }
-  if ((await p.locator(".os-party-switch button").count()) !== 2) problemas.push("não dá para escolher entre cliente e parceira");
+  if ((await p.locator(`${CAMADA} .os-party-switch button`).count()) !== 2) problemas.push("não dá para escolher entre cliente e parceira");
 
-  await p.locator(".os-party-switch button", { hasText: /parceira/i }).click();
+  await p.locator(`${CAMADA} .os-party-switch button`, { hasText: /parceira/i }).click();
   await p.waitForTimeout(1000);
-  const escolhida = await p.locator(".os-partner-pick select").first().locator("option:checked").innerText();
+  const escolhida = await p.locator(`${CAMADA} .os-partner-pick select`).first().locator("option:checked").innerText();
   if (!/Flash Entregas/.test(escolhida)) problemas.push(`a parceira não veio selecionada: ${JSON.stringify(escolhida)}`);
 
   // A frota dela aparece para escolher. O <select> mostrava a primeira parceira
   // com o estado ainda vazio, e o filtro procurava por id vazio: a lista da
   // parceira vinha sempre vazia.
-  const motosNaTela = await p.locator(".vehicle-choice-list > button").allInnerTexts();
+  const motosNaTela = await p.locator(`${CAMADA} .vehicle-choice-list > button`).allInnerTexts();
   if (!motosNaTela.some((texto) => /FLA-2C34/.test(texto))) problemas.push(`as motos da parceira não apareceram: ${JSON.stringify(motosNaTela)}`);
-  await p.locator(".vehicle-choice-list > button", { hasText: "FLA-2C34" }).click();
+  await p.locator(`${CAMADA} .vehicle-choice-list > button`, { hasText: "FLA-2C34" }).click();
   await p.waitForTimeout(800);
-  if ((await p.locator(".os-block.done").count()) !== 2) problemas.push("os dois blocos deviam ficar prontos");
+  if ((await p.locator(`${CAMADA} .os-block.done`).count()) !== 2) problemas.push("os dois blocos deviam ficar prontos");
 
+  await irParaServico();
+  await abrirDetalhesDaRecepcao();
   await p.getByPlaceholder("Ex.: 38.420 km").fill("12.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão da frota");
   await incluirMaoDeObra("REVISÃO COMPLETA", "200");
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click();
+  await conferirEAbrir();
   await p.waitForTimeout(4500);
 
   const daParceira = (await banco("serviceOrders")).find((ordem) => ordem.partnerName === "Flash Entregas");
@@ -994,12 +1089,7 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   // sozinho, tudo junto.
   const problemas = [];
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
+  await abrirNovaOS();
 
   if ((await p.locator(".os-block").count()) !== 2) problemas.push("a etapa não tem os dois blocos");
   if (await p.locator(".os-inline-form").count()) problemas.push("o formulário de cadastro apareceu sem ninguém pedir");
@@ -1007,7 +1097,7 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
     problemas.push("o bloco da moto não espera o cliente ser escolhido");
 
   // Cliente do passo 6, procurado pelo nome.
-  await p.locator(".os-search input").first().fill("Cliente de Teste");
+  await p.locator(`${CAMADA} .os-search input`).first().fill("Cliente de Teste");
   await p.waitForTimeout(1200);
   // Digitar LISTA quem bateu; escolher é o clique. Antes o campo já prendia a
   // OS no primeiro cliente que batesse, sem mostrar que havia outros.
@@ -1021,17 +1111,17 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   if (!/1 moto cadastrada/.test(achado)) problemas.push(`não contou as motos dele: ${JSON.stringify(achado)}`);
 
   // A moto dele aparece para escolher, e não um formulário em branco.
-  const motos = await p.locator(".vehicle-choice-list > button").allInnerTexts();
+  const motos = await p.locator(`${CAMADA} .vehicle-choice-list > button`).allInnerTexts();
   if (!motos.some((t) => /TES-1D23/.test(t))) problemas.push(`as motos do cliente não apareceram: ${JSON.stringify(motos)}`);
   if (!motos.some((t) => /Outra moto/.test(t))) problemas.push("falta a opção de cadastrar outra moto");
   await p.locator(".vehicle-choice-list > button", { hasText: "TES-1D23" }).first().click();
   await p.waitForTimeout(700);
-  if ((await p.locator(".os-block.done").count()) !== 2) problemas.push("os dois blocos deviam estar marcados como prontos");
+  if ((await p.locator(`${CAMADA} .os-block.done`).count()) !== 2) problemas.push("os dois blocos deviam estar marcados como prontos");
 
   // "Outra moto" abre o cadastro rápido com as listas do catálogo.
   await p.locator(".vehicle-choice-list > button", { hasText: "Outra moto" }).click();
   await p.waitForTimeout(800);
-  if ((await p.locator(".os-inline-form.vehicle select").count()) < 2) problemas.push("a moto nova não veio com marca e modelo em lista");
+  if ((await p.locator(`${CAMADA} .os-inline-form.vehicle select`).count()) < 2) problemas.push("a moto nova não veio com marca e modelo em lista");
   await p.locator(".os-inline-form.vehicle .ghost-button").first().click();
   await p.waitForTimeout(700);
   if (!(await p.locator(".vehicle-choice-list").count())) problemas.push("voltar não trouxe as motos do cliente de volta");
@@ -1039,7 +1129,7 @@ await passo("OS de cliente que já é da casa: acha, mostra as motos dele e não
   // Trocar de cliente limpa a escolha, em vez de manter a moto do anterior.
   await p.locator(".os-picked-change", { hasText: /^Trocar$/ }).click();
   await p.waitForTimeout(800);
-  if (!(await p.locator(".os-search input").count())) problemas.push("trocar não voltou para a busca");
+  if (!(await p.locator(`${CAMADA} .os-search input`).count())) problemas.push("trocar não voltou para a busca");
   if (!/Escolha o cliente acima/.test(await p.locator(".os-block").nth(1).innerText()))
     problemas.push("trocar de cliente deixou a moto do anterior escolhida");
 
@@ -1078,13 +1168,8 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
   if (!oFilho) throw new Error("os dois homônimos não foram cadastrados");
 
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
-  await p.locator(".os-search input").first().fill("Joaquim");
+  await abrirNovaOS();
+  await p.locator(`${CAMADA} .os-search input`).first().fill("Joaquim");
   await p.waitForTimeout(1300);
   const achados = await p.locator(".os-search-results > button").allInnerTexts();
   if (achados.length !== 2) problemas.push(`a busca listou ${achados.length} cliente(s), esperado os dois Joaquim`);
@@ -1100,11 +1185,13 @@ await passo("dois clientes com o mesmo nome: a busca lista os dois e a OS vai pa
   const motoDoBloco = await p.locator(".os-block").nth(1).innerText();
   if (/JOA-1A11/.test(motoDoBloco)) problemas.push("mostrou a moto do homônimo");
 
+  await irParaServico();
+  await abrirDetalhesDaRecepcao();
   await p.getByPlaceholder("Ex.: 38.420 km").fill("21.000 km");
   await p.locator(".dialog textarea").first().fill("Revisão dos 20 mil");
   await incluirMaoDeObra("REVISÃO", "90");
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4500);
+  await conferirEAbrir(); await p.waitForTimeout(4500);
 
   // A conferência que vale: no banco, a OS é do filho, com a moto do filho.
   const aberta = (await banco("serviceOrders")).find((ordem) => ordem.plate === "JOA-2A22");
@@ -1122,15 +1209,10 @@ await passo("busca por placa acha o dono, e o histórico dele abre quando pedido
   // já foi feito nela? A resposta estava só no caderno.
   const problemas = [];
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
+  await abrirNovaOS();
 
   // A placa do passo 6, digitada sem hífen, como quem lê a moto de longe.
-  await p.locator(".os-search input").first().fill("tes1d23");
+  await p.locator(`${CAMADA} .os-search input`).first().fill("tes1d23");
   await p.waitForTimeout(1300);
   const achados = await p.locator(".os-search-results > button").allInnerTexts();
   if (achados.length !== 1) problemas.push(`a busca por placa achou ${achados.length}, esperado só o dono`);
@@ -1223,12 +1305,7 @@ await passo("mecânico com login mas sem cadastro entra na OS pelo aviso", async
 
   // A prova que importa: agora ele aparece para escolher na nova OS.
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
+  await abrirNovaOS();
   const mecanicos = await p.locator(".mechanic-picker button").allInnerTexts();
   if (!mecanicos.some((linha) => /ERASMO/i.test(linha))) problemas.push(`o mecânico continua fora da OS: ${JSON.stringify(mecanicos)}`);
   await p.locator(".dialog-footer .ghost-button", { hasText: /Cancelar/ }).first().click().catch(() => {});
@@ -1697,31 +1774,28 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   // oficina fica com serviço feito e ninguém para cobrar.
   const problemas = [];
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
-  const acoes = await p.locator(".os-search-actions button").allInnerTexts();
+  await abrirNovaOS();
+  const acoes = await p.locator(`${CAMADA} .os-search-actions button`).allInnerTexts();
   if (acoes.length !== 2) problemas.push(`a etapa 1 tem ${acoes.length} ação(ões), esperado cadastrar e seguir sem cadastrar`);
-  await p.locator(".os-search-actions .ghost-button").click();
+  await p.locator(`${CAMADA} .os-search-actions .ghost-button`).click();
   await p.waitForTimeout(900);
   if (!(await p.locator(".os-pending-card").count())) problemas.push("não avisou que o cliente ficou pendente");
   if (/Escolha o cliente acima/.test(await p.locator(".os-block").nth(1).innerText()))
     problemas.push("o bloco da moto continuou travado");
 
-  await p.locator('.os-inline-form.vehicle input[placeholder*="ABC-1234"]').fill("GUI-4D44");
+  await p.locator(`${CAMADA} .os-inline-form.vehicle input[placeholder*="ABC-1234"]`).fill("GUI-4D44");
   await p.waitForTimeout(500);
-  const listas = p.locator(".os-inline-form.vehicle select");
+  const listas = p.locator(`${CAMADA} .os-inline-form.vehicle select`);
   await listas.nth(0).selectOption("Honda"); await p.waitForTimeout(600);
   await listas.nth(1).selectOption("CG 150"); await p.waitForTimeout(600);
   await listas.nth(2).selectOption("Fan"); await p.waitForTimeout(500);
+  await irParaServico();
+  await abrirDetalhesDaRecepcao();
   await p.getByPlaceholder("Ex.: 38.420 km").fill("50.000 km");
   await p.locator(".dialog textarea").first().fill("Chegou de guincho");
   await incluirMaoDeObra("REVISÃO", "120");
   await p.waitForTimeout(900);
-  await p.locator(".dialog-footer .primary-button").click(); await p.waitForTimeout(4000);
+  await conferirEAbrir(); await p.waitForTimeout(4000);
 
   const aberta = (await banco("serviceOrders")).find((ordem) => ordem.plate === "GUI-4D44");
   if (aberta?.customerPending !== true) problemas.push("a OS não ficou marcada como cliente pendente");
@@ -2008,13 +2082,8 @@ await passo("OS de parceira: acha a moto pela placa sem hífen, e a que já est�
   const semHifen = String(deCliente.plate).replace(/[^A-Za-z0-9]/g, "");
 
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
-  await p.locator(".os-party-switch button", { hasText: /parceira/i }).click();
+  await abrirNovaOS();
+  await p.locator(`${CAMADA} .os-party-switch button`, { hasText: /parceira/i }).click();
   await p.waitForTimeout(1200);
 
   const busca = p.locator(".os-partner-bike-search input").first();
@@ -2059,67 +2128,56 @@ await passo("OS de parceira: acha a moto pela placa sem hífen, e a que já est�
   if (problemas.length) throw new Error("moto na OS de parceira:\n      - " + problemas.join("\n      - "));
 });
 
-await passo("a nova OS cabe numa tela só, sem rolar atrás do problema e dos mecânicos", async () => {
-  // O formato anterior gastava mais da metade da tela com moldura: cabeçalho de
-  // três linhas, um ícone decorativo de 42px por seção, círculo numerado por
-  // bloco, campo de 40px e linha de peça de 51px. Dava 960px de conteúdo numa
-  // área de 688px — quem abre a OS rolava para chegar no problema relatado e
-  // nos mecânicos, que são os campos que ele mais preenche.
+await passo("cada etapa do atendimento cabe na tela, sem rolar atrás do que se preenche", async () => {
+  // A oficina trocou a tela única pelo passo a passo com conferência. A
+  // exigência mudou de lugar, mas não sumiu: se CADA etapa rolar, o balcão
+  // volta a perder de vista o que está preenchendo — que era o problema
+  // original, só que agora repetido três vezes.
   const problemas = [];
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
+  await abrirNovaOS();
+
+  const medir = async (nome) => {
+    const m = await p.evaluate((sel) => {
+      const painel = document.querySelector(`${sel} .intake-step-panel:not([hidden])`);
+      if (!painel) return null;
+      return { visivel: Math.round(painel.getBoundingClientRect().height), conteudo: painel.scrollHeight };
+    }, CAMADA);
+    if (!m) { problemas.push(`a etapa "${nome}" não abriu`); return; }
+    // 12px de tolerância: arredondamento de sub-pixel não é rolagem.
+    if (m.conteudo > m.visivel + 12) problemas.push(`a etapa "${nome}" rola: ${m.conteudo}px numa área de ${m.visivel}px`);
+  };
+
+  await medir("identificação");
+  // As três etapas existem e dizem em qual delas se está.
+  const etapas = await p.locator(`${CAMADA} .intake-steps`).innerText().catch(() => "");
+  for (const nome of ["Cliente e moto", "Serviço", "Conferir"]) {
+    if (!etapas.includes(nome)) problemas.push(`o passo a passo não mostra "${nome}"`);
   }
-  const medida = await p.evaluate(() => {
-    const corpo = document.querySelector(".dialog-body.os-single");
-    const cabecalho = document.querySelector(".dialog-os .dialog-header");
-    const campo = document.querySelector(".dialog-os .field input");
-    const peca = document.querySelector(".dialog-os .os-piece-list > button");
-    if (!corpo) return null;
-    return {
-      corpo: Math.round(corpo.getBoundingClientRect().height),
-      conteudo: corpo.scrollHeight,
-      cabecalho: cabecalho ? Math.round(cabecalho.getBoundingClientRect().height) : 0,
-      campo: campo ? Math.round(campo.getBoundingClientRect().height) : 0,
-      peca: peca ? Math.round(peca.getBoundingClientRect().height) : 0,
-      // A régua: rótulo à esquerda do campo, alinhado à direita, como no
-      // cadastro de peça e no sistema que a oficina usa todo dia.
-      regua: (() => {
-        const linha = document.querySelector(".dialog-os .form-grid > .field");
-        const rotulo = linha?.querySelector("span");
-        const dele = linha?.querySelector("input, select, textarea");
-        if (!rotulo || !dele) return null;
-        return Math.abs(rotulo.getBoundingClientRect().top - dele.getBoundingClientRect().top) < 14
-          && rotulo.getBoundingClientRect().right <= dele.getBoundingClientRect().left + 1
-          && getComputedStyle(rotulo).textAlign === "right";
-      })(),
-      // Os campos que ficavam abaixo da dobra.
-      textoTodo: corpo.innerText,
-    };
-  });
-  if (!medida) throw new Error("a OS não abriu na tela única");
-  // Numa tela de 950px o conteúdo tem de caber; sobra é o que o navegador
-  // devolve como scrollHeight igual à altura visível.
-  if (medida.conteudo > medida.corpo + 12) problemas.push(`a OS ainda rola: ${medida.conteudo}px de conteúdo numa área de ${medida.corpo}px`);
-  if (medida.cabecalho > 60) problemas.push(`o cabeçalho da OS voltou a ${medida.cabecalho}px (era 150px em três linhas)`);
-  // A versão 3 aumentou os campos de propósito ("campos maiores", no
-  // MELHORIAS-V3). O teto sobe junto, mas continua existindo: o que não pode
-  // voltar é o formulário deixar de caber na tela, conferido logo acima.
-  if (medida.campo > 44) problemas.push(`o campo da OS está com ${medida.campo}px, esperado no máximo 44`);
-  if (medida.peca && medida.peca > 42) problemas.push(`a linha de peça está com ${medida.peca}px, esperado no máximo 42`);
-  if (medida.regua !== true) problemas.push("o rótulo da OS voltou a ficar em cima do campo, fora do formato dos cadastros");
-  // A versão 3 renomeou os dois botões do editor de itens: "Adicionar peças"
-  // virou "Adicionar peça" e "Adicionar mão de obra" virou "Adicionar
-  // serviço". O que importa é que os dois cabem na tela única, não o nome.
-  for (const pedaco of ["Problema relatado", "Mecânicos responsáveis", "Adicionar peça", "Adicionar serviço"]) {
-    if (!medida.textoTodo.includes(pedaco)) problemas.push(`"${pedaco}" sumiu da tela única`);
+
+  await preencherEtapa1({ nome: "Cliente da Densidade", telefone: "34988887777", placa: "DEN-5S55", marca: "Honda", modelo: "CG 160" });
+  await irParaServico();
+  await medir("serviço");
+  // O que o mecânico mais preenche tem de estar à vista, sem abrir gaveta.
+  const noServico = await p.locator(`${CAMADA} .intake-step-panel:not([hidden])`).innerText();
+  for (const pedaco of ["Problema relatado", "Adicionar peça", "Adicionar serviço"]) {
+    if (!noServico.includes(pedaco)) problemas.push(`a etapa do serviço não traz "${pedaco}"`);
   }
-  await p.locator(".dialog-footer .ghost-button", { hasText: /Cancelar/ }).first().click().catch(() => {});
-  await p.waitForTimeout(1200);
-  if (problemas.length) throw new Error("densidade da nova OS:\n      - " + problemas.join("\n      - "));
+
+  await p.locator(`${CAMADA} textarea`).first().fill("Barulho na relação");
+  await incluirMaoDeObra("REVISÃO", "100");
+  await avancar(/Conferir atendimento/);
+  await medir("conferência");
+  // A conferência existe para responder "está tudo certo?" — sem o valor, ela
+  // não responde nada.
+  const naConferencia = await p.locator(`${CAMADA} .intake-step-panel:not([hidden])`).innerText();
+  if (!/100,00/.test(naConferencia)) problemas.push("a conferência não mostra o total antes de gravar");
+  for (const pedaco of ["DEN-5S55", "Honda"]) {
+    if (!naConferencia.includes(pedaco)) problemas.push(`a conferência não mostra "${pedaco}"`);
+  }
+
+  await fecharQualquerDialogo();
+  if (problemas.length) throw new Error("densidade do atendimento:\n      - " + problemas.join("\n      - "));
 });
 
 await passo("excluir cadastro: some quem nunca foi usado, e desativa quem tem histórico", async () => {
@@ -2197,12 +2255,7 @@ await passo("excluir cadastro: some quem nunca foi usado, e desativa quem tem hi
   if (!/Inativo/i.test(naLista)) problemas.push("a lista não marca a peça como inativa");
 
   await ir("Ordens de serviço");
-  await p.getByRole("button", { name: /Novo atendimento/i }).first().click();
-  await p.waitForTimeout(1500);
-  if (await p.getByText(/tipo de atendimento/i).count()) {
-    await p.getByText(/Abrir OS completa/i).first().click();
-    await p.waitForTimeout(1800);
-  }
+  await abrirNovaOS();
   const oferecidas = (await p.locator(".os-piece-list > button").allInnerTexts()).join(" ");
   if (/20W50/i.test(oferecidas)) problemas.push("a peça inativa continua sendo oferecida na OS");
   await p.locator(".dialog-footer .ghost-button", { hasText: /Cancelar/ }).first().click().catch(() => {});
