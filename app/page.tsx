@@ -17,7 +17,7 @@ import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories
 import { NumberField } from "../src/components/NumberField";
 import { MoneyField } from "../src/components/MoneyField";
 import { formatTyped, valorDigitado } from "../src/number-input";
-import { billingDescription, isPartnerBilled, motorcycleLabel, nextBillingDate, partnerTotals, PARTNER_PAYMENT_METHOD } from "../src/partner";
+import { isPartnerBilled, motorcycleLabel, nextBillingDate, partnerTotals, receivableForOrder, PARTNER_PAYMENT_METHOD } from "../src/partner";
 import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
 import { formatPlate, motorcycleIdFor, normalizePlate, platePattern } from "../src/plate";
 import { avisoDeMotoDeFora, buscarMotos, estaNaFrota } from "../src/fleet";
@@ -28,6 +28,7 @@ import { pendenciasRecorrentes, periodicidades, proximaConta, serieDe, textoDaPe
 import { emMaiusculo } from "../src/text-case";
 import { dataBrasileira, problemasDaOSAntiga, registroDaOSAntiga, separarMarcaEModelo } from "../src/backfill";
 import { acharPecas, itensDepoisDePegar, osQuePodemReceber, problemasDoPedido, rotuloDaOS, textoDoLancamento, totalDepoisDePegar } from "../src/take-part";
+import { appendEvents, changeEvents, eventStamp, eventTime, orderEvent, orderTimeline } from "../src/order-events";
 import { mensagemDoErro } from "../src/firebase-errors";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeForAccount, employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
@@ -3598,6 +3599,11 @@ export function AppDialog({
     // Com a trava desligada, a peça já sai do estoque na abertura; com ela
     // ligada, a OS nasce sem reservar nada e a baixa espera o serviço começar.
     const reservedOnCreate = shouldReserveStock("Recepção", deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(osItems) : [];
+    // A abertura é o primeiro carimbo do histórico da OS, e é o mesmo instante
+    // que vai para `time`: os dois precisam bater, senão a linha do tempo
+    // contradiz o cabeçalho da própria OS.
+    const agora = new Date();
+    const aberturaEm = agora.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
     const orderId = await createServiceOrder(osPrefix, nextOrderNumber, {
       customer: daParceira ? (customerName || selectedPartner!.name) : semCliente ? "Cliente não identificado" : customerName,
       ...(semCliente ? { customerPending: true } : {}),
@@ -3610,7 +3616,7 @@ export function AppDialog({
       // `historySortKey` precisa de dd/mm/aaaa e devolvia vazio. Para uma moto
       // que volta depois de um ano, o papel não dizia se foi este setembro ou
       // o passado, que é exatamente o que o histórico existe para responder.
-      time: new Date().toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+      time: aberturaEm,
       status: "Recepção",
       tone: statusTone("Recepção"),
       items: osItems,
@@ -3630,6 +3636,7 @@ export function AppDialog({
       ...(osOrigin === "partner" && selectedPartner ? { partnerId: selectedPartner.id, partnerName: selectedPartner.name } : {}),
       ...(clientId ? { clientId } : {}),
       ...(motorcycleId ? { motorcycleId } : {}),
+      events: [orderEvent(`Ordem de serviço aberta · ${aberturaEm}`, operadorAtual, agora.toISOString())],
     });
     pendingOrder.current = { id: orderId, items: reservedOnCreate };
     if (reservedOnCreate.length) {
@@ -3642,6 +3649,14 @@ export function AppDialog({
     return orderId;
   };
 
+
+  /**
+   * Quem está mexendo, para assinar as linhas do histórico da OS.
+   *
+   * Vazio quando o sistema não sabe (sessão sem nome no perfil): a linha sai
+   * sem assinatura, que é melhor do que sair assinada por "Usuário".
+   */
+  const operadorAtual = (currentUser?.displayName || currentUser?.email || "").trim();
 
   const partsOf = (items: ServiceOrderItem[] | undefined) => mergeParts((items ?? [])
     .filter((item) => item.type === "Peça" && item.productId)
@@ -3822,7 +3837,7 @@ export function AppDialog({
     const deltas = stockDeltas(target, reserved);
     const partner = partners.find((item) => item.id === currentOrder.partnerId);
     const itemsChanged = JSON.stringify(orderItems) !== JSON.stringify(currentOrder.items ?? []);
-    await saveOrderWithStock(currentOrder.id, {
+    const mudancas = {
       ...(itemsChanged ? { items: orderItems, total: partnerTotals(orderItems, partner?.laborDiscount ?? 0).total } : {}),
       delivery: orderDelivery, notes: orderNotes, solution: orderSolution,
       status: orderStatus,
@@ -3830,6 +3845,14 @@ export function AppDialog({
       mechanicIds: orderMechanicIds,
       mechanic: activeMechanics.find((mechanic) => mechanic.id === orderMechanicIds[0])?.name ?? currentOrder.mechanic,
       deductedItems: target,
+    };
+    // O histórico sai da DIFERENÇA entre o que estava gravado e o que está
+    // sendo gravado — não de cada tecla digitada. Salvar sem mudar nada não
+    // deixa linha nenhuma, senão o histórico vira lista de cliques.
+    const anotacoes = changeEvents(currentOrder, mudancas, operadorAtual);
+    await saveOrderWithStock(currentOrder.id, {
+      ...mudancas,
+      ...(anotacoes.length ? { events: appendEvents(currentOrder.events, anotacoes) } : {}),
     }, deltas);
   };
 
@@ -3949,6 +3972,9 @@ export function AppDialog({
           items: itens,
           total: totalDepoisDePegar(itens),
           deductedItems: partsOf(itens),
+          // Fica no histórico da OS quem pegou a peça e quando. É a pergunta
+          // que aparece na entrega, quando o cliente contesta um item.
+          events: appendEvents(ordem!.events, changeEvents(ordem!, { items: itens }, operadorAtual)),
         }, []);
         return finish(textoDoLancamento(escolhida!, pecaQuantidade, ordem!));
       } catch (falha) {
@@ -4185,6 +4211,10 @@ export function AppDialog({
           // conferência volta para a prateleira.
           const reserved = (currentOrder.deductedItems ?? []) as ReservedPart[];
           const target = !currentOrder.items?.length && !checkoutItems.length ? (currentOrder.deductedItems ?? []) : partsOf(checkoutItems);
+          // Um instante só para a data, a hora e a linha do histórico: três
+          // `new Date()` seguidos podem cair em minutos diferentes, e aí a OS
+          // diz que foi encerrada num minuto e o histórico dela, noutro.
+          const fechadoEm = new Date();
           await saveOrderWithStock(currentOrder.id, {
             items: checkoutItems,
             total: checkoutTotal,
@@ -4193,11 +4223,18 @@ export function AppDialog({
             paymentMethod: splitPayment ? (effectivePayments[0]?.method ?? paymentMethod) : paymentMethod,
             ...(splitPayment ? { payments: effectivePayments } : {}),
             closed: true,
-            closedAt: new Date().toLocaleDateString("pt-BR"),
+            closedAt: fechadoEm.toLocaleDateString("pt-BR"),
             // Só a data não basta para o caixa: ele precisa saber a hora para
             // saber a qual sessão esta OS pertence.
-            closedAtISO: new Date().toISOString(),
+            closedAtISO: fechadoEm.toISOString(),
             deductedItems: target,
+            // A última linha do histórico. Junto com a forma de pagamento,
+            // porque "encerrada" sem dizer como o dinheiro entrou não responde
+            // nada de útil depois.
+            events: appendEvents(currentOrder.events, [
+              ...changeEvents(currentOrder, { items: checkoutItems, status: "Entrega" }, operadorAtual, fechadoEm.toISOString()),
+              orderEvent(`Encerrada · ${splitPayment ? (effectivePayments[0]?.method ?? paymentMethod) : paymentMethod} · ${formatBRL(checkoutTotal)}`, operadorAtual, fechadoEm.toISOString()),
+            ]),
             ...(faltamDados ? {
               customer: checkoutCustomerName.trim(),
               customerPending: false,
@@ -4218,18 +4255,17 @@ export function AppDialog({
             // não do motoboy que trouxe a moto, e vence no dia 1º do mês
             // seguinte — a fatura mensal. A baixa do estoque já aconteceu
             // acima, como em qualquer OS.
-            const faturada = isPartnerBilled(currentOrder);
+            // Para quem vai a cobrança é decisão de `receivableForOrder`, em
+            // src/partner.ts, onde ela é conferida. Aqui só se grava.
             try {
               await createReceivableFor({
-                person: faturada ? (currentOrder.partnerName || "Empresa parceira") : (faltamDados ? checkoutCustomerName.trim() : currentOrder.customer),
-                personId: faturada ? currentOrder.partnerId : (clienteDaOs || currentOrder.clientId),
-                description: faturada
-                  ? billingDescription(currentOrder.id, currentOrder.bike)
-                  : `Ordem de serviço ${currentOrder.id} · ${currentOrder.bike}${splitPayment ? " · parte a prazo" : ""}`,
+                ...receivableForOrder(currentOrder, {
+                  customerName: faltamDados ? checkoutCustomerName : "",
+                  clientId: clienteDaOs || currentOrder.clientId,
+                  partial: splitPayment,
+                }),
                 amount: aPrazoOS,
-                origin: faturada ? "Fatura de parceiro" : "Ordem de serviço",
                 sourceId: currentOrder.id,
-                ...(faturada ? { dueDate: nextBillingDate() } : {}),
               });
             } catch (error) {
               notify(`${currentOrder.id} encerrada, mas a conta a receber não foi criada: ${error instanceof Error ? error.message : "erro desconhecido"}. Lance a cobrança em Contas a receber.`);
@@ -5540,6 +5576,28 @@ export function AppDialog({
                 </div>
                 <fieldset className="order-followup" disabled={!canOperate || !!currentOrder.closed}><legend>Acompanhamento</legend><div className="form-grid"><label className="field"><span>Previsão de entrega</span><input type="date" value={orderDelivery} onChange={(event) => setOrderDelivery(event.target.value)}/></label><label className="field field-full"><span>Diagnóstico e serviço realizado</span><textarea value={orderSolution} onChange={(event) => setOrderSolution(event.target.value)} placeholder="O que foi identificado e realizado na moto"/></label><label className="field field-full"><span>Observações</span><textarea value={orderNotes} onChange={(event) => setOrderNotes(event.target.value)} placeholder="Peça aguardada, retorno do cliente ou outras informações"/></label></div></fieldset>
                 <div className="order-progress interactive">{serviceOrderStatuses.map((item, index) => { const currentIndex = serviceOrderStatuses.indexOf(orderStatus); return <button disabled={!canOperate || !!currentOrder.closed} className={index <= currentIndex ? "done" : ""} key={item} onClick={() => setOrderStatus(item)}><i>{index < currentIndex ? "✓" : index + 1}</i><span>{item}</span></button>; })}</div>
+                {/* O que já aconteceu com esta OS. A régua acima mostra ONDE ela
+                    está; isto mostra COMO chegou lá, com hora e com quem mexeu.
+                    OS aberta antes deste histórico existir não fica vazia: a
+                    abertura e o encerramento são reconstruídos do que ela sempre
+                    guardou (ver src/order-events.ts). */}
+                <section className="order-section order-timeline">
+                  <div className="order-timeline-head">
+                    <div><strong>Histórico desta OS</strong><small>O que foi feito, em ordem, com hora.</small></div>
+                    <span>{orderTimeline(currentOrder).length} registro(s)</span>
+                  </div>
+                  <ol className="order-timeline-list">
+                    {orderTimeline(currentOrder).map((linha, index) => (
+                      <li key={`${linha.at}-${index}`}>
+                        <b>{eventTime(linha.at) || "--:--"}</b>
+                        <div>
+                          <strong>{linha.what}</strong>
+                          <small>{[eventStamp(linha.at), linha.who].filter(Boolean).join(" · ") || "Sem data registrada"}</small>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
               </>
             ) : (
               <div className="empty-panel"><Icon name="wrench" size={24}/><span>Nenhuma ordem de serviço ativa.</span></div>

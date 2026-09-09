@@ -40,6 +40,55 @@ export function nextBillingDate(reference: Date = new Date()): string {
   return `${dia}/${mes}/${primeiro.getFullYear()}`;
 }
 
+/**
+ * A cobrança gerada ao encerrar uma OS que não foi paga na hora.
+ *
+ * Ficava solta no meio do encerramento, como três perguntas ternárias em
+ * sequência, e era a resposta a "quando eu clico em receber, a conta vai
+ * mesmo para a parceira?". Pergunta que ninguém conseguia responder olhando o
+ * código, e que ninguém conferia — então virou função, com nome e conferência.
+ *
+ * Quem paga decide TUDO: o nome na conta, o id a que ela se prende, a
+ * descrição, a origem e o vencimento. Na OS da parceira a cobrança vai no nome
+ * da EMPRESA e vence no dia 1º do mês seguinte (a fatura mensal); na OS comum
+ * vai no nome do dono da moto, sem vencimento imposto.
+ */
+export type OrderReceivable = {
+  person: string;
+  personId?: string;
+  description: string;
+  origin: string;
+  dueDate?: string;
+};
+
+export function receivableForOrder(
+  order: Pick<OrderRecord, "id" | "bike" | "customer" | "clientId" | "payer" | "partnerId" | "partnerName">,
+  options: { customerName?: string; clientId?: string; partial?: boolean } = {},
+  reference: Date = new Date(),
+): OrderReceivable {
+  const nome = (options.customerName ?? "").trim() || order.customer;
+  const id = options.clientId || order.clientId;
+  if (isPartnerBilled(order)) {
+    return {
+      // "Empresa parceira" só aparece se a OS perdeu o nome gravado. É melhor
+      // do que uma conta a receber sem dono nenhum na tela do financeiro.
+      person: order.partnerName || "Empresa parceira",
+      personId: order.partnerId,
+      description: billingDescription(order.id, order.bike, reference),
+      origin: "Fatura de parceiro",
+      dueDate: nextBillingDate(reference),
+    };
+  }
+  return {
+    person: nome,
+    personId: id,
+    // "parte a prazo" só entra quando o pagamento foi dividido: senão a conta
+    // diria que é um pedaço de uma OS que foi paga inteira desta forma.
+    description: `Ordem de serviço ${order.id} · ${order.bike}${options.partial ? " · parte a prazo" : ""}`,
+    origin: "Ordem de serviço",
+  };
+}
+
 /** A competência da fatura, para a descrição da conta ("03/2026"). */
 export function billingReference(reference: Date = new Date()): string {
   return `${String(reference.getMonth() + 1).padStart(2, "0")}/${reference.getFullYear()}`;

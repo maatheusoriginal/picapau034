@@ -38,6 +38,7 @@
     "check:history": "node --import tsx scripts/check-history.ts",
     "check:text-case": "node --import tsx scripts/check-text-case.ts",
     "check:team-link": "node --import tsx scripts/check-team-link.ts",
+    "check:order-events": "node --import tsx scripts/check-order-events.ts",
     "check:pricing": "node --import tsx scripts/check-pricing.ts",
     "check:help": "node --import tsx scripts/check-help.ts",
     "check:nfe": "node --import tsx scripts/check-nfe.ts",

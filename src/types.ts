@@ -332,6 +332,21 @@ export type ServiceOrderItem = {
   productId?: string;
 };
 
+/**
+ * Uma linha do histórico da OS: o que aconteceu, quando e por quem.
+ *
+ * Mora aqui, e não em src/order-events.ts, porque OrderRecord depende dela —
+ * e o contrário faria os dois arquivos se importarem em círculo.
+ */
+export type OrderEvent = {
+  /** ISO 8601. É o que ordena e o que dá a hora certa. */
+  at: string;
+  /** A frase que aparece na linha do tempo, já pronta para a tela. */
+  what: string;
+  /** Quem fez, quando o sistema sabe. */
+  who?: string;
+};
+
 export type OrderRecord = {
   id: string;
   customer: string;
@@ -415,6 +430,15 @@ export type OrderRecord = {
    * evita baixa dobrada e devolve a peça quando ela sai da ordem.
    */
   deductedItems?: Array<{ productId: string; quantity: number }>;
+  /**
+   * O que aconteceu com esta OS, linha a linha e com hora.
+   *
+   * A OS mostra o estado de agora; isto guarda o caminho até aqui — quando
+   * entrou em serviço, quando a peça foi lançada, quem mexeu. Ver
+   * src/order-events.ts. OS aberta antes disto não tem o campo, e a linha do
+   * tempo é reconstruída de `time` e `closedAt`.
+   */
+  events?: OrderEvent[];
 };
 
 /**

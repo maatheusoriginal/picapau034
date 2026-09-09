@@ -23,7 +23,7 @@ const ordens = [
        time: "02/01/2026", closedAt: "05/01/2026", closed: true, total: 150,
        items: [{ id: "1", type: "Mão de obra", name: "Troca do kit relação", price: 150 }] }),
   os({ id: "OS-0002", clientId: "CLI-1", plate: "ABC-1D23", bike: "Honda CG 160 Fan",
-       time: "28/06/2026", closedAt: "28/06/2026", closed: true, total: 90,
+       time: "28/06/2026, 08:15", closedAt: "28/06/2026", closed: true, total: 90,
        items: [{ id: "1", type: "Peça", name: "Óleo 20W50", price: 40 },
                { id: "2", type: "Mão de obra", name: "Troca de óleo", price: 50 }] }),
   // Aberta antes de o cadastro existir: guarda a placa, não o id do cliente.
@@ -60,6 +60,11 @@ const casos: Array<[string, unknown, unknown]> = [
   // 150 + 90; os 500 da OS aberta não entram, e a de outro cliente também não.
   ["só OS encerrada conta como dinheiro que entrou", doCliente.totalSpent, 240],
   ["a data mostrada é a do encerramento quando houve", doCliente.entries[1].date, "28/06/2026"],
+  // A data da linha responde "quando ficou pronta". A HORA DE ENTRADA responde
+  // "desde quando a moto está aí" e quanto o serviço demorou — e ela só existe
+  // em `time`, que o encerramento não substitui.
+  ["a hora de entrada chega inteira ao histórico", doCliente.entries[1].openedAt, "28/06/2026, 08:15"],
+  ["OS sem hora gravada não inventa uma", doCliente.entries[0].openedAt, "01/08/2026"],
   ["OS aberta aparece com a data de abertura", doCliente.entries[0].date, "01/08/2026"],
 
   ["o histórico da moto acha pela placa", daMoto.visits, 4],
