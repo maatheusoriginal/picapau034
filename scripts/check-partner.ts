@@ -8,7 +8,7 @@
  *
  * Rode com: npm run check:partner
  */
-import { billingDescription, billingReference, isPartnerBilled, motorcycleLabel, nextBillingDate, partnerOf, partnerTotals, PARTNER_PAYMENT_METHOD } from "../src/partner";
+import { billingDescription, billingReference, isPartnerBilled, motorcycleLabel, nextBillingDate, partnerOf, partnerTotals, receivableForOrder, PARTNER_PAYMENT_METHOD } from "../src/partner";
 import { drawerTotal, isCreditPayment, paymentsOf, settledTotal } from "../src/finance";
 import type { PartnerConfig, ServiceOrderItem } from "../src/types";
 
@@ -27,6 +27,17 @@ const osDireta = { payer: "owner" as const, partnerId: "" };
 
 // Uma OS faturada na parceira, do jeito que fica gravada.
 const pagamentosDaOs = paymentsOf({ total: 290, paymentMethod: PARTNER_PAYMENT_METHOD });
+
+// As duas OS inteiras, para conferir para quem vai a cobrança no encerramento.
+const osDoGonzaga = {
+  id: "OS-0007", bike: "Honda CG 160", customer: "MOTOBOY QUE TROUXE",
+  clientId: "CLI-MOTOBOY", payer: "partner" as const,
+  partnerId: "PAR-1", partnerName: "Gonzaga Motos",
+};
+const osDoDono = {
+  id: "OS-0008", bike: "Yamaha Factor 150", customer: "João",
+  clientId: "CLI-9", payer: "owner" as const, partnerId: "", partnerName: "",
+};
 
 const casos: Array<[string, unknown, unknown]> = [
   // Quem paga
@@ -60,6 +71,32 @@ const casos: Array<[string, unknown, unknown]> = [
 
   // O dinheiro NÃO entra no dia: é a parte que evita o caixa fechar com quebra.
   ["faturado na parceira conta como a prazo", isCreditPayment(PARTNER_PAYMENT_METHOD), true],
+
+  /*
+    "Quando eu clico em receber, a conta já vai para o Gonzaga?"
+
+    Vai — e é este bloco que responde. O caminho inteiro: a OS nasce com
+    `payer: "partner"` ao escolher a parceira, o encerramento já abre com
+    "Faturado no parceiro", essa forma conta como A PRAZO (acima), e por isso
+    o encerramento gera conta a receber em vez de dinheiro no caixa. A conta
+    sai no nome da EMPRESA e presa ao id DELA — não do motoboy que trouxe a
+    moto — e vence no dia 1º do mês seguinte.
+  */
+  ["a cobrança da parceira sai no nome da empresa", receivableForOrder(osDoGonzaga, {}, new Date(2026, 2, 10)).person, "Gonzaga Motos"],
+  ["e presa ao id da empresa, não ao do motoboy", receivableForOrder(osDoGonzaga, { clientId: "CLI-MOTOBOY" }, new Date(2026, 2, 10)).personId, "PAR-1"],
+  ["com vencimento na fatura do mês seguinte", receivableForOrder(osDoGonzaga, {}, new Date(2026, 2, 10)).dueDate, "01/04/2026"],
+  ["e separada do resto em Contas a receber", receivableForOrder(osDoGonzaga, {}, new Date(2026, 2, 10)).origin, "Fatura de parceiro"],
+  ["a descrição diz de qual competência é", receivableForOrder(osDoGonzaga, {}, new Date(2026, 2, 10)).description.startsWith("Fatura 03/2026"), true],
+  ["parceira sem nome gravado ainda gera conta com dono", receivableForOrder({ ...osDoGonzaga, partnerName: "" }, {}, new Date(2026, 2, 10)).person, "Empresa parceira"],
+
+  // A OS comum não pode cair na fatura da parceira por engano.
+  ["OS do dono da moto vai no nome dele", receivableForOrder(osDoDono, {}, new Date(2026, 2, 10)).person, "João"],
+  ["e sem vencimento imposto", receivableForOrder(osDoDono, {}, new Date(2026, 2, 10)).dueDate, undefined],
+  ["e presa ao cliente", receivableForOrder(osDoDono, { clientId: "CLI-9" }, new Date(2026, 2, 10)).personId, "CLI-9"],
+  // Cliente identificado só na hora de receber (OS aberta sem cadastro).
+  ["nome informado no encerramento vale mais que o da OS", receivableForOrder(osDoDono, { customerName: "  MARIA  " }, new Date(2026, 2, 10)).person, "MARIA"],
+  ["pagamento dividido avisa que é só um pedaço", receivableForOrder(osDoDono, { partial: true }, new Date(2026, 2, 10)).description.endsWith("· parte a prazo"), true],
+  ["pagamento inteiro a prazo não diz 'parte'", receivableForOrder(osDoDono, {}, new Date(2026, 2, 10)).description.includes("parte a prazo"), false],
   ["não entra na gaveta do caixa", drawerTotal(pagamentosDaOs), 0],
   ["não conta como faturamento recebido", settledTotal(pagamentosDaOs), 0],
   ["dinheiro continua entrando na gaveta", drawerTotal(paymentsOf({ total: 290, paymentMethod: "Dinheiro" })), 290],

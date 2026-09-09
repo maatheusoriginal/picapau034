@@ -16,6 +16,16 @@ export type HistoryEntry = {
   id: string;
   /** Data que aparece na linha: o encerramento quando houve, senão a abertura. */
   date: string;
+  /**
+   * Quando a moto ENTROU, com hora.
+   *
+   * A linha do histórico mostra a data do encerramento, que é a que responde
+   * "quando ficou pronta". Só que a oficina também pergunta "que horas essa
+   * moto entrou?" — para saber se o serviço demorou, para cobrar diária de
+   * pátio, para lembrar quem estava no balcão naquele turno. Sai direto de
+   * `time`, que já guarda dia e hora.
+   */
+  openedAt: string;
   /** Chave de ordenação. String vazia quando a data não deu para entender. */
   sortKey: string;
   plate: string;
@@ -101,6 +111,7 @@ function summarize(orders: OrderRecord[]): HistorySummary {
     return {
       id: order.id,
       date: date || "Sem data",
+      openedAt: (order.time || "").trim(),
       sortKey: historySortKey(date),
       plate: order.plate || "",
       bike: order.bike || "",

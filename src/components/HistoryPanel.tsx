@@ -26,7 +26,12 @@ export function HistoryPanel({ historico, vazio }: { historico: HistorySummary; 
             <span className="history-date">{entrada.date}</span>
             <div>
               <strong>{entrada.services}</strong>
+              {/* A data da linha é a do encerramento, que responde "quando
+                  ficou pronta". A entrada, com HORA, vem aqui embaixo: é o que
+                  responde "desde quando essa moto está aí" e quanto tempo o
+                  serviço levou. */}
               <small>{[entrada.bike, entrada.plate].filter(Boolean).join(" · ") || "Moto não informada"}</small>
+              {entrada.openedAt ? <small className="history-opened">Entrou em {entrada.openedAt}</small> : null}
             </div>
             <span className="history-total">{emReais(entrada.total)}</span>
             <span className={`history-badge ${entrada.closed ? "ok" : ""}`}>{entrada.closed ? "Entregue" : entrada.status || "Em aberto"}</span>

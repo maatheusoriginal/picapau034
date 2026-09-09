@@ -242,3 +242,35 @@ table td strong, table td span { font-size: .875rem; }
 .order-add-actions { display: flex; gap: 9px; padding: 15px 18px; border-top: 1px solid var(--line); }.order-add-actions > button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 41px; border: 1px solid var(--line); border-radius: 7px; background: #fff; font-size: .875rem; color: #5c6e4d; }.order-add-actions > button.selected { background: #edf4e3; border-color: #bbd09e; }
 .order-item-picker { padding: 0 18px 17px; }.order-item-picker .mini-search { width: 100%; max-width: none; }.order-item-picker p { margin: 14px 0 0; color: var(--muted); font-size: .8125rem; }.order-item-result { display: flex; align-items: center; gap: 9px; width: 100%; background: white; border: 0; border-bottom: 1px solid var(--line); padding: 12px 2px; text-align: left; }.order-item-result > span { flex: 1; }.order-item-result strong { display: block; font-size: .875rem; }.order-item-result small { display: block; color: var(--muted); font-size: .8125rem; }.order-item-result > b { font-size: .875rem; }.order-labor-fields { display: grid; grid-template-columns: 1fr 140px; gap: 12px; padding: 0 18px 18px; }.order-labor-fields > button { grid-column: 1 / -1; }.order-followup { border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-top: 22px; }.order-followup legend { padding: 0 8px; font-size: .9375rem; font-weight: 650; }.readonly-footer { color: var(--muted); font-size: .875rem; }
 @media(max-width:560px) { .editable-order-line { gap: 10px; padding: 13px; }.editable-item-name { flex-basis: calc(100% - 70px); }.editable-item-quantity { margin-left: auto; }.order-add-actions { padding: 13px; }.order-add-actions button { font-size: .8125rem; }.order-labor-fields { grid-template-columns: 1fr; }.dialog-footer > div:last-child { display: flex; flex-wrap: wrap; gap: 9px; justify-content: flex-end; } }
+
+/* ---------------------------------------------------------------------------
+   Histórico da OS
+
+   A régua de etapas mostra ONDE a OS está; isto mostra COMO ela chegou lá. A
+   hora fica numa coluna fixa à esquerda porque é o que o balcão procura quando
+   o cliente liga perguntando desde quando a moto está aí — e coluna fixa
+   permite bater o olho de cima a baixo sem ler o resto.
+
+   A lista rola dentro de si a partir de umas oito linhas: numa OS de vários
+   dias o histórico passa de vinte, e sem isso ele empurraria o rodapé do
+   diálogo para fora da tela.
+   --------------------------------------------------------------------------- */
+.order-timeline { margin-top: 22px; border: 1px solid var(--line); border-radius: 10px; background: white; }
+.order-timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: #faf9f7; }
+.order-timeline-head strong { display: block; font-size: .9375rem; color: #424347; }
+.order-timeline-head small { display: block; margin-top: 3px; color: #96969a; font-size: .8125rem; }
+.order-timeline-head > span { color: var(--muted); font-size: .8125rem; white-space: nowrap; }
+.order-timeline-list { list-style: none; margin: 0; padding: 6px 0; max-height: 260px; overflow-y: auto; }
+.order-timeline-list li { display: flex; align-items: flex-start; gap: 12px; padding: 9px 16px; }
+.order-timeline-list li + li { border-top: 1px solid #f1efec; }
+.order-timeline-list b { flex: 0 0 46px; padding-top: 1px; color: #6b7b57; font-size: .875rem; font-variant-numeric: tabular-nums; }
+.order-timeline-list strong { display: block; font-size: .875rem; font-weight: 600; color: #3a3b3f; }
+.order-timeline-list small { display: block; margin-top: 2px; color: #96969a; font-size: .8125rem; }
+@media(max-width:560px) {
+  .order-timeline-list li { padding: 9px 13px; gap: 10px; }
+  .order-timeline-head { padding: 13px; }
+}
+
+/* A hora de entrada fica abaixo da moto, um tom mais claro: é informação de
+   apoio, não pode competir com o serviço que foi feito. */
+.history-opened { margin-top: 1px !important; color: #a7a7ab !important; }
