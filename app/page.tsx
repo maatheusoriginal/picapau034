@@ -30,7 +30,7 @@ import { dataBrasileira, problemasDaOSAntiga, registroDaOSAntiga, separarMarcaEM
 import { acharPecas, itensDepoisDePegar, osQuePodemReceber, problemasDoPedido, rotuloDaOS, textoDoLancamento, totalDepoisDePegar } from "../src/take-part";
 import { mensagemDoErro } from "../src/firebase-errors";
 import { clientHistory, motorcycleHistory } from "../src/history";
-import { employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
+import { employeeForAccount, employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
 import { nextSequentialId, withoutUndefined } from "../src/firestore-data";
 import { addToList } from "../src/quick-list";
 import { helpTopic, searchHelp } from "../src/help-topics";
@@ -1607,11 +1607,18 @@ function UserAccessWorkspace({
       if (dialogMode === "create") {
         const result = await createManagedUser({ ...form, phone: formatPhone(form.phone) });
         setCredentials({ name: form.name.trim(), email: form.email.trim().toLowerCase(), password: form.password });
-        // Mecânico novo já nasce com cadastro de funcionário: sem isso ele
-        // entra no sistema e não existe para a oficina — não aparece no
-        // seletor da OS, não recebe serviço e não entra em comissão.
+        // Usuário novo já nasce com cadastro de funcionário, com o cargo que
+        // foi escolhido aqui: mecânico entra como mecânico e vai para o
+        // seletor da OS; balcão entra como atendente e NÃO vai. Sem esse
+        // cadastro a pessoa entra no sistema e não existe para a oficina —
+        // não recebe serviço e não entra em comissão.
+        //
+        // A condição é "ainda não tem funcionário", e não "é mecânico": quem
+        // atende o balcão também trabalha na oficina e precisa aparecer na
+        // equipe. O que mudou foi o CARGO com que ele nasce, que agora sai do
+        // cargo da conta em vez de sair da permissão de atualizar OS.
         const contaNova: AccessAccount = { uid: result.user?.uid ?? "", name: form.name, phone: formatPhone(form.phone), role: form.role, employeeId: form.employeeId, active: form.active, permissions: form.permissions };
-        if (!form.employeeId && mechanicsWithoutEmployee([contaNova], employees).length) {
+        if (!form.employeeId && employeeForAccount(contaNova, employees) === null) {
           await criarFuncionarioDaConta(contaNova, employees);
         }
         notify(result.mode === "cloud" ? "Usuário criado no Authentication e liberado no sistema." : "Usuário criado e liberado no sistema.");
