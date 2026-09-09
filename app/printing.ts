@@ -12,15 +12,23 @@
 export function printDocument(html: string) {
   if (typeof document === "undefined") return;
 
+  // A moldura fica FORA da tela, e não com tamanho zero.
+  //
+  // Com `width: 0; height: 0` o documento de dentro é montado numa janela de
+  // largura zero — medido: `documentElement.clientWidth` dava 0. Papel de
+  // largura zero é o tipo de conta degenerada em que o navegador desiste de
+  // paginar e devolve tudo numa página só, que foi a queixa da oficina: as
+  // três vias saindo grudadas numa folha. Uma folha inteira de largura resolve
+  // sem aparecer para ninguém, porque ela está a dez mil pixels à esquerda.
   const frame = document.createElement("iframe");
   frame.setAttribute("aria-hidden", "true");
+  frame.setAttribute("tabindex", "-1");
   frame.style.position = "fixed";
-  frame.style.right = "0";
-  frame.style.bottom = "0";
-  frame.style.width = "0";
-  frame.style.height = "0";
+  frame.style.left = "-10000px";
+  frame.style.top = "0";
+  frame.style.width = "210mm";
+  frame.style.height = "297mm";
   frame.style.border = "0";
-  frame.style.visibility = "hidden";
 
   // O iframe só pode ser removido depois que o diálogo de impressão fecha —
   // tirá-lo antes cancela a impressão no meio.

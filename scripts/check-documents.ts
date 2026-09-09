@@ -68,7 +68,11 @@ const casos: Array<[string, unknown, unknown]> = [
   ["desativar nos cupons preserva a imagem no A4", buildSaleDocument(sale, { ...logoSettings, logoOnThermal: false, printFormat: "A4" }).includes('<img class="print-logo"'), true],
   ["desativar no A4 omite a imagem no A4", buildSaleDocument(sale, { ...logoSettings, logoOnA4: false, printFormat: "A4" }).includes('<img class="print-logo"'), false],
   ["a logo respeita o papel de 58mm", logo58.includes("max-width:50mm"), true],
-  ["papel estreito não imprime como 80mm", logo58.includes("size: 58mm"), true],
+  // Antes esta conferência lia o `size` do @page — que o Chrome descartava por
+  // ser inválido. Ou seja, ela aprovava um valor que a impressora nunca via. A
+  // largura que vale é a do corpo do documento: o papel menos as duas margens
+  // de 4mm.
+  ["papel estreito não imprime como 80mm", logo58.includes("body { width: 50mm"), true],
   ["a imagem externa não gera requisição no cupom", buildSaleDocument(sale, { ...settings, logoDataUrl: "https://example.invalid/logo.png" }).includes('<img class="print-logo"'), false],
   ["SVG ativo não entra na impressão", safeLogoDataUrl("data:image/svg+xml;base64,PHN2Zz4="), ""],
   ["atributos injetados não entram na imagem", safeLogoDataUrl(`${logo}\" onerror=\"alert(1)`), ""],
@@ -112,6 +116,17 @@ const casos: Array<[string, unknown, unknown]> = [
   ["toda via termina em quebra de página", osDoc.includes("break-after: page"), true],
   ["e no nome antigo da propriedade também", osDoc.includes("page-break-after: always"), true],
   ["a última via não é mais exceção", osDoc.includes(".via:last-child"), false],
+  // A mesma quebra pedida do outro lado. Quando o navegador engole a de
+  // depois — acontece imprimindo de dentro de uma moldura, que é como o
+  // sistema faz — é esta que separa as vias. Sem as duas, três vias curtas
+  // cabem juntas numa folha e saem grudadas.
+  ["toda via depois da primeira começa em página nova", osDoc.includes(".via + .via { break-before: page"), true],
+  ["e no nome antigo da propriedade também", osDoc.includes("page-break-before: always"), true],
+  // `size: 80mm auto` mistura comprimento com palavra-chave, o que o CSS não
+  // permite: o Chrome descartava a declaração inteira e o cupom saía no papel
+  // que a impressora mandasse. Deixar o driver decidir é o certo aqui (só ele
+  // sabe o comprimento da bobina), mas escrito de um jeito que funcione.
+  ["não sobrou tamanho de papel inválido", /size:\s*\d+mm\s+auto/.test(osDoc), false],
   // A lâmina fica acima da cabeça de impressão: sem a sobra, o corte come a
   // última linha, que é a assinatura do cliente.
   ["cada via reserva o espaço da lâmina", (osDoc.match(/class="feed"/g) || []).length, 3],
@@ -156,9 +171,9 @@ const casos: Array<[string, unknown, unknown]> = [
   ["a quantidade da peça aparece", osDoc.includes("2x"), true],
 
   // Formato
-  ["cupom usa largura de 80mm", osDoc.includes("80mm"), true],
+  ["cupom usa a largura do papel de 80mm", osDoc.includes("body { width: 72mm"), true],
   ["A4 usa página A4", a4.includes("size: A4"), true],
-  ["A4 não usa a largura do cupom", a4.includes("80mm"), false],
+  ["A4 não usa a largura do cupom", a4.includes("72mm"), false],
 
   // Cupom da venda
   ["o cupom traz o número da venda", saleDoc.includes("VEN-0003"), true],
