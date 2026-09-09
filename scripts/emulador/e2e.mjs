@@ -286,10 +286,24 @@ const avancar = async (nome, espera = 1800) => {
 
 /** Da identificação para o serviço. */
 const irParaServico = () => avancar(/Ir para serviço/);
-/** Do serviço para a conferência, e da conferência para a OS gravada. */
+/**
+ * Do serviço para a conferência, da conferência para a OS gravada, e daí para
+ * fora.
+ *
+ * O fluxo novo termina numa tela de confirmação ("Ordem de serviço aberta!")
+ * que fica aberta esperando o que fazer em seguida. Ela é útil para quem
+ * atende, e para o roteiro é uma máscara que engole o clique seguinte — foi o
+ * que fez o passo da frota travar tentando abrir um cartão que estava atrás
+ * dela. Fechar pelo "×" volta para a lista sem seguir para outro lugar.
+ */
 const conferirEAbrir = async () => {
   await avancar(/Conferir atendimento/);
   await avancar(/Abrir ordem de serviço/, 4500);
+  const fechar = p.locator(`${CAMADA} .attendance-success button[aria-label="Fechar confirmação"]`).first();
+  if (await fechar.count()) {
+    await fechar.click();
+    await p.waitForTimeout(1800);
+  }
 };
 
 const ir = async (destino) => {
@@ -870,7 +884,10 @@ await passo("cadastrar cliente completo sem sair da OS", async () => {
   await p.locator(".dialog-window button", { hasText: /Cadastrar Cliente/ }).first().click();
   await p.waitForTimeout(4000);
   if ((await banco("clients")).length !== antes + 1) problemas.push("o cliente completo não foi gravado");
-  if (!(await p.locator(".dialog", { hasText: /Abrir nova ordem/i }).count())) problemas.push("não voltou para a OS depois de cadastrar");
+  // O diálogo mudou de nome junto com o fluxo: "Abrir nova ordem de serviço"
+  // virou "Nova ordem de serviço". O que se confere é o mesmo: cadastrar o
+  // cliente por dentro não pode jogar quem atende para fora da OS.
+  if (!(await p.locator(`${CAMADA}`, { hasText: /Nova ordem de serviço/i }).count())) problemas.push("não voltou para a OS depois de cadastrar");
   await p.locator(".dialog-footer .ghost-button, .dialog button", { hasText: /Cancelar/ }).first().click().catch(() => {});
   await p.waitForTimeout(1200);
   if (problemas.length) throw new Error("cadastro dentro da OS:\n      - " + problemas.join("\n      - "));
