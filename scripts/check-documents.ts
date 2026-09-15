@@ -9,6 +9,9 @@
  * Rode com: npm run check:documents
  */
 import {
+  copiesToPrint,
+  orderFromQuickService,
+  ORDER_COPY_LABELS,
   buildOrderDocument,
   buildOrderWhatsappMessage,
   buildSaleDocument,
@@ -47,6 +50,16 @@ const sale: SaleRecord = {
 };
 
 const osDoc = buildOrderDocument({ order, settings, mechanics: "João + Ana" });
+const quickSale: SaleRecord = {
+  id: "VEN-0009", origin: "Serviço rápido", total: 140, paymentMethod: "Dinheiro",
+  date: "15/09/2026", soldAt: "2026-09-15T13:10:00.000Z",
+  customer: "MARIA SOUZA", vehicle: "HONDA BIZ 125 · XYZ-9999",
+  mechanicId: "USR-002", mechanicName: "RONALDO",
+  items: [
+    { id: "SRV-1", type: "Mão de obra", name: "TROCA DE ÓLEO", price: 60 },
+    { id: "PRD-9", type: "Peça", name: "ÓLEO 20W50", price: 80, quantity: 2 },
+  ],
+};
 const saleDoc = buildSaleDocument(sale, settings);
 const saleComDesconto = buildSaleDocument({ ...sale, subtotal: 100, discount: 10, total: 90 }, settings);
 const saleDividida = buildSaleDocument({ ...sale, total: 150, paymentMethod: "PIX",
@@ -117,6 +130,42 @@ const casos: Array<[string, unknown, unknown]> = [
 
   // Vias
   ["três vias configuradas geram três rótulos", orderCopyLabels(true).length, 3],
+
+  /*
+    Escolher a via na hora de imprimir.
+
+    Reimprimir UMA via é o caso do dia a dia: o cliente perdeu a dele, a do
+    caixa rasgou na gaveta. Gastar as três folhas de novo para recuperar uma é
+    desperdício de papel e de tempo na guilhotina.
+  */
+  ["escolher uma via imprime só ela", copiesToPrint("Via do caixa", true).join(","), "Via do caixa"],
+  ["e o documento sai com uma via só", (buildOrderDocument({ order, settings, mechanics: "", copies: ["Via do caixa"] }).match(/class="via"/g) || []).length, 1],
+  ["com o rótulo certo no papel", buildOrderDocument({ order, settings, mechanics: "", copies: ["Via do caixa"] }).includes("Via do caixa"), true],
+  ["e sem o rótulo das outras", buildOrderDocument({ order, settings, mechanics: "", copies: ["Via do caixa"] }).includes("Via do cliente"), false],
+  ["mesmo com uma via só, ela termina em corte", buildOrderDocument({ order, settings, mechanics: "", copies: ["Via do caixa"] }).includes("break-after: page"), true],
+  ["'todas' respeita a configuração da oficina", copiesToPrint("todas", true).length, 3],
+  ["e quem desligou as três vias continua com uma", copiesToPrint("todas", false).join(","), "Via do cliente"],
+  // Lista vazia gastaria papel imprimindo nada.
+  ["lista vazia cai no padrão em vez de sair em branco", (buildOrderDocument({ order, settings, mechanics: "", copies: [] }).match(/class="via"/g) || []).length, 3],
+  ["as três vias oferecidas na tela são as do papel", ORDER_COPY_LABELS.join(","), orderCopyLabels(true).join(",")],
+
+  /*
+    O serviço rápido impresso no papel da OS.
+
+    O balcão pediu para imprimir a OS também no serviço rápido. A saída certa
+    não é um documento novo: é este mesmo, que já tem cabeçalho, cliente e
+    placa em destaque, corte por via e assinatura.
+  */
+  ["o serviço rápido vira OS com o número da venda", orderFromQuickService(quickSale).id, "VEN-0009"],
+  ["com o cliente", orderFromQuickService(quickSale).customer, "MARIA SOUZA"],
+  ["a moto e a placa saem separadas do campo livre", `${orderFromQuickService(quickSale).bike}|${orderFromQuickService(quickSale).plate}`, "HONDA BIZ 125|XYZ-9999"],
+  ["sem placa informada não inventa uma", orderFromQuickService({ ...quickSale, vehicle: "HONDA BIZ 125" }).plate, ""],
+  ["serviço rápido sem cliente não sai com o nome em branco", orderFromQuickService({ ...quickSale, customer: "" }).customer, "Cliente não identificado"],
+  ["o que foi feito vai para o campo do serviço executado", orderFromQuickService(quickSale).solution, "TROCA DE ÓLEO"],
+  ["e o papel do serviço rápido também tem a hora", orderFromQuickService(quickSale).time.includes(":"), true],
+  ["serviço rápido antigo, sem hora gravada, cai na data", orderFromQuickService({ ...quickSale, soldAt: "" } as never).time, "15/09/2026"],
+  ["e o papel sai com as três vias", (buildOrderDocument({ order: orderFromQuickService(quickSale), settings, mechanics: "RONALDO" }).match(/class="via"/g) || []).length, 3],
+  ["com o total do serviço rápido", buildOrderDocument({ order: orderFromQuickService(quickSale), settings, mechanics: "" }).includes("R$\u00A0140,00"), true],
   ["sem três vias, só a do cliente", orderCopyLabels(false).join(""), "Via do cliente"],
   ["o documento sai com as três vias", (osDoc.match(/class="via"/g) || []).length, 3],
   ["desligando três vias, sai uma só", (uma.match(/class="via"/g) || []).length, 1],

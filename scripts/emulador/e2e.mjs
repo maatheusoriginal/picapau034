@@ -2836,6 +2836,45 @@ await passo("dois cliques no cartão abrem a OS, e o botão não abre duas vezes
   }
 });
 
+await passo("o serviço rápido lista o atendimento do dia e imprime a via escolhida", async () => {
+  await ir("Serviço rápido");
+  await p.waitForTimeout(1800);
+
+  // A tabela era uma casca com o texto de "nenhum atendimento" cravado: dizia
+  // isso mesmo depois de dez serviços feitos na manhã.
+  const vazio = await p.locator("tbody", { hasText: /Nenhum atendimento expresso/ }).count();
+  if (vazio) throw new Error("a lista continua dizendo que não houve atendimento");
+  const linhas = await p.locator("tbody tr").count();
+  if (!linhas) throw new Error("o serviço rápido do roteiro não apareceu na lista do dia");
+
+  const contador = await p.locator(".panel-header .status").first().innerText();
+  if (/^0 /.test(contador.trim())) throw new Error(`o contador ficou em zero com ${linhas} linha(s) na tela: "${contador}"`);
+
+  // O seletor de vias: abrir, ver as quatro opções e escolher uma só.
+  await p.locator("tbody tr .print-copies > button").first().click();
+  await p.waitForTimeout(700);
+  const menu = p.locator(".print-copies-menu").first();
+  if (!(await menu.count())) throw new Error("o botão de imprimir não abriu o seletor de vias");
+  for (const opcao of ["Imprimir as 3 vias", "Via do mecânico", "Via do caixa", "Via do cliente"]) {
+    if (!(await menu.locator(`text=${opcao}`).count())) throw new Error(`falta a opção "${opcao}" no seletor`);
+  }
+  await menu.locator("button", { hasText: /^Via do caixa$/ }).first().click();
+  await p.waitForTimeout(1200);
+  if (await p.locator(".print-copies-menu").count()) throw new Error("o seletor ficou aberto depois de escolher a via");
+
+  // E o mesmo seletor dentro da OS.
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(2200);
+  await p.locator(".order-actions .print-copies > button").first().click();
+  await p.waitForTimeout(700);
+  if (!(await p.locator(".print-copies-menu").count())) throw new Error("a OS não abriu o seletor de vias");
+  await p.locator(".print-copies-menu button", { hasText: /^Via do cliente$/ }).first().click();
+  await p.waitForTimeout(1200);
+  await fecharQualquerDialogo();
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();

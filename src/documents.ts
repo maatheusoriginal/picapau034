@@ -186,14 +186,84 @@ export function orderCopyLabels(threeCopies: boolean): string[] {
   return threeCopies ? ["Via do mecânico", "Via do caixa", "Via do cliente"] : ["Via do cliente"];
 }
 
+/**
+ * As vias que a oficina pode escolher na hora de imprimir.
+ *
+ * A ordem é a do papel: mecânico primeiro, cliente por último, porque é essa a
+ * que fica na mão de quem vai embora.
+ */
+export const ORDER_COPY_LABELS = ["Via do mecânico", "Via do caixa", "Via do cliente"] as const;
+export type OrderCopyLabel = (typeof ORDER_COPY_LABELS)[number];
+export type OrderCopyChoice = "todas" | OrderCopyLabel;
+
+/**
+ * O que sai da impressora para a escolha feita.
+ *
+ * Reimprimir UMA via é o caso do dia a dia: o cliente perdeu a dele, a via do
+ * caixa rasgou na gaveta, o mecânico levou a dele junto com a moto. Gastar as
+ * três folhas de novo para recuperar uma é desperdício de papel e de tempo na
+ * guilhotina.
+ *
+ * "todas" respeita a configuração da oficina: quem desligou as três vias
+ * continua imprimindo só a do cliente.
+ */
+export function copiesToPrint(choice: OrderCopyChoice, threeCopies: boolean): string[] {
+  if (choice === "todas") return orderCopyLabels(threeCopies);
+  return [choice];
+}
+
+/**
+ * O serviço rápido impresso no mesmo papel da OS.
+ *
+ * O balcão pediu para imprimir a OS também no serviço rápido, e a saída certa
+ * não é um documento novo: é ESTE, com o cabeçalho da oficina, o cliente e a
+ * placa em destaque, o corte por via e a assinatura. Um serviço rápido tem
+ * tudo o que o papel precisa — cliente, moto, mecânico, itens e total —, só
+ * não tem número de OS, então entra com o número da venda.
+ */
+export function orderFromQuickService(sale: SaleRecord): OrderRecord {
+  const [modelo, placa] = String(sale.vehicle ?? "").split("·").map((parte) => parte.trim());
+  return {
+    id: sale.id,
+    customer: sale.customer || "Cliente não identificado",
+    bike: modelo || "",
+    plate: placa || "",
+    mechanic: sale.mechanicName ?? "",
+    mechanicIds: sale.mechanicId ? [sale.mechanicId] : [],
+    // Com a HORA, como a OS: é ela que separa dois serviços rápidos do mesmo
+    // cliente no mesmo dia, na troca e na garantia.
+    time: saleStamp(sale),
+    status: "Entrega",
+    tone: "green",
+    items: sale.items ?? [],
+    total: sale.total,
+    // O serviço rápido não tem "problema relatado": ele nasce com o serviço já
+    // decidido no balcão. O que foi feito vai para `solution`, que é o campo
+    // certo para isso; no papel ele já aparece na lista de itens, como mão de
+    // obra, e é de lá que o cliente lê.
+    solution: (sale.items ?? []).filter((item) => item.type === "Mão de obra").map((item) => item.name).join(", "),
+    paymentMethod: sale.paymentMethod,
+    closed: true,
+    closedAt: sale.date,
+    closedAtISO: sale.soldAt,
+  };
+}
+
 export type OrderPrintInput = {
   order: OrderRecord;
   settings: Partial<SettingsConfig> | null;
   mechanics: string;
+  /**
+   * As vias a imprimir. Sem isto, sai o que a oficina configurou.
+   *
+   * Lista vazia cai no padrão de propósito: mandar para a impressora um
+   * documento sem via nenhuma gasta papel e não imprime nada útil.
+   */
+  copies?: string[];
 };
 
 /** Documento da ordem de serviço, pronto para a impressora. */
-export function buildOrderDocument({ order, settings, mechanics }: OrderPrintInput): string {
+export function buildOrderDocument({ order, settings, mechanics, copies }: OrderPrintInput): string {
   const items = order.items ?? [];
   const total = order.total ?? items.reduce((sum, item) => sum + item.price, 0);
   const warranty = settings?.defaultWarrantyDays;
@@ -225,8 +295,8 @@ export function buildOrderDocument({ order, settings, mechanics }: OrderPrintInp
     <div class="feed"></div>
   </div>`;
 
-  const copies = orderCopyLabels(settings?.printThreeCopies !== false).map(via).join("");
-  return documentShell(`OS ${order.id}`, settings?.printFormat ?? "Cupom 80mm", copies);
+  const escolhidas = copies?.length ? copies : orderCopyLabels(settings?.printThreeCopies !== false);
+  return documentShell(`OS ${order.id}`, settings?.printFormat ?? "Cupom 80mm", escolhidas.map(via).join(""));
 }
 
 /**
