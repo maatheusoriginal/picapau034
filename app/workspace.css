@@ -274,3 +274,42 @@ table td strong, table td span { font-size: .875rem; }
 /* A hora de entrada fica abaixo da moto, um tom mais claro: é informação de
    apoio, não pode competir com o serviço que foi feito. */
 .history-opened { margin-top: 1px !important; color: #a7a7ab !important; }
+
+/* ---------------------------------------------------------------------------
+   Escolher a via na hora de imprimir
+
+   O botão continua igual ao que era; o menu abre debaixo dele. As três vias
+   ficam sempre na lista, mesmo em oficina que desligou as três vias nas
+   Configurações — aquela opção decide o padrão, e aqui a pessoa escolhe na mão.
+
+   `.order-actions button` e as regras da tabela pintam qualquer botão que
+   esteja dentro delas, então as linhas do menu precisam desfazer aquilo, senão
+   saem como três pílulas soltas em vez de uma lista.
+   --------------------------------------------------------------------------- */
+.print-copies { position: relative; display: inline-flex; }
+.print-copies-menu {
+  position: absolute; z-index: 40; top: calc(100% + 6px); right: 0; min-width: 232px;
+  display: flex; flex-direction: column; padding: 6px;
+  border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  box-shadow: 0 18px 44px rgba(0,0,0,.16);
+}
+.print-copies-menu button {
+  display: block; width: 100%; height: auto; min-height: 38px; padding: 8px 10px;
+  border: 0; border-radius: 7px; background: transparent; color: #3a3b3f;
+  font-size: .875rem; font-weight: 600; text-align: left; white-space: nowrap;
+}
+.print-copies-menu button:hover { background: #f4f2ef; }
+.print-copies-menu .print-copies-all { padding: 9px 10px; }
+.print-copies-menu .print-copies-all strong { display: block; font-size: .875rem; font-weight: 750; }
+.print-copies-menu .print-copies-all small { display: block; margin-top: 2px; color: #96969a; font-size: .8125rem; font-weight: 500; }
+.print-copies-divider {
+  display: block; margin: 5px 4px 2px; padding-top: 6px; border-top: 1px solid #f1efec;
+  color: #a7a7ab; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em;
+}
+/* Encostado na borda direita da tela o menu sairia para fora; no celular ele
+   se alinha pela esquerda do botão, que é onde sobra espaço. */
+@media(max-width:560px) { .print-copies-menu { right: auto; left: 0; min-width: 210px; } }
+
+/* O cabeçalho do painel do serviço rápido ganhou o "Ver todos" ao lado do
+   contador. */
+.panel-header-actions { display: flex; align-items: center; gap: 14px; }

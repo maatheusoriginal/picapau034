@@ -42,7 +42,8 @@ import { buildMovement, cashDifference, cashHistorySummary, cashSummary, closedS
 import { mergeParts, priceFromMarkup, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoDoServico } from "../src/mechanic";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
-import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, whatsappUrl } from "../src/documents";
+import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, copiesToPrint, orderFromQuickService, whatsappUrl, type OrderCopyChoice } from "../src/documents";
+import { PrintCopiesMenu } from "../src/components/PrintCopiesMenu";
 import { openWhatsapp, printDocument } from "./printing";
 import { clearReloadMark, ErrorBoundary } from "./ErrorBoundary";
 import { downloadFile } from "./download";
@@ -539,8 +540,43 @@ function useFirebaseSyncedEmployees(
 // pagamento, que é outro componente. Enquanto o estado morava aqui dentro, o
 // diálogo não tinha como saber o que estava sendo vendido — mostrava um total
 // fixo de R$ 108,00 e a venda sumia ao fechar a janela.
-function QuickServiceWorkspace({ openDialog, quickServices }: { openDialog: (dialog: "quick") => void; quickServices: QuickServiceConfig[] }) {
+function QuickServiceWorkspace({ openDialog, quickServices, sales, settings }: {
+  openDialog: (dialog: "quick") => void;
+  quickServices: QuickServiceConfig[];
+  sales: SaleRecord[];
+  settings: Partial<SettingsConfig> | null;
+}) {
   const enabledServices = quickServices.filter((service) => service.active);
+  /*
+    Os atendimentos de verdade.
+
+    Esta tabela era uma casca: dizia "0 concluídos" e "Nenhum atendimento
+    expresso realizado hoje" com o texto CRAVADO, sem nunca olhar as vendas.
+    Quem atendia dez motos pela manhã via a mesma tela vazia da hora de abrir —
+    e não tinha de onde reimprimir o papel de nenhuma delas.
+  */
+  const [verTudo, setVerTudo] = useState(false);
+  const hoje = new Date().toLocaleDateString("pt-BR");
+  const rapidos = useMemo(() => sales
+    .filter((sale) => sale.origin === "Serviço rápido")
+    .sort((um, outro) => String(outro.soldAt ?? "").localeCompare(String(um.soldAt ?? ""))), [sales]);
+  const doDia = useMemo(() => rapidos.filter((sale) => sale.date === hoje), [rapidos, hoje]);
+  const naTela = verTudo ? rapidos : doDia;
+  const totalDoDia = doDia.reduce((soma, sale) => soma + (sale.total || 0), 0);
+  const horaDaVenda = (sale: SaleRecord) => {
+    const quando = new Date(sale.soldAt ?? "");
+    return Number.isNaN(quando.getTime()) ? sale.date : quando.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  };
+  const servicoDe = (sale: SaleRecord) => (sale.items ?? []).filter((item) => item.type === "Mão de obra").map((item) => item.name).join(", ") || "Serviço não descrito";
+  const produtoDe = (sale: SaleRecord) => (sale.items ?? []).filter((item) => item.type === "Peça").map((item) => `${item.quantity && item.quantity > 1 ? `${item.quantity}x ` : ""}${item.name}`).join(", ") || "Sem produto";
+  // A mesma folha da OS, com as mesmas vias e o mesmo corte: foi o que o
+  // balcão pediu. Ver orderFromQuickService, em src/documents.ts.
+  const imprimir = (sale: SaleRecord, choice: OrderCopyChoice) => printDocument(buildOrderDocument({
+    order: orderFromQuickService(sale),
+    settings,
+    mechanics: sale.mechanicName ?? "",
+    copies: copiesToPrint(choice, settings?.printThreeCopies !== false),
+  }));
   return (
     <>
       <div className="module-heading">
@@ -553,9 +589,26 @@ function QuickServiceWorkspace({ openDialog, quickServices }: { openDialog: (dia
         )) : <div className="no-results" style={{ gridColumn: "1 / -1", padding: "24px 16px", textAlign: "center" }}>Nenhum serviço rápido configurado. Adicione em Configurações.</div>}
       </div>
       <section className="panel module-panel">
-        <div className="panel-header"><div><h2>Atendimentos de hoje</h2><p>Serviços concluídos diretamente no balcão</p></div><span className="status green"><i/>0 concluídos</span></div>
-        <div className="table-scroll"><table><thead><tr><th className="col-secondary">Horário</th><th>Serviço</th><th className="col-secondary">Produto</th><th className="col-secondary">Pagamento</th><th>Valor</th><th>Status</th></tr></thead><tbody>
-          <tr><td colSpan={6} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }} className="col-secondary">Nenhum atendimento expresso realizado hoje.</td></tr>
+        <div className="panel-header">
+          <div><h2>{verTudo ? "Todos os atendimentos" : "Atendimentos de hoje"}</h2><p>{verTudo ? "Histórico completo do balcão express" : `Serviços concluídos diretamente no balcão · ${formatBRL(totalDoDia)}`}</p></div>
+          <div className="panel-header-actions">
+            <span className="status green"><i/>{doDia.length} concluído(s) hoje</span>
+            <button className="text-button" onClick={() => setVerTudo((valor) => !valor)}>{verTudo ? "Ver só hoje" : "Ver todos"}</button>
+          </div>
+        </div>
+        <div className="table-scroll"><table><thead><tr><th className="col-secondary">Horário</th><th>Serviço</th><th className="col-secondary">Produto</th><th className="col-secondary">Pagamento</th><th>Valor</th><th/></tr></thead><tbody>
+          {naTela.length ? naTela.map((sale) => (
+            <tr key={sale.id}>
+              <td className="col-secondary">{horaDaVenda(sale)}</td>
+              <td><strong className="order-id">{sale.id}</strong><span>{servicoDe(sale)}{sale.customer ? ` · ${sale.customer}` : ""}</span></td>
+              <td className="col-secondary">{produtoDe(sale)}</td>
+              <td className="col-secondary">{sale.paymentMethod}</td>
+              <td><strong>{formatBRL(sale.total)}</strong></td>
+              <td><PrintCopiesMenu label="Imprimir" onPrint={(choice) => imprimir(sale, choice)}/></td>
+            </tr>
+          )) : (
+            <tr><td colSpan={6} style={{ textAlign: "center", padding: "32px 16px", color: "var(--muted)" }}>{verTudo ? "Nenhum serviço rápido registrado ainda." : "Nenhum atendimento expresso realizado hoje."}</td></tr>
+          )}
         </tbody></table></div>
       </section>
     </>
@@ -2213,7 +2266,7 @@ export function ModuleWorkspace({
 
   if (active === "PDV Balcão") return <CounterWorkspace products={products} cart={cart} setCart={setCart} discount={discount} setDiscount={setDiscount} notify={notify} openDialog={openDialog} cash={openSession(cashSessions) ?? undefined} blockZeroStockSale={settings?.blockZeroStockSale !== false} canManageFinance={canManageFinance} parked={parked} setParked={setParked}/>;
   if (["Compras e entradas", "Vendas do balcão"].includes(active)) return <ActivityWorkspace mode={active === "Compras e entradas" ? "purchases" : "sales"} sales={sales} entries={stockEntries} openDialog={openDialog} navigate={navigate} canOperate={canOperate} settings={settings} notify={notify}/>;
-  if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices}/>;
+  if (active === "Serviço rápido") return <QuickServiceWorkspace openDialog={(dialog) => openDialog(dialog)} quickServices={quickServices} sales={sales} settings={settings}/>;
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts} notify={notify} canManage={canOperate}/>;
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts} notify={notify} canManage={canOperate}/>;
@@ -3689,9 +3742,14 @@ export function AppDialog({
     setPurchaseItems((current) => current.filter((_, position) => position !== index));
   };
 
-  const printOrder = (order: OrderRecord) => {
+  const printOrder = (order: OrderRecord, choice: OrderCopyChoice = "todas") => {
     const names = activeMechanics.filter((mechanic) => (order.mechanicIds ?? []).includes(mechanic.id)).map((mechanic) => mechanic.name);
-    printDocument(buildOrderDocument({ order, settings, mechanics: names.join(" + ") || order.mechanic }));
+    printDocument(buildOrderDocument({
+      order,
+      settings,
+      mechanics: names.join(" + ") || order.mechanic,
+      copies: copiesToPrint(choice, settings?.printThreeCopies !== false),
+    }));
   };
 
   const sendOrderWhatsapp = (order: OrderRecord) => {
@@ -5546,7 +5604,7 @@ export function AppDialog({
           <div className="dialog-body order-detail">
             {currentOrder ? (
               <>
-                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{currentOrder.closed ? "Entregue e encerrada" : orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><button onClick={() => printOrder(currentOrder)}><Icon name="printer" size={16}/>{settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"}</button><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
+                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{currentOrder.closed ? "Entregue e encerrada" : orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><PrintCopiesMenu label={settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"} onPrint={(choice) => printOrder(currentOrder, choice)}/><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
                 <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select disabled={!canOperate || !!currentOrder.closed} value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as ServiceOrderStatus)}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button disabled={!canOperate || !!currentOrder.closed} className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
                 <div className="order-info-grid"><div><span>Cliente / pagador</span><strong>{currentOrder.customer}</strong><small>{currentOrder.origin}</small></div><div><span>Motocicleta</span><strong>{currentOrder.bike}</strong><small>{currentOrder.plate}</small></div><div><span>Mecânicos</span><strong>{orderMechanics.map((mechanic) => mechanic.name).join(" + ") || currentOrder.mechanic}</strong><small>{orderMechanics.length || 1} responsável(is)</small></div><div><span>Previsão</span><strong>{currentOrder.delivery}</strong><small>Prioridade {currentOrder.priority}</small></div></div>
                 {canOperate && !currentOrder.closed ? (
