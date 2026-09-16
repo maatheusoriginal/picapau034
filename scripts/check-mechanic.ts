@@ -19,15 +19,15 @@ const orders = [
   // Do Ronaldo, na bancada agora.
   { id: "OS-0001", customer: "João", status: "Em serviço", mechanicIds: [RONALDO] },
   // Do Ronaldo, ainda não começou.
-  { id: "OS-0002", customer: "Marta", status: "Aprovação", mechanicIds: [RONALDO] },
+  { id: "OS-0002", customer: "Marta", status: "Em avaliação", mechanicIds: [RONALDO] },
   // Do Ronaldo, já pronta esperando o cliente.
-  { id: "OS-0003", customer: "Bruno", status: "Entrega", mechanicIds: [RONALDO] },
+  { id: "OS-0003", customer: "Bruno", status: "Finalizada", mechanicIds: [RONALDO] },
   // Do Ronaldo, mas ENCERRADA: saiu da oficina, não aparece mais.
-  { id: "OS-0004", customer: "Antigo", status: "Entrega", mechanicIds: [RONALDO], closed: true },
+  { id: "OS-0004", customer: "Antigo", status: "Finalizada", mechanicIds: [RONALDO], closed: true },
   // Da Ana.
   { id: "OS-0005", customer: "Carlos", status: "Em serviço", mechanicIds: [ANA] },
   // Sem ninguém: é o que está livre para pegar.
-  { id: "OS-0006", customer: "Rayane", status: "Recepção", mechanicIds: [] },
+  { id: "OS-0006", customer: "Rayane", status: "Em avaliação", mechanicIds: [] },
   // Compartilhada entre os dois.
   { id: "OS-0007", customer: "Pedro", status: "Em serviço", mechanicIds: [ANA, RONALDO] },
   // Dele, parada esperando peça chegar.
@@ -60,7 +60,7 @@ const casos: Array<[string, unknown, unknown]> = [
   ["nem entre as da oficina", board.shop.some((o) => o.id === "OS-0004"), false],
   ["o que é dos outros fica em 'na oficina'", json(board.shop.map((o) => o.id)), json(["OS-0005", "OS-0009", "OS-0006"])],
   ["o que está na bancada vem primeiro", board.mine[0]!.status, "Em serviço"],
-  ["o que já está pronto vai para o fim", board.mine[board.mine.length - 1]!.status, "Entrega"],
+  ["o que já está pronto vai para o fim", board.mine[board.mine.length - 1]!.status, "Finalizada"],
   ["nenhuma OS aparece nas duas listas", board.mine.some((m) => board.shop.some((s) => s.id === m.id)), false],
   ["nenhuma OS aberta se perde", board.mine.length + board.shop.length, orders.filter((o) => !o.closed).length],
 
@@ -76,18 +76,18 @@ const casos: Array<[string, unknown, unknown]> = [
   ["quantas dele estão paradas esperando peça", resumo.blocked, 1],
 
   // --- Os passos de um toque ---
-  ["quem não começou, inicia", json(actionsFor("Recepção")), json([{ label: "Iniciar", target: "Em serviço" }])],
-  ["orçamento aprovado vai para a bancada", actionsFor("Aprovação")[0]!.target, "Em serviço"],
+  ["quem não começou, inicia", json(actionsFor("Em avaliação")), json([{ label: "Iniciar", target: "Em serviço" }])],
+  ["orçamento aprovado vai para a bancada", actionsFor("Em avaliação")[0]!.target, "Em serviço"],
   // Terminar e travar esperando peça acontecem com a mesma frequência: as duas
   // precisam caber em um toque, senão ninguém registra a espera.
   ["em serviço tem dois caminhos", actionsFor("Em serviço").length, 2],
   ["um deles é travar esperando peça", actionsFor("Em serviço")[0]!.target, "Aguardando peça"],
   // Rótulo curto para caber ao lado de "Abrir" e "Pronta" no celular.
   ["mas o botão é curto", actionsFor("Em serviço")[0]!.label, "Falta peça"],
-  ["o outro é marcar pronta", actionsFor("Em serviço")[1]!.target, "Entrega"],
+  ["o outro é marcar pronta", actionsFor("Em serviço")[1]!.target, "Finalizada"],
   ["quando a peça chega, volta para a bancada", json(actionsFor("Aguardando peça")), json([{ label: "Peça chegou", target: "Em serviço" }])],
-  ["quem já está pronta não tem ação de um toque", actionsFor("Entrega").length, 0],
-  ["OS livre convida a pegar", takeLabelFor("Recepção"), "Pegar"],
+  ["quem já está pronta não tem ação de um toque", actionsFor("Finalizada").length, 0],
+  ["OS livre convida a pegar", takeLabelFor("Em avaliação"), "Pegar"],
   ["OS já em serviço convida a ajudar", takeLabelFor("Em serviço"), "Ajudar"],
   ["OS parada esperando peça convida a assumir", takeLabelFor("Aguardando peça"), "Assumir"],
 

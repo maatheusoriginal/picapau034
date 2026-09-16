@@ -233,7 +233,7 @@ export function orderFromQuickService(sale: SaleRecord): OrderRecord {
     // Com a HORA, como a OS: é ela que separa dois serviços rápidos do mesmo
     // cliente no mesmo dia, na troca e na garantia.
     time: saleStamp(sale),
-    status: "Entrega",
+    status: "Finalizada",
     tone: "green",
     items: sale.items ?? [],
     total: sale.total,

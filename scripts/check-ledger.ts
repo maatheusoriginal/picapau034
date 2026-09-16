@@ -22,7 +22,7 @@ const emDias = (dias: number, hora = 10) => new Date(2026, 8, 16 - dias, hora, 0
 
 const os = (partes: Partial<OrderRecord>): OrderRecord => ({
   id: "OS-X", customer: "", bike: "", plate: "", mechanic: "", mechanicIds: [],
-  time: "", status: "Entrega", tone: "green", ...partes,
+  time: "", status: "Finalizada", tone: "green", ...partes,
 });
 const venda = (partes: Partial<SaleRecord>): SaleRecord => ({
   id: "VEN-X", origin: "PDV", items: [], total: 0, paymentMethod: "Dinheiro",

@@ -25,8 +25,8 @@ const item = (name: string, quantity = 1): ServiceOrderItem =>
 const QUANDO = "2026-09-09T17:32:00.000Z";
 
 // --- mudanças ---------------------------------------------------------------
-const trocaDeSituacao = changeEvents({ status: "Recepção" }, { status: "Em serviço" }, "RAYANE", QUANDO);
-const primeiraSituacao = changeEvents({}, { status: "Recepção" }, "RAYANE", QUANDO);
+const trocaDeSituacao = changeEvents({ status: "Em avaliação" }, { status: "Em serviço" }, "RAYANE", QUANDO);
+const primeiraSituacao = changeEvents({}, { status: "Em avaliação" }, "RAYANE", QUANDO);
 const semMudanca = changeEvents({ status: "Em serviço", mechanic: "RONALDO" }, { status: "Em serviço", mechanic: "RONALDO" }, "RAYANE", QUANDO);
 
 const pecaIncluida = changeEvents({ items: [item("ÓLEO")] }, { items: [item("ÓLEO"), item("RETENTOR")] }, "RONALDO", QUANDO);
@@ -41,13 +41,13 @@ const osNova: Partial<OrderRecord> = {
   time: "09/09/2026, 08:15",
   events: [
     orderEvent("Ordem de serviço aberta · 09/09/2026, 08:15", "RAYANE", "2026-09-09T11:15:00.000Z"),
-    orderEvent("Situação: Recepção → Em serviço", "RONALDO", "2026-09-09T13:40:00.000Z"),
+    orderEvent("Situação: Em avaliação → Em serviço", "RONALDO", "2026-09-09T13:40:00.000Z"),
   ],
 };
 // Linha carimbada fora de ordem: a tela precisa devolver em ordem de relógio.
 const foraDeOrdem: Partial<OrderRecord> = {
   events: [
-    orderEvent("Situação: Recepção → Em serviço", "RONALDO", "2026-09-09T13:40:00.000Z"),
+    orderEvent("Situação: Em avaliação → Em serviço", "RONALDO", "2026-09-09T13:40:00.000Z"),
     orderEvent("Ordem de serviço aberta", "RAYANE", "2026-09-09T11:15:00.000Z"),
   ],
 };
@@ -60,10 +60,10 @@ const passouDoTeto = appendEvents(cheia, [orderEvent("a mais", "", QUANDO)]);
 
 const casos: Array<[string, unknown, unknown]> = [
   // A situação é a pergunta que a oficina faz ao telefone.
-  ["troca de situação vira linha", trocaDeSituacao[0]?.what, "Situação: Recepção → Em serviço"],
+  ["troca de situação vira linha", trocaDeSituacao[0]?.what, "Situação: Em avaliação → Em serviço"],
   ["e guarda quem mexeu", trocaDeSituacao[0]?.who, "RAYANE"],
   ["e a hora exata", trocaDeSituacao[0]?.at, QUANDO],
-  ["a primeira situação não inventa um 'de'", primeiraSituacao[0]?.what, "Situação: Recepção"],
+  ["a primeira situação não inventa um 'de'", primeiraSituacao[0]?.what, "Situação: Em avaliação"],
   ["salvar sem mudar nada não anota", semMudanca.length, 0],
 
   // Peça lançada e peça tirada: é o que o cliente contesta na entrega.

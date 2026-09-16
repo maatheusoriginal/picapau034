@@ -31,14 +31,14 @@ const osComHistorico = {
   tone: "amber", total: 165, delivery: "11/09/2026", priority: "Normal", origin: "Cliente direto",
   events: [
     { at: "2026-09-09T11:15:00.000Z", what: "Ordem de serviço aberta · 09/09/2026, 08:15", who: "RAYANE" },
-    { at: "2026-09-09T13:40:00.000Z", what: "Situação: Recepção → Em serviço", who: "RONALDO" },
+    { at: "2026-09-09T13:40:00.000Z", what: "Situação: Em avaliação → Em serviço", who: "RONALDO" },
     { at: "2026-09-09T14:05:00.000Z", what: "Incluído: RETENTOR", who: "RONALDO" },
   ],
 };
 const osAntigaSemHistorico = { ...osComHistorico, id: "OS-0001", events: undefined };
 
 for (const [ordem, esperado] of [
-  [osComHistorico, ["Histórico desta OS", "Situação: Recepção → Em serviço", "Incluído: RETENTOR", "RAYANE", "3 registro(s)"]],
+  [osComHistorico, ["Histórico desta OS", "Situação: Em avaliação → Em serviço", "Incluído: RETENTOR", "RAYANE", "3 registro(s)"]],
   // OS de antes deste histórico não pode aparecer vazia.
   [osAntigaSemHistorico, ["Histórico desta OS", "Ordem de serviço aberta · 09/09/2026, 08:15", "1 registro(s)"]],
 ] as const) {
@@ -58,7 +58,7 @@ for (const [ordem, esperado] of [
 const osSemNome = {
   id: "OS-0042", customer: "Cliente não identificado", customerPending: true,
   bike: "", plate: "", mechanic: "", mechanicIds: [], time: "16/09/2026, 09:00",
-  status: "Recepção", tone: "amber", total: 0,
+  status: "Em avaliação", tone: "amber", total: 0,
 };
 const marcadoSemNome = renderToStaticMarkup(<AppDialog {...props} dialog="order" orders={[osSemNome as never]} selectedRecordId="OS-0042"/>);
 for (const texto of ["Cliente e motocicleta", "Nome de quem responde pela moto", "Problema relatado", "aberta sem identificar o cliente"]) {

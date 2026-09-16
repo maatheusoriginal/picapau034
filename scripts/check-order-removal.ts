@@ -19,7 +19,7 @@ import type { OrderRecord } from "../src/types";
 
 const os = (partes: Partial<OrderRecord>): OrderRecord => ({
   id: "OS-0001", customer: "MARIA SOUZA", bike: "HONDA BIZ 125", plate: "XYZ-9999",
-  mechanic: "RONALDO", mechanicIds: [], time: "16/09/2026, 09:00", status: "Recepção",
+  mechanic: "RONALDO", mechanicIds: [], time: "16/09/2026, 09:00", status: "Em avaliação",
   tone: "amber", ...partes,
 });
 

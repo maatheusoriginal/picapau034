@@ -332,3 +332,100 @@ table td strong, table td span { font-size: .875rem; }
 .order-actions .removal-trigger:hover { color: #8c4a30; text-decoration: underline; }
 .removal-box .removal-exit { margin-top: 10px; }
 .removal-box .removal-error { margin-top: 12px; color: #a8412c; font-weight: 600; }
+
+/* ---------------------------------------------------------------------------
+   Quadro das Ordens de serviço
+
+   Uma coluna por etapa da oficina, o card arrastável entre elas. No celular o
+   mesmo quadro vira uma etapa por vez, escolhida pela régua de pílulas: seis
+   colunas num telefone seriam seis tiras de dois centímetros — cabe e não se
+   usa. Quem decide é a largura da tela, aqui, e não uma medição em JavaScript.
+--------------------------------------------------------------------------- */
+.order-board-wrap { background: #fafbf7; border-top: 1px solid var(--line); }
+/* A régua de etapas é do celular. No computador as colunas já dizem tudo. */
+.board-stage-pills { display: none; }
+/*
+  As seis etapas cabem na tela, sem rolar para o lado.
+
+  Antes cada coluna tinha largura fixa e o quadro rolava na horizontal: metade
+  da oficina ficava fora da janela, e quem quisesse arrastar da Recepção para a
+  Entrega tinha de rolar segurando o card. Em grade de seis partes iguais tudo
+  fica visível de uma vez, que é a razão de existir um quadro.
+*/
+.order-board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); padding: 14px 16px; }
+/* A divisória entre etapas: uma linha, não seis caixas. */
+.order-board-column { display: flex; flex-direction: column; min-width: 0; min-height: 130px; max-height: 68vh; padding: 0 9px; border-left: 1px solid #e4e8dc; }
+.order-board-column:first-child { border-left: 0; padding-left: 0; }
+.order-board-column:last-child { padding-right: 0; }
+/* A coluna que vai receber o card fica evidente antes de soltar: soltar no
+   lugar errado muda a etapa de uma moto, e desfazer isso é ir na OS. */
+.order-board-column.is-target { background: #eef5e5; border-radius: 9px; box-shadow: inset 0 0 0 1.5px #9bb77d; }
+.order-board-column > header { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 10px; padding: 7px 7px; border-radius: 7px; font-size: .75rem; font-weight: 700; letter-spacing: .01em; color: #46533b; background: #f0f2ea; }
+.order-board-column > header span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.order-board-column > header b { flex-shrink: 0; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 20px; background: #ffffffd9; font-variant-numeric: tabular-nums; font-size: .6875rem; }
+.order-board-column > header.stage-green { background: #e4f1da; color: #37532a; }
+.order-board-column > header.stage-amber { background: #fbeed6; color: #79561a; }
+.order-board-column > header.stage-red { background: #fbe4dd; color: #8f3a27; }
+.order-board-column > header.stage-violet { background: #eee8fa; color: #574080; }
+.order-board-column > header.stage-blue { background: #e3edf7; color: #2f4d69; }
+.order-board-cards { display: flex; flex-direction: column; gap: 9px; overflow-y: auto; scrollbar-width: thin; }
+.order-board-empty { margin: 0; padding: 14px 4px; text-align: center; font-size: .75rem; color: #9aa48e; line-height: 1.45; }
+
+.board-card { position: relative; padding: 10px; border: 1px solid #e3e8da; border-radius: 9px; background: #fff; min-width: 0; }
+/* Card que se arrasta não se seleciona: sem isto, puxar o card pintava o nome
+   do cliente e a moto de azul, como quem passa o mouse marcando texto. */
+.board-card.can-drag { cursor: grab; user-select: none; -webkit-user-select: none; }
+.board-card.can-drag:active { cursor: grabbing; }
+/* O card em movimento fica invisível ao ponteiro: sem isso a coluna debaixo do
+   cursor seria sempre a de origem, que é onde o card ainda está desenhado. */
+.board-card.is-dragging { opacity: .4; pointer-events: none; }
+.board-card.is-late { border-color: #e6bda1; background: #fffaf5; }
+.board-card > header { display: flex; flex-direction: column; gap: 2px; }
+.board-card > header strong { font-size: .875rem; line-height: 1.3; overflow-wrap: anywhere; }
+.board-card .order-number { font-size: .6875rem; white-space: nowrap; }
+.board-card-bike { margin: 6px 0 0; font-size: .75rem; color: #66715d; overflow-wrap: anywhere; }
+.board-card-plate { margin: 2px 0 0; font-size: .6875rem; font-family: ui-monospace,monospace; color: #8a9280; }
+.board-card > footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; margin-top: 9px; padding-top: 8px; border-top: 1px solid #eef1e9; font-size: .6875rem; }
+.board-card-who { display: flex; align-items: center; gap: 6px; color: #6b795e; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-card-who i { display: grid; place-items: center; width: 19px; height: 19px; flex-shrink: 0; border-radius: 50%; background: #e9eee0; color: #55663f; font-style: normal; font-size: .6875rem; font-weight: 700; }
+.board-card-due { color: #8a9280; white-space: nowrap; }
+.board-card-late { color: #a8492f; font-weight: 650; white-space: nowrap; }
+.board-card-total { display: block; margin-top: 6px; font-size: .8125rem; color: #6b5a33; font-variant-numeric: tabular-nums; }
+.board-card-open { width: 100%; margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 33px; border: 1px solid var(--line); border-radius: 7px; background: #fff; font-size: .75rem; color: #55663f; }
+.order-board-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 13px 18px; border-top: 1px solid var(--line); font-size: .8125rem; color: var(--muted); background: #fff; }
+
+/* Abaixo de 1100px seis colunas viram tiras de dois centímetros: cabem e não
+   se usam. Daí para baixo vale a régua de etapas, uma por vez. */
+@media (max-width: 1100px) {
+  /* Uma etapa por vez, escolhida na régua: é o que cabe no polegar. */
+  .board-stage-pills { display: flex; gap: 7px; padding: 14px 14px 0; overflow-x: auto; scrollbar-width: thin; }
+  .board-stage-pills button { display: flex; align-items: center; gap: 7px; white-space: nowrap; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px 12px; font-size: .875rem; color: #637057; min-height: 40px; }
+  .board-stage-pills button.selected { background: #36432e; border-color: #36432e; color: #fff; }
+  .board-stage-pills b { padding: 1px 7px; border-radius: 20px; background: #ffffff2e; font-variant-numeric: tabular-nums; font-size: .8125rem; }
+  .board-stage-pills button:not(.selected) b { background: #eff2e7; color: #5c6b4c; }
+  .order-board { display: block; padding: 14px; }
+  .order-board-column { max-height: none; border: 0; padding: 0; background: transparent; }
+  .order-board-column > header { display: none; }
+  .order-board-cards { padding: 0; gap: 11px; overflow: visible; }
+  /*
+    Só a etapa escolhida fica na tela.
+
+    A marca vem do React, e não de uma lista de nomes de etapa escrita aqui.
+    A primeira versão enumerava as seis etapas em seis seletores; quando a
+    oficina passou para quatro, duas delas ficaram sem regra e o celular voltou
+    a mostrar todas as colunas de uma vez — em silêncio, porque nada quebra:
+    a tela só fica errada. Com a marca, renomear ou acrescentar etapa não
+    consegue mais furar isto.
+  */
+  .order-board-column:not(.is-active-stage) { display: none; }
+  /* Arrastar com o dedo briga com rolar a tela: no celular a etapa se muda
+     abrindo a OS, que é onde o mecânico já está. */
+  .board-card { cursor: default; padding: 14px; }
+  .board-card-open { min-height: 42px; }
+}
+
+/* A OS que é retorno se anuncia na lista: sem isso, a segunda OS da mesma moto
+   parece um serviço novo e o mecânico refaz o diagnóstico do zero. */
+.return-flag { display: flex; align-items: center; gap: 5px; margin: -4px 0 8px; font-size: .75rem; font-weight: 650; color: #96581f; }
+.work-order-card footer .return-button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: #8a5417; border-color: #e3c99f; background: #fffaf1; }
+.board-card .return-flag { margin: 5px 0 0; font-size: .6875rem; }

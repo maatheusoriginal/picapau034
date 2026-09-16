@@ -38,7 +38,7 @@ const settings: Partial<SettingsConfig> = {
 
 const order: OrderRecord = {
   id: "OS-0007", customer: 'Zé "Fera" & Cia', bike: "CG 160", plate: "ABC-1234",
-  mechanic: "João", mechanicIds: ["m1"], time: "12/03 14:20", status: "Entrega", tone: "green",
+  mechanic: "João", mechanicIds: ["m1"], time: "12/03 14:20", status: "Finalizada", tone: "green",
   total: 250, problem: "Barulho no motor",
   items: [{ id: "PRD-1", type: "Peça", name: "Óleo 20W50", price: 60, quantity: 2 }, { id: "L1", type: "Mão de obra", name: "Troca de óleo", price: 130 }],
 };

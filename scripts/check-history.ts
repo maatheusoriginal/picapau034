@@ -8,7 +8,7 @@ import type { MotorcycleRecord, OrderRecord } from "../src/types";
 
 const os = (partes: Partial<OrderRecord>): OrderRecord => ({
   id: "OS-X", customer: "", bike: "", plate: "", mechanic: "", mechanicIds: [],
-  time: "", status: "Recepção", tone: "", ...partes,
+  time: "", status: "Em avaliação", tone: "", ...partes,
 });
 const moto = (partes: Partial<MotorcycleRecord>): MotorcycleRecord => ({
   id: "MOTO-X", ownerId: "", plate: "", model: "", year: "", color: "", ...partes,

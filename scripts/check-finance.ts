@@ -58,7 +58,7 @@ const sales: SaleRecord[] = [
 
 const orders: OrderRecord[] = [
   // OS encerrada hoje, em PIX: entra.
-  { id: "OS-0001", customer: "João", bike: "CG 160", plate: "ABC-1234", mechanic: "Zé", mechanicIds: [], time: "", status: "Entrega", tone: "green",
+  { id: "OS-0001", customer: "João", bike: "CG 160", plate: "ABC-1234", mechanic: "Zé", mechanicIds: [], time: "", status: "Finalizada", tone: "green",
     total: 200, closed: true, closedAt: hoje, paymentMethod: "PIX", items: [{ id: "p5", type: "Peça", name: "Kit", price: 120, cost: 70 }] },
   // OS ainda aberta: não conta como faturamento.
   { id: "OS-0002", customer: "Ana", bike: "Fan", plate: "DEF-5678", mechanic: "Zé", mechanicIds: [], time: "", status: "Em serviço", tone: "amber", total: 500 },

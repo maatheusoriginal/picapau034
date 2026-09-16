@@ -26,7 +26,7 @@ const comoOS: OrderRecord = { ...registro, id: "OS-0031", mechanic: "", mechanic
 // Uma OS de verdade, encerrada hoje, para provar que o filtro separa as duas.
 const daOficina: OrderRecord = {
   id: "OS-0032", customer: "Rayane", bike: "Honda CG 160", plate: "ECF9G16", mechanic: "João",
-  mechanicIds: ["F1"], time: "08/09/2026, 09:10", status: "Entrega", tone: "green",
+  mechanicIds: ["F1"], time: "08/09/2026, 09:10", status: "Finalizada", tone: "green",
   items: [], total: 200, closed: true, closedAt: "08/09/2026", paymentMethod: "Dinheiro",
 };
 
@@ -79,7 +79,7 @@ const casos: Array<[string, unknown, unknown]> = [
 
   // --- Como a OS nasce ---
   ["nasce encerrada", registro.closed, true],
-  ["não fica na fila da oficina", registro.status, "Entrega"],
+  ["não fica na fila da oficina", registro.status, "Finalizada"],
   ["a data de abertura é a do papel", registro.time, "03/09/2026"],
   ["e a de encerramento também", registro.closedAt, "03/09/2026"],
   ["não leva item nenhum", (registro.items ?? []).length, 0],

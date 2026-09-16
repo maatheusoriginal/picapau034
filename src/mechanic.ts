@@ -1,4 +1,5 @@
 import type { OrderRecord, ServiceOrderStatus } from "./types";
+import { normalizeOrderStatus } from "./types";
 
 /**
  * A visão do mecânico.
@@ -36,14 +37,12 @@ const STAGE_ORDER: Record<string, number> = {
   // Logo depois do que está na mão: é uma moto começada e parada, o que o
   // mecânico precisa reencontrar assim que a peça chegar.
   "Aguardando peça": 1,
-  "Aprovação": 2,
-  "Avaliação": 3,
-  "Recepção": 4,
-  "Entrega": 5,
+  "Em avaliação": 2,
+  "Finalizada": 3,
 };
 
 function byStage(a: OrderRecord, b: OrderRecord): number {
-  const stage = (STAGE_ORDER[a.status] ?? 9) - (STAGE_ORDER[b.status] ?? 9);
+  const stage = (STAGE_ORDER[normalizeOrderStatus(a.status)] ?? 9) - (STAGE_ORDER[normalizeOrderStatus(b.status)] ?? 9);
   if (stage !== 0) return stage;
   return String(a.id).localeCompare(String(b.id));
 }
@@ -86,10 +85,10 @@ export type MechanicSummary = {
 
 export function mechanicSummary(board: MechanicBoard): MechanicSummary {
   return {
-    working: board.mine.filter((order) => order.status === "Em serviço").length,
-    blocked: board.mine.filter((order) => order.status === "Aguardando peça").length,
-    waiting: board.mine.filter((order) => ["Recepção", "Avaliação", "Aprovação"].includes(order.status)).length,
-    ready: board.mine.filter((order) => order.status === "Entrega").length,
+    working: board.mine.filter((order) => normalizeOrderStatus(order.status) === "Em serviço").length,
+    blocked: board.mine.filter((order) => normalizeOrderStatus(order.status) === "Aguardando peça").length,
+    waiting: board.mine.filter((order) => normalizeOrderStatus(order.status) === "Em avaliação").length,
+    ready: board.mine.filter((order) => normalizeOrderStatus(order.status) === "Finalizada").length,
     available: board.shop.length,
   };
 }
@@ -105,20 +104,20 @@ export type BoardAction = { label: string; target: ServiceOrderStatus };
  * segunda escondida atrás de "Abrir" era o que fazia ninguém registrar a
  * espera — e a oficina não enxergar a moto parada.
  *
- * Orçamento e aprovação são conversa com o cliente, então "Avaliação" e
- * "Aprovação" levam direto a "Em serviço": é o que acontece quando o cliente
+ * "Em avaliação" leva direto a "Em serviço": é o que acontece quando o cliente
  * aprova e a moto vai para a bancada. Todo o resto continua no diálogo da OS.
  */
 export function actionsFor(status: string): BoardAction[] {
   // Rótulos curtos de propósito: com três botões na linha ("Abrir" mais dois),
   // texto longo espremia o nome do cliente até quebrar em quatro linhas no
   // celular. A situação colorida ao lado já diz de onde a OS está saindo.
-  if (status === "Entrega") return [];
-  if (status === "Em serviço") return [
+  const etapa = normalizeOrderStatus(status);
+  if (etapa === "Finalizada") return [];
+  if (etapa === "Em serviço") return [
     { label: "Falta peça", target: "Aguardando peça" },
-    { label: "Pronta", target: "Entrega" },
+    { label: "Pronta", target: "Finalizada" },
   ];
-  if (status === "Aguardando peça") return [{ label: "Peça chegou", target: "Em serviço" }];
+  if (etapa === "Aguardando peça") return [{ label: "Peça chegou", target: "Em serviço" }];
   return [{ label: "Iniciar", target: "Em serviço" }];
 }
 

@@ -17,6 +17,16 @@ export default defineConfig({
         // dependência, o vendor (que muda a cada atualização de biblioteca,
         // não a cada deploy) fica em cache entre as versões.
         manualChunks(id) {
+          // O ajudante de import sob demanda do Vite fica junto do vendor.
+          //
+          // É um trecho minúsculo, mas o sistema inteiro depende dele para
+          // qualquer carregamento sob demanda. Deixado solto, o empacotador o
+          // colocou dentro do pedaço do PDF — e aí o index.html passou a
+          // pré-carregar o pedaço do PDF inteiro na abertura, justamente o que
+          // a separação abaixo existe para evitar. Ancorado no vendor, que
+          // desce na abertura de qualquer forma, o pedaço do PDF volta a só
+          // ser baixado no clique.
+          if (id === "\0vite/preload-helper.js") return "vendor";
           if (!id.includes("node_modules")) return undefined;
           if (id.includes("/firebase/") || id.includes("/@firebase/")) return "firebase";
           if (id.includes("/react-dom/") || id.includes("/react/") || id.includes("/scheduler/")) return "react";

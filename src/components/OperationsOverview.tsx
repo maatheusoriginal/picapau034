@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { CashSession, FirebasePermission, OpenDialog, OrderRecord, ProductRecord } from "../types";
-import { statusTone } from "../types";
+import { normalizeOrderStatus, statusTone } from "../types";
 import type { financeSummary } from "../finance";
 import { lowStock, money, orderAttention, orderMatchesFilter, shortDate, sortOrders } from "../workspace";
 import { sessionIsStale } from "../cash";
@@ -36,8 +36,8 @@ export function OperationsOverview({ name, orders, products, summary, cash, draw
     <section className="day-metrics" aria-label="Resumo do dia">
       {can("orders.view") && <>
         <button onClick={() => navigate("Ordens de serviço", "Em aberto")}><span>Motos na oficina</span><strong>{current.length.toString().padStart(2, "0")}</strong><small>Atendimentos em aberto</small><Icon name="bike"/></button>
-        <button onClick={() => navigate("Ordens de serviço", "Aprovação")}><span>Aguardando aprovação</span><strong>{current.filter((order) => order.status === "Aprovação").length.toString().padStart(2, "0")}</strong><small>Retornar ao cliente</small><Icon name="clock"/></button>
-        <button onClick={() => navigate("Ordens de serviço", "Prontas")}><span>Prontas para retirar</span><strong>{current.filter((order) => order.status === "Entrega").length.toString().padStart(2, "0")}</strong><small>Combinar a entrega</small><Icon name="check"/></button>
+        <button onClick={() => navigate("Ordens de serviço", "Em avaliação")}><span>Em avaliação</span><strong>{current.filter((order) => normalizeOrderStatus(order.status) === "Em avaliação").length.toString().padStart(2, "0")}</strong><small>Ainda fora da bancada</small><Icon name="clock"/></button>
+        <button onClick={() => navigate("Ordens de serviço", "Prontas")}><span>Prontas para retirar</span><strong>{current.filter((order) => normalizeOrderStatus(order.status) === "Finalizada").length.toString().padStart(2, "0")}</strong><small>Combinar a entrega</small><Icon name="check"/></button>
       </>}
       {finance && <button className="metric-revenue" onClick={() => navigate("Financeiro")}><span>Recebido hoje</span><strong>{money(summary.receivedToday)}</strong><small>{summary.salesTodayCount} movimentações no dia</small><Icon name="wallet"/></button>}
     </section>
@@ -46,9 +46,9 @@ export function OperationsOverview({ name, orders, products, summary, cash, draw
         <header className="panel-header"><div><h2>Próximas ações</h2><p>Abra o atendimento para continuar.</p></div><button className="text-button" onClick={() => navigate("Ordens de serviço", "Em aberto")}>Ver oficina <Icon name="arrow" size={16}/></button></header>
         <div className="queue-tabs" aria-label="Filtrar próximos atendimentos">{["Atenção", "Hoje", "Em aberto"].map((tab) => <button key={tab} aria-pressed={queue === tab} className={queue === tab ? "selected" : ""} onClick={() => setQueue(tab)}>{tab === "Hoje" ? "Entrega hoje" : tab}{tab === "Atenção" && <b>{attention.length}</b>}</button>)}</div>
         <div className="queue-items">{queueOrders.length ? queueOrders.map((order) => <button key={order.id} className="queue-row" onClick={() => openDialog("order", order.id)}>
-          <span className={`queue-marker ${statusTone(order.status)}`}><Icon name={order.status === "Entrega" ? "check" : "wrench"}/></span>
+          <span className={`queue-marker ${statusTone(order.status)}`}><Icon name={normalizeOrderStatus(order.status) === "Finalizada" ? "check" : "wrench"}/></span>
           <span className="queue-person"><span className="queue-code">{order.id} <b>{order.plate || "Sem placa"}</b></span><strong>{order.customer || "Cliente a identificar"}</strong><small>{order.bike} · {order.mechanic || "Sem mecânico"}</small></span>
-          <span className="queue-progress"><span className={`status ${statusTone(order.status)}`}><i/>{order.status === "Entrega" ? "Pronta" : order.status}</span><small>{orderAttention(order) || shortDate(order.delivery)}</small></span><Icon name="arrow" size={18}/>
+          <span className="queue-progress"><span className={`status ${statusTone(order.status)}`}><i/>{normalizeOrderStatus(order.status)}</span><small>{orderAttention(order) || shortDate(order.delivery)}</small></span><Icon name="arrow" size={18}/>
         </button>) : <div className="workspace-empty"><span><Icon name={queue === "Atenção" ? "check" : "wrench"} size={28}/></span><h3>{queue === "Atenção" ? "Tudo em dia por aqui" : queue === "Hoje" ? "Sem entrega prevista hoje" : "A oficina está livre"}</h3><p>{queue === "Atenção" ? "Aprovações, atrasos e retiradas aparecem aqui." : "Os atendimentos aparecem assim que a OS é aberta."}</p>{queue !== "Em aberto" ? <button className="outline-button" onClick={() => setQueue("Em aberto")}>Ver atendimentos abertos</button> : create ? <button className="primary-button" onClick={() => openDialog("osChoice")}>Novo atendimento</button> : null}</div>}</div>
         {!!queueOrders.length && <footer className="queue-footer"><span>Exibindo {queueOrders.length} atendimento(s)</span><button className="text-button" onClick={() => navigate("Ordens de serviço", queue)}>Abrir lista completa <Icon name="arrow" size={16}/></button></footer>}
       </section>}

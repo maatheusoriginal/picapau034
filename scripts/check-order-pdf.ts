@@ -80,7 +80,7 @@ const totaisDaTela = partnerTotals(os.items!, 0);
 // --- OS mínima, sem cliente cadastrado, sem moto cadastrada e sem item ------
 const osMagra: OrderRecord = {
   id: "OS-0002", customer: "", bike: "CG 125", plate: "", mechanic: "", mechanicIds: [],
-  time: "01/09/2026, 08:00", status: "Recepção", tone: "blue", total: 90,
+  time: "01/09/2026, 08:00", status: "Em avaliação", tone: "blue", total: 90,
 };
 const magro = buildOrderPdfModel({ order: osMagra, settings: {} });
 
