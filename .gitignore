@@ -24,3 +24,4 @@ npm-debug.log*
 # um arquivo de rascunho para o repositório por causa de `git add -A`.
 scripts/emulador/*.png
 scripts/emulador/*.csv
+scripts/emulador/*.pdf
