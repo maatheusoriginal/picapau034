@@ -3009,6 +3009,88 @@ await passo("apagar OS devolve a peça ao estoque, e OS encerrada não some", as
   }
 });
 
+await passo("pegar peça: a peça entra NA OS escolhida e o saldo cai no mesmo movimento", async () => {
+  // Uma OS só desta prova, para não depender do que sobrou dos outros passos.
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirNovaOS();
+  await preencherEtapa1({ nome: `PEGA PECA ${Date.now().toString().slice(-4)}`, placa: "PEC-1A23", modelo: "CG 160" });
+  await irParaServico();
+  await p.locator(`${CAMADA} textarea`).first().fill("OS PARA PEGAR PECA");
+  await conferirEAbrir();
+  await p.waitForTimeout(2000);
+
+  // O saldo da peça ANTES.
+  await ir("Produtos e estoque");
+  await p.waitForTimeout(1800);
+  const linhaDaPeca = p.locator("tbody tr", { hasText: /PASTILHA|Pastilha|ÓLEO|Óleo/ }).first();
+  if (!(await linhaDaPeca.count())) throw new Error("nenhuma peça no estoque para a prova");
+  const nomeDaPeca = (await linhaDaPeca.locator("td").nth(1).innerText().catch(() => "")).split("\n")[0].trim()
+    || (await linhaDaPeca.innerText()).split("\n")[0].trim();
+  const numeros = (texto) => (texto.match(/\d+/g) || []).map(Number);
+  const antes = numeros(await linhaDaPeca.innerText());
+
+  // Pegar a peça pela tela do mecânico.
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1200);
+  const botaoPegar = p.locator("button", { hasText: /Pegar peça/ }).first();
+  if (!(await botaoPegar.count())) {
+    // O atalho mora na visão do mecânico e no painel do dia.
+    await ir("Painel do dia").catch(() => {});
+    await p.waitForTimeout(1200);
+  }
+  const pegar = p.locator("button", { hasText: /Pegar peça/ }).first();
+  if (!(await pegar.count())) throw new Error("não achei o botão 'Pegar peça' em nenhuma tela");
+  await pegar.click();
+  await p.waitForTimeout(1500);
+
+  await p.locator(".take-part input").first().fill(nomeDaPeca.slice(0, 12));
+  await p.waitForTimeout(1200);
+  const achada = p.locator(".take-part-results button").first();
+  if (!(await achada.count())) throw new Error(`a busca não achou a peça "${nomeDaPeca}"`);
+  await achada.click();
+  await p.waitForTimeout(800);
+
+  const seletorDaOS = p.locator(".take-part select").first();
+  const opcoes = await seletorDaOS.locator("option").allInnerTexts();
+  const daProva = opcoes.find((texto) => /PEC-1A23/.test(texto));
+  if (!daProva) throw new Error(`a OS da prova não apareceu na lista do 'para qual OS': ${opcoes.join(" | ")}`);
+  await seletorDaOS.selectOption({ label: daProva });
+  await p.waitForTimeout(800);
+
+  // A tela precisa dizer o que vai acontecer ANTES de confirmar.
+  const previa = await p.locator(".take-part .info-strip").first().innerText().catch(() => "");
+  if (!/Vai lançar/.test(previa)) throw new Error("a tela não mostrou a prévia do lançamento");
+
+  await p.locator(".dialog-footer .primary-button").first().click();
+  await p.waitForTimeout(3500);
+  const erroNaTela = await p.locator(".dialog-error-strip").first().innerText().catch(() => "");
+  if (erroNaTela.trim()) throw new Error(`o lançamento reclamou: "${erroNaTela.trim().slice(0, 200)}"`);
+  await fecharQualquerDialogo();
+  await p.waitForTimeout(1500);
+
+  // 1. A peça está DENTRO da OS?
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirOSdaPlaca("PEC-1A23");
+  await p.waitForTimeout(2200);
+  const naOS = await p.locator(".dialog-body.order-detail").innerText();
+  if (!naOS.toUpperCase().includes(nomeDaPeca.slice(0, 8).toUpperCase())) {
+    throw new Error(`a peça não entrou na OS. A OS mostra: ${naOS.slice(0, 400)}`);
+  }
+  // 2. E o histórico da OS registrou o lançamento?
+  if (!/Inclu/.test(naOS)) throw new Error("o lançamento da peça não entrou no histórico da OS");
+  await fecharQualquerDialogo();
+  await p.waitForTimeout(1200);
+
+  // 3. E o saldo caiu?
+  await ir("Produtos e estoque");
+  await p.waitForTimeout(1800);
+  const depois = numeros(await p.locator("tbody tr", { hasText: nomeDaPeca.slice(0, 8) }).first().innerText());
+  const caiu = antes.some((valor, indice) => depois[indice] !== undefined && depois[indice] < valor);
+  if (!caiu) throw new Error(`o saldo não caiu ao pegar a peça: antes ${antes.join("/")} depois ${depois.join("/")}`);
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();
