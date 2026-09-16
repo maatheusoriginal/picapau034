@@ -498,7 +498,7 @@ await passo("levar a OS até a entrega e faturar em dinheiro", async () => {
   // nome conforme a visão: "Abrir OS" no cartão, "Abrir" na lista.
   await abrirPrimeiraOS();
   await p.waitForTimeout(2500);
-  await p.locator(".order-status-control select").selectOption("Entrega");
+  await p.locator(".order-status-control select").selectOption("Finalizada");
   await p.waitForTimeout(900);
   await abrirRecebimento();
   const titulo = await p.locator(".dialog h2").first().innerText();
@@ -508,7 +508,7 @@ await passo("levar a OS até a entrega e faturar em dinheiro", async () => {
   await p.locator(".dialog-footer .primary-button").click();
   await p.waitForTimeout(4500);
   const os = (await banco("serviceOrders"))[0];
-  if (!/Entrega|Conclu/i.test(os.status || "")) throw new Error(`OS ficou em "${os.status}"`);
+  if (!/Finalizada|Conclu/i.test(os.status || "")) throw new Error(`OS ficou em "${os.status}"`);
   if (!os.closedAt && !os.closedAtISO) throw new Error("a OS não registrou o encerramento");
   // O recebimento fica gravado na própria OS — não vira documento em "sales".
   if (Number(os.total) !== 150) throw new Error(`faturou ${os.total}, esperado 150`);
@@ -1012,7 +1012,7 @@ await passo("frota: moto sem dono, parceira responsável e fatura no mês seguin
 
   // 4. o encerramento não pergunta forma de pagamento
   await abrirOSdaPlaca("FLA-2C34");
-  await p.locator(".order-status-control select").selectOption("Entrega");
+  await p.locator(".order-status-control select").selectOption("Finalizada");
   await p.waitForTimeout(900);
   await abrirRecebimento();
   if (await p.locator(".payment-methods.checkout-methods").count()) problemas.push("perguntou forma de pagamento numa OS de parceira");
@@ -1832,7 +1832,7 @@ await passo("OS sem cliente identificado: abre pela placa e cobra os dados no fi
   // Na versão 3 a lista abre em cartões; a linha de tabela só existe na visão
   // "Lista". Abrir pelo cartão da placa procurada funciona nas duas.
   await abrirOSdaPlaca("GUI-4D44");
-  await p.locator(".order-status-control select").selectOption("Entrega");
+  await p.locator(".order-status-control select").selectOption("Finalizada");
   await p.waitForTimeout(900);
   await abrirRecebimento();
   if (!(await p.locator(".checkout-pending-customer").count())) problemas.push("o encerramento não pediu os dados que faltam");
@@ -1989,7 +1989,7 @@ await passo("no celular, o mecânico vê a OS inteira sem rolar e acerta os bot�
   await fetch(`${FS}/users/${uid}`, { method: "PATCH", headers: { "content-type": "application/json", Authorization: "Bearer owner" }, body: JSON.stringify({ fields: perfil }) });
 
   // Uma OS aberta, sem mecânico e com relato: é o que ele vê em "para pegar".
-  const aberta = (await banco("serviceOrders")).find((os) => !os.closed && os.status !== "Entrega" && !(os.mechanicIds || []).length);
+  const aberta = (await banco("serviceOrders")).find((os) => !os.closed && os.status !== "Finalizada" && !(os.mechanicIds || []).length);
   if (!aberta) throw new Error("nenhuma OS aberta e livre para o mecânico pegar");
   const RELATO = "MOTO FALHANDO EM MARCHA LENTA E VAZANDO OLEO PELO RETENTOR";
   await fetch(`${FS}/serviceOrders/${aberta._id}?updateMask.fieldPaths=problem`, {
@@ -3034,13 +3034,13 @@ await passo("apagar OS devolve a peça ao estoque, e OS encerrada não some", as
   // e quando o clique não pegava o passo seguia com a lista de OS abertas — a
   // prova dizia "OS encerrada aceitou a exclusão" sobre uma OS que nem estava
   // encerrada. Teste que mente é pior do que teste que falta.
-  // O rótulo do filtro traz a CONTAGEM colada ("Entregues3"), então a âncora de
-  // fim de texto sozinha nunca casa.
+  // O rótulo do filtro traz a CONTAGEM colada ("Finalizadas (entregues)3"),
+  // então a âncora de fim de texto sozinha nunca casa.
   // A régua de etapas vive nas visões de Cartões e Lista; o Quadro mostra as
   // colunas em vez dela, e OS entregue não fica no quadro.
   await visaoDaOficina("Cartões");
-  const filtroEntregues = p.locator(".order-status-filters button", { hasText: /^Entregues\d*$/ }).first();
-  if (!(await filtroEntregues.count())) throw new Error("não achei o filtro 'Entregues' na tela da oficina");
+  const filtroEntregues = p.locator(".order-status-filters button", { hasText: /^Finalizadas \(entregues\)/ }).first();
+  if (!(await filtroEntregues.count())) throw new Error("não achei o filtro das finalizadas entregues na tela da oficina");
   await filtroEntregues.click();
   await p.waitForTimeout(2000);
   const encerradas = await p.locator(".work-order-card, tbody tr").count();
