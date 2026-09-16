@@ -74,6 +74,18 @@ const casos: Array<[string, unknown, unknown]> = [
   ["pegar a mesma peça de novo é entrada nova", mesmaPecaDeNovo.map((linha) => linha.what).join(" | "), "Incluído: 2x RETENTOR | Retirado: RETENTOR"],
   ["lista igual não gera linha", itensIguais.length, 0],
 
+  /*
+    Cliente e moto corrigidos depois da abertura — a moto que chegou no guincho
+    e o nome que apareceu por telefone uma hora depois. Trocar o dono de uma OS
+    é o tipo de mexida que alguém vai querer explicar um dia.
+  */
+  ["identificar o cliente depois vira linha", changeEvents({ customer: "Cliente não identificado" }, { customer: "MARIA SOUZA" }, "RAYANE", QUANDO)[0]?.what, "Cliente: Cliente não identificado → MARIA SOUZA"],
+  ["OS que nasceu sem nome não inventa um 'de'", changeEvents({ customer: "" }, { customer: "MARIA SOUZA" }, "", QUANDO)[0]?.what, "Cliente identificado: MARIA SOUZA"],
+  ["apagar o nome não vira linha vazia", changeEvents({ customer: "MARIA" }, { customer: "" }, "", QUANDO).length, 0],
+  ["a moto informada depois aparece", changeEvents({ bike: "" }, { bike: "HONDA BIZ 125" }, "", QUANDO)[0]?.what, "Motocicleta: HONDA BIZ 125"],
+  ["a placa também", changeEvents({ plate: "" }, { plate: "XYZ-9999" }, "", QUANDO)[0]?.what, "Placa: XYZ-9999"],
+  ["salvar com o mesmo cliente não anota nada", changeEvents({ customer: "MARIA", bike: "BIZ", plate: "XYZ-9999" }, { customer: "MARIA", bike: "BIZ", plate: "XYZ-9999" }, "", QUANDO).length, 0],
+
   ["mecânico trocado aparece", changeEvents({ mechanic: "" }, { mechanic: "RONALDO" }, "", QUANDO)[0]?.what, "Mecânico: RONALDO"],
   ["mecânico apagado não vira linha vazia", changeEvents({ mechanic: "RONALDO" }, { mechanic: "" }, "", QUANDO).length, 0],
   ["previsão de entrega aparece", changeEvents({}, { delivery: "11/09/2026" }, "", QUANDO)[0]?.what, "Previsão de entrega: 11/09/2026"],

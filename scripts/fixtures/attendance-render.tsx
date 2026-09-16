@@ -48,6 +48,28 @@ for (const [ordem, esperado] of [
   console.log(`OK histórico da OS na tela · ${ordem.id}`);
 }
 
+/*
+  Os campos de cliente e moto dentro da OS, renderizados de verdade.
+
+  A moto chega no guincho e a OS abre sem nome; o nome aparece por telefone uma
+  hora depois. Se este bloco não estiver NA TELA, não adianta o resto funcionar
+  — e bloco que compila e não aparece já aconteceu aqui antes.
+*/
+const osSemNome = {
+  id: "OS-0042", customer: "Cliente não identificado", customerPending: true,
+  bike: "", plate: "", mechanic: "", mechanicIds: [], time: "16/09/2026, 09:00",
+  status: "Recepção", tone: "amber", total: 0,
+};
+const marcadoSemNome = renderToStaticMarkup(<AppDialog {...props} dialog="order" orders={[osSemNome as never]} selectedRecordId="OS-0042"/>);
+for (const texto of ["Cliente e motocicleta", "Nome de quem responde pela moto", "Problema relatado", "aberta sem identificar o cliente"]) {
+  assert.ok(marcadoSemNome.includes(texto), `edição da OS: falta "${texto}"`);
+}
+// OS com nome não fica com o aviso de "sem identificar" na tela.
+const comNome = renderToStaticMarkup(<AppDialog {...props} dialog="order" orders={[{ ...osSemNome, id: "OS-0043", customer: "MARIA SOUZA", customerPending: false } as never]} selectedRecordId="OS-0043"/>);
+assert.ok(comNome.includes("Cliente e motocicleta"), "a OS identificada também edita cliente e moto");
+assert.ok(!comNome.includes("aberta sem identificar o cliente"), "OS com nome não pode mostrar o aviso de cliente pendente");
+console.log("OK cliente e moto editáveis dentro da OS");
+
 const summary: AttendanceSummaryProps = { customer: "ANA COSTA", phone: "(34) 99999-1234", bike: "HONDA CG 160", plate: "ABC-1D23", payer: "Parceira · fatura mensal", mechanics: "JOSÉ", problem: "RUÍDO AO FREAR", delivery: "12/09/2026", priority: "Urgente", mileage: "38420", fuel: "1/2", mileageChecked: true, partnerOrder: "1684", items: [{ id: "LAB-1", type: "Mão de obra", name: "REVISÃO", price: 100, quantity: 1 }], parts: 0, labor: 100, discount: 10, total: 90, pendingCustomer: true, reserveNow: false, onEdit: noop };
 const html = renderToStaticMarkup(<AttendanceReview {...summary}/>);
 for (const text of ["ANA COSTA", "ABC-1D23", "RUÍDO AO FREAR", "12/09/2026", "1684", "90,00", "início do serviço", "antes de encerrar"]) assert.ok(html.includes(text), text);

@@ -2875,6 +2875,71 @@ await passo("o serviço rápido lista o atendimento do dia e imprime a via escol
   await fecharQualquerDialogo();
 });
 
+await passo("dá para pôr o nome do cliente depois de a OS estar aberta", async () => {
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(2200);
+
+  const campo = p.locator(".dialog-body.order-detail input").filter({ hasNot: p.locator("[type=date]") });
+  const cliente = p.locator('.dialog-body.order-detail .field:has(span:text-is("Cliente")) input').first();
+  if (!(await cliente.count())) throw new Error("a OS não tem campo de cliente para editar");
+
+  const nome = `DONO TARDIO ${Date.now().toString().slice(-4)}`;
+  await cliente.fill(nome);
+  const placa = p.locator('.dialog-body.order-detail .field:has(span:text-is("Placa")) input').first();
+  if (await placa.count()) await placa.fill("QQQ-1Q11");
+  await p.locator(".dialog-footer .primary-button").first().click();
+  await p.waitForTimeout(3500);
+  await fecharQualquerDialogo();
+  await p.waitForTimeout(1200);
+
+  // Voltou gravado? A lista da oficina mostra o nome novo.
+  const naLista = await p.locator(".orders-workspace").innerText();
+  if (!naLista.includes(nome)) throw new Error(`o nome informado depois não apareceu na lista da oficina: "${nome}"`);
+
+  // E o histórico da OS registra quem mexeu.
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(2200);
+  const linhaDoTempo = await p.locator(".order-timeline-list").innerText();
+  if (!/Cliente/.test(linhaDoTempo)) throw new Error("a troca de cliente não entrou no histórico da OS");
+  await fecharQualquerDialogo();
+  void campo;
+});
+
+await passo("o histórico geral junta OS encerrada, balcão e serviço rápido", async () => {
+  await ir("Histórico geral");
+  await p.waitForTimeout(2200);
+
+  const tela = await p.locator(".workspace, main, body").first().innerText();
+  if (/Ainda não passou nada pela oficina/.test(tela)) throw new Error("o histórico geral abriu vazio depois de todo o roteiro");
+
+  // "Todos" para não depender do recorte do dia.
+  const todos = p.locator(".report-period .filter-pills button", { hasText: /^Todos$/ }).first();
+  if (await todos.count()) { await todos.click(); await p.waitForTimeout(1500); }
+
+  const linhas = await p.locator("tbody tr").count();
+  if (linhas < 3) throw new Error(`o histórico geral trouxe só ${linhas} linha(s) depois de OS, venda e serviço rápido`);
+
+  const texto = await p.locator("tbody").first().innerText();
+  for (const tipo of ["Ordem de serviço", "PDV Balcão", "Serviço rápido"]) {
+    if (!texto.includes(tipo)) throw new Error(`falta "${tipo}" no histórico geral`);
+  }
+
+  // Filtrar por tipo tem de recortar de verdade.
+  await p.locator(".report-period .filter-pills button", { hasText: /^Serviço rápido$/ }).first().click();
+  await p.waitForTimeout(1500);
+  const soRapido = await p.locator("tbody").first().innerText();
+  if (soRapido.includes("PDV Balcão")) throw new Error("o filtro de tipo não recortou: o balcão continuou na lista");
+
+  // E a busca.
+  await p.locator(".report-period .filter-pills button", { hasText: /^Todos$/ }).first().click();
+  await p.waitForTimeout(1200);
+  await p.locator('input[aria-label="Buscar no histórico"]').fill("ZZZ-0000-NAO-EXISTE");
+  await p.waitForTimeout(1200);
+  if (await p.locator("tbody tr").count()) throw new Error("a busca do histórico não filtrou nada");
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();

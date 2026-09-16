@@ -313,3 +313,14 @@ table td strong, table td span { font-size: .875rem; }
 /* O cabeçalho do painel do serviço rápido ganhou o "Ver todos" ao lado do
    contador. */
 .panel-header-actions { display: flex; align-items: center; gap: 14px; }
+
+/* ---------------------------------------------------------------------------
+   Histórico geral
+
+   Uma linha por atendimento, das três origens. O tipo fica embaixo do nome,
+   numa terceira linha discreta: quem olha a tabela procura primeiro a pessoa e
+   o valor, e só depois quer saber se aquilo foi OS, balcão ou serviço rápido.
+   --------------------------------------------------------------------------- */
+.ledger-kind { display: block; margin-top: 2px; color: #a7a7ab; font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; }
+.ledger-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+@media(max-width:800px) { .ledger-row-actions { flex-wrap: wrap; justify-content: flex-start; } }

@@ -17,7 +17,9 @@ export const workspacePermissions: Record<string, FirebasePermission[]> = {
   "Ajuste de estoque": ["inventory.view"], "Fornecedores": ["inventory.manage"],
   "Clientes": ["customers.view"], "Motocicletas": ["customers.view"], "Funcionários": ["team.view"],
   "Financeiro": ["finance.view"], "Contas a receber": ["finance.view"], "Contas a pagar": ["finance.view"],
-  "Histórico de caixas": ["finance.view"], "Relatórios": ["finance.view"], "Configurações": ["settings.view"],
+  // O histórico geral mostra o dinheiro de tudo o que passou, então segue a
+  // mesma porta do resto da Gestão: quem vê valores, vê.
+  "Histórico geral": ["finance.view"], "Histórico de caixas": ["finance.view"], "Relatórios": ["finance.view"], "Configurações": ["settings.view"],
 };
 
 export function canVisit(destination: string, role: UserRole, permissions: FirebasePermission[]): boolean {

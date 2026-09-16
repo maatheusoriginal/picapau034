@@ -44,6 +44,7 @@ import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoD
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, copiesToPrint, orderFromQuickService, whatsappUrl, type OrderCopyChoice } from "../src/documents";
 import { PrintCopiesMenu } from "../src/components/PrintCopiesMenu";
+import { LedgerWorkspace } from "../src/components/LedgerWorkspace";
 import { openWhatsapp, printDocument } from "./printing";
 import { clearReloadMark, ErrorBoundary } from "./ErrorBoundary";
 import { downloadFile } from "./download";
@@ -252,6 +253,7 @@ const navGroups: Array<{
       { label: "Financeiro", icon: "wallet" },
       { label: "Contas a receber", icon: "arrow" },
       { label: "Contas a pagar", icon: "file" },
+      { label: "Histórico geral", icon: "clock" },
       { label: "Histórico de caixas", icon: "wallet" },
       { label: "Relatórios", icon: "chart" },
     ],
@@ -2270,6 +2272,7 @@ export function ModuleWorkspace({
   if (active === "Financeiro") return <FinanceWorkspace openDialog={openDialog} navigate={navigate} expenses={expenses} users={users} sales={sales} orders={orders} accounts={accounts} cashSessions={cashSessions} movements={movements}/>;
   if (active === "Contas a receber") return <AccountsWorkspace kind="receber" openDialog={openDialog} expenses={expenses} accounts={accounts} notify={notify} canManage={canOperate}/>;
   if (active === "Contas a pagar") return <AccountsWorkspace kind="pagar" openDialog={openDialog} expenses={expenses} accounts={accounts} notify={notify} canManage={canOperate}/>;
+  if (active === "Histórico geral") return <LedgerWorkspace orders={orders} sales={sales} settings={settings} openDialog={openDialog}/>;
   if (active === "Histórico de caixas") return <CashHistoryWorkspace cashSessions={cashSessions} notify={notify}/>;
   if (active === "Ajuste de estoque") return <StockAdjustWorkspace products={products} adjustments={stockAdjustments} currentUser={currentFirebaseUser} notify={notify} canManage={canOperate}/>;
   if (active === "Relatórios") return <ReportWorkspace sales={sales} orders={orders} expenses={expenses} movements={movements} accounts={accounts} notify={notify}/>;
@@ -2743,6 +2746,20 @@ export function AppDialog({
   const [purchasePayment, setPurchasePayment] = useState("À vista");
   const [purchaseItems, setPurchaseItems] = useState<Array<{ productId: string; quantity: number; unitCost: number }>>([]);
   const [orderItems, setOrderItems] = useState<ServiceOrderItem[]>([]);
+  /*
+    Os dados da moto e do dono, editáveis depois de a OS estar aberta.
+
+    A moto chega no guincho ou o cliente deixa e sai correndo: a OS abre sem
+    nome, e o nome aparece uma hora depois, por telefone. Até agora o único
+    lugar que aceitava esse dado era o encerramento, então a OS passava o
+    serviço inteiro dizendo "Cliente não identificado" — inclusive na via que
+    o mecânico leva para a bancada.
+  */
+  const [orderCustomer, setOrderCustomer] = useState("");
+  const [orderBike, setOrderBike] = useState("");
+  const [orderPlate, setOrderPlate] = useState("");
+  const [orderMileage, setOrderMileage] = useState("");
+  const [orderProblem, setOrderProblem] = useState("");
   const [orderDelivery, setOrderDelivery] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
   const [orderSolution, setOrderSolution] = useState("");
@@ -2972,6 +2989,11 @@ export function AppDialog({
     setOrderStatus((serviceOrderStatuses as readonly string[]).includes(currentOrder.status) ? currentOrder.status as ServiceOrderStatus : "Recepção");
     setOrderMechanicIds(currentOrder.mechanicIds?.length ? currentOrder.mechanicIds : []);
     setOrderItems((currentOrder.items ?? []).map((item) => ({ ...item })));
+    setOrderCustomer(currentOrder.customerPending ? "" : currentOrder.customer || "");
+    setOrderBike(currentOrder.bike || "");
+    setOrderPlate(formatPlate(currentOrder.plate || ""));
+    setOrderMileage(currentOrder.mileage || "");
+    setOrderProblem(currentOrder.problem || "");
     setOrderDelivery(calendarDay(currentOrder.delivery));
     setOrderNotes(currentOrder.notes || "");
     setOrderSolution(currentOrder.solution || "");
@@ -3898,6 +3920,14 @@ export function AppDialog({
     const mudancas = {
       ...(itemsChanged ? { items: orderItems, total: partnerTotals(orderItems, partner?.laborDiscount ?? 0).total } : {}),
       delivery: orderDelivery, notes: orderNotes, solution: orderSolution,
+      // Cliente e moto podem ser corrigidos depois: é o caso da moto que chega
+      // no guincho. Nome em branco não apaga o que já estava gravado, senão
+      // salvar a OS por qualquer outro motivo limparia o cliente.
+      ...(orderCustomer.trim() ? { customer: orderCustomer.trim(), customerPending: false } : {}),
+      bike: orderBike.trim(),
+      plate: formatPlate(orderPlate),
+      mileage: orderMileage.trim(),
+      problem: orderProblem.trim(),
       status: orderStatus,
       tone: statusTone(orderStatus),
       mechanicIds: orderMechanicIds,
@@ -5607,6 +5637,26 @@ export function AppDialog({
                 <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{currentOrder.closed ? "Entregue e encerrada" : orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><PrintCopiesMenu label={settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"} onPrint={(choice) => printOrder(currentOrder, choice)}/><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button></div></div>
                 <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select disabled={!canOperate || !!currentOrder.closed} value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as ServiceOrderStatus)}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button disabled={!canOperate || !!currentOrder.closed} className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
                 <div className="order-info-grid"><div><span>Cliente / pagador</span><strong>{currentOrder.customer}</strong><small>{currentOrder.origin}</small></div><div><span>Motocicleta</span><strong>{currentOrder.bike}</strong><small>{currentOrder.plate}</small></div><div><span>Mecânicos</span><strong>{orderMechanics.map((mechanic) => mechanic.name).join(" + ") || currentOrder.mechanic}</strong><small>{orderMechanics.length || 1} responsável(is)</small></div><div><span>Previsão</span><strong>{currentOrder.delivery}</strong><small>Prioridade {currentOrder.priority}</small></div></div>
+                {/* Cliente e moto, editáveis com a OS aberta.
+                    A moto chega no guincho, ou o cliente deixa e sai correndo:
+                    a OS abre sem nome, e o nome aparece uma hora depois, por
+                    telefone. Até agora o único lugar que aceitava esse dado era
+                    o encerramento, então a OS passava o serviço inteiro dizendo
+                    "Cliente não identificado" — inclusive na via que o mecânico
+                    leva para a bancada. */}
+                <fieldset className="order-followup" disabled={!canOperate || !!currentOrder.closed}>
+                  <legend>Cliente e motocicleta</legend>
+                  {currentOrder.customerPending ? (
+                    <div className="info-strip"><Icon name="alert" size={17}/><span>Esta OS foi aberta sem identificar o cliente. Informe o nome aqui e ele passa a valer na OS e na impressão.</span></div>
+                  ) : null}
+                  <div className="form-grid">
+                    <label className="field"><span>Cliente</span><input value={orderCustomer} onChange={(event) => setOrderCustomer(emMaiusculo(event.target.value))} placeholder="Nome de quem responde pela moto"/></label>
+                    <label className="field"><span>Motocicleta</span><input value={orderBike} onChange={(event) => setOrderBike(emMaiusculo(event.target.value))} placeholder="Ex.: HONDA CG 160 FAN"/></label>
+                    <label className="field"><span>Placa</span><input value={orderPlate} onChange={(event) => setOrderPlate(formatPlate(event.target.value))} placeholder="ABC-1D23"/></label>
+                    <label className="field"><span>Quilometragem</span><input value={orderMileage} onChange={(event) => setOrderMileage(event.target.value)} placeholder="Ex.: 42500" inputMode="numeric"/></label>
+                    <label className="field field-full"><span>Problema relatado</span><textarea value={orderProblem} onChange={(event) => setOrderProblem(emMaiusculo(event.target.value))} placeholder="O que o cliente contou ao deixar a moto"/></label>
+                  </div>
+                </fieldset>
                 {canOperate && !currentOrder.closed ? (
                   <div className="mechanic-assignment compact">
                     <div><strong>Equipe responsável</strong><small>Selecione mais de um mecânico quando o serviço for compartilhado.</small></div>
