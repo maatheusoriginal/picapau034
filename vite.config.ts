@@ -20,6 +20,15 @@ export default defineConfig({
           if (!id.includes("node_modules")) return undefined;
           if (id.includes("/firebase/") || id.includes("/@firebase/")) return "firebase";
           if (id.includes("/react-dom/") || id.includes("/react/") || id.includes("/scheduler/")) return "react";
+          // A biblioteca de PDF fica FORA do vendor.
+          //
+          // O vendor desce em toda abertura do sistema. Jogar o jsPDF ali
+          // somava quase meio mega ao primeiro carregamento de todo mundo —
+          // inclusive do celular do mecânico, no 4G da oficina — por causa de
+          // um botão que se usa algumas vezes por dia. Em pedaço próprio, ele
+          // só desce no clique de "Baixar PDF", que é o que o import dinâmico
+          // de app/order-pdf-file.ts já pede.
+          if (id.includes("/jspdf/") || id.includes("/fflate/") || id.includes("/canvg/") || id.includes("/dompurify/")) return "pdf";
           return "vendor";
         },
       },

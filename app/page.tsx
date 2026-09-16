@@ -46,6 +46,7 @@ import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, copie
 import { PrintCopiesMenu } from "../src/components/PrintCopiesMenu";
 import { LedgerWorkspace } from "../src/components/LedgerWorkspace";
 import { OrderRemovalButton } from "../src/components/OrderRemovalButton";
+import { buildOrderPdfModel, orderPdfFileName } from "../src/order-pdf";
 import { openWhatsapp, printDocument } from "./printing";
 import { clearReloadMark, ErrorBoundary } from "./ErrorBoundary";
 import { downloadFile } from "./download";
@@ -2970,6 +2971,11 @@ export function AppDialog({
    * a peça não foi cobrada, e ninguém sabe em qual moto ela entrou.
    */
   const [pecaBusca, setPecaBusca] = useState("");
+  // Fica aqui, com os outros estados do diálogo, e não perto da função que o
+  // usa: o AppDialog tem returns antecipados, e hook declarado depois de um
+  // deles muda a quantidade de hooks entre renderizações — foi o que já deu
+  // tela branca neste arquivo. A conferência `check:hooks` cobra isso.
+  const [baixandoPdf, setBaixandoPdf] = useState(false);
   const [pecaEscolhidaId, setPecaEscolhidaId] = useState("");
   const [pecaQuantidade, setPecaQuantidade] = useState(1);
   const [pecaOsId, setPecaOsId] = useState("");
@@ -3773,6 +3779,39 @@ export function AppDialog({
       mechanics: names.join(" + ") || order.mechanic,
       copies: copiesToPrint(choice, settings?.printThreeCopies !== false),
     }));
+  };
+
+  /**
+   * A OS em A4 para o cliente, baixada como PDF.
+   *
+   * O cupom continua sendo o cupom: papel da oficina, três vias, guilhotina.
+   * Este é o documento que vai pelo WhatsApp — e por isso ele monta os dados
+   * do MESMO lugar que a tela: a OS aberta, o cadastro do cliente, o cadastro
+   * da moto e as configurações da oficina. Não existe segunda fonte, nem
+   * segunda conta: o total sai da mesma regra que a tela mostra.
+   */
+  const baixarOrdemEmPdf = async (order: OrderRecord) => {
+    setBaixandoPdf(true);
+    try {
+      const names = activeMechanics.filter((mechanic) => (order.mechanicIds ?? []).includes(mechanic.id)).map((mechanic) => mechanic.name);
+      const model = buildOrderPdfModel({
+        order,
+        client: clients.find((item) => item.id === order.clientId) ?? null,
+        motorcycle: motorcycles.find((item) => item.id === order.motorcycleId)
+          ?? motorcycles.find((item) => normalizePlate(item.plate) === normalizePlate(order.plate)) ?? null,
+        settings,
+        mechanics: names.join(" + ") || order.mechanic,
+        laborDiscountPercent: partners.find((item) => item.id === order.partnerId)?.laborDiscount ?? 0,
+      });
+      // A biblioteca de PDF só desce agora, no clique.
+      const { downloadOrderPdf } = await import("./order-pdf-file");
+      await downloadOrderPdf(model, orderPdfFileName(order));
+      notify(`${order.id} baixada em PDF. É só anexar no WhatsApp do cliente.`);
+    } catch (falha) {
+      notify(`Não foi possível gerar o PDF: ${falha instanceof Error ? falha.message : "erro desconhecido"}`);
+    } finally {
+      setBaixandoPdf(false);
+    }
   };
 
   const sendOrderWhatsapp = (order: OrderRecord) => {
@@ -5649,7 +5688,7 @@ export function AppDialog({
           <div className="dialog-body order-detail">
             {currentOrder ? (
               <>
-                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{currentOrder.closed ? "Entregue e encerrada" : orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><PrintCopiesMenu label={settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"} onPrint={(choice) => printOrder(currentOrder, choice)}/><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button><OrderRemovalButton order={currentOrder} podeApagar={canOperate} actor={{ uid: currentUser?.uid ?? "", name: operadorAtual }} notify={notify} onRemoved={() => close()}/></div></div>
+                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{currentOrder.closed ? "Entregue e encerrada" : orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><PrintCopiesMenu label={settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"} onPrint={(choice) => printOrder(currentOrder, choice)}/><button disabled={baixandoPdf} onClick={() => void baixarOrdemEmPdf(currentOrder)}><Icon name="file" size={16}/>{baixandoPdf ? "Gerando..." : "Baixar PDF"}</button><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button><OrderRemovalButton order={currentOrder} podeApagar={canOperate} actor={{ uid: currentUser?.uid ?? "", name: operadorAtual }} notify={notify} onRemoved={() => close()}/></div></div>
                 <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select disabled={!canOperate || !!currentOrder.closed} value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as ServiceOrderStatus)}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button disabled={!canOperate || !!currentOrder.closed} className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
                 <div className="order-info-grid"><div><span>Cliente / pagador</span><strong>{currentOrder.customer}</strong><small>{currentOrder.origin}</small></div><div><span>Motocicleta</span><strong>{currentOrder.bike}</strong><small>{currentOrder.plate}</small></div><div><span>Mecânicos</span><strong>{orderMechanics.map((mechanic) => mechanic.name).join(" + ") || currentOrder.mechanic}</strong><small>{orderMechanics.length || 1} responsável(is)</small></div><div><span>Previsão</span><strong>{currentOrder.delivery}</strong><small>Prioridade {currentOrder.priority}</small></div></div>
                 {/* Cliente e moto, editáveis com a OS aberta.
