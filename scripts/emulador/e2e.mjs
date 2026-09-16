@@ -2985,7 +2985,7 @@ await passo("apagar OS devolve a peça ao estoque, e OS encerrada não some", as
   // 3. Sumiu da lista?
   await ir("Ordens de serviço");
   await p.waitForTimeout(1800);
-  const todas = p.locator(".order-status-filters button", { hasText: /^Todos$/ }).first();
+  const todas = p.locator(".order-status-filters button", { hasText: /^Todos\d*$/ }).first();
   if (await todas.count()) { await todas.click(); await p.waitForTimeout(1500); }
   const naLista = await p.locator(".orders-workspace").innerText();
   if (naLista.includes("DEL-1D23")) throw new Error("a OS apagada continua na lista da oficina");
@@ -2996,7 +2996,9 @@ await passo("apagar OS devolve a peça ao estoque, e OS encerrada não some", as
   // e quando o clique não pegava o passo seguia com a lista de OS abertas — a
   // prova dizia "OS encerrada aceitou a exclusão" sobre uma OS que nem estava
   // encerrada. Teste que mente é pior do que teste que falta.
-  const filtroEntregues = p.locator(".order-status-filters button", { hasText: /^Entregues$/ }).first();
+  // O rótulo do filtro traz a CONTAGEM colada ("Entregues3"), então a âncora de
+  // fim de texto sozinha nunca casa.
+  const filtroEntregues = p.locator(".order-status-filters button", { hasText: /^Entregues\d*$/ }).first();
   if (!(await filtroEntregues.count())) throw new Error("não achei o filtro 'Entregues' na tela da oficina");
   await filtroEntregues.click();
   await p.waitForTimeout(2000);
@@ -3030,17 +3032,6 @@ await passo("pegar peça: a peça entra NA OS escolhida e o saldo cai no mesmo m
   await conferirEAbrir();
   await p.waitForTimeout(2000);
 
-  // O saldo da peça ANTES.
-  await ir("Produtos e estoque");
-  await p.waitForTimeout(1800);
-  const linhaDaPeca = p.locator("tbody tr", { hasText: /PASTILHA|Pastilha|ÓLEO|Óleo/ }).first();
-  if (!(await linhaDaPeca.count())) throw new Error("nenhuma peça no estoque para a prova");
-  const nomeDaPeca = (await linhaDaPeca.locator("td").nth(1).innerText().catch(() => "")).split("\n")[0].trim()
-    || (await linhaDaPeca.innerText()).split("\n")[0].trim();
-  const numeros = (texto) => (texto.match(/\d+/g) || []).map(Number);
-  const antes = numeros(await linhaDaPeca.innerText());
-
-  // Pegar a peça pela tela do mecânico.
   await ir("Ordens de serviço");
   await p.waitForTimeout(1200);
   const pegar = p.locator(".heading-actions button", { hasText: /Pegar peça/ }).first();
@@ -3048,12 +3039,34 @@ await passo("pegar peça: a peça entra NA OS escolhida e o saldo cai no mesmo m
   await pegar.click();
   await p.waitForTimeout(1500);
 
-  await p.locator(".take-part input").first().fill(nomeDaPeca.slice(0, 12));
-  await p.waitForTimeout(1200);
-  const achada = p.locator(".take-part-results button").first();
-  if (!(await achada.count())) throw new Error(`a busca não achou a peça "${nomeDaPeca}"`);
-  await achada.click();
-  await p.waitForTimeout(800);
+  /*
+    A peça é escolhida COM SALDO, pela própria lista do diálogo.
+
+    A rodada anterior pegava a primeira peça que casasse pelo nome, e no fim do
+    roteiro ela já estava zerada: o sistema recusou, certíssimo, e a prova
+    reprovou por um motivo que não era o que ela queria provar. O saldo de cada
+    peça está ali no resultado da busca, então é de lá que a escolha sai.
+  */
+  await p.locator(".take-part input").first().fill("a");
+  await p.waitForTimeout(1500);
+  const resultados = p.locator(".take-part-results button");
+  const quantos = await resultados.count();
+  if (!quantos) throw new Error("a busca do 'pegar peça' não trouxe peça nenhuma");
+  let escolhida = null;
+  let nomeDaPeca = "";
+  for (let indice = 0; indice < quantos; indice += 1) {
+    const linha = resultados.nth(indice);
+    const saldo = Number((await linha.locator("b").last().innerText()).replace(/\D/g, "")) || 0;
+    if (saldo >= 1) { escolhida = linha; nomeDaPeca = (await linha.locator("strong").first().innerText()).trim(); break; }
+  }
+  if (!escolhida) throw new Error("nenhuma peça com saldo na busca do 'pegar peça'");
+  await escolhida.click();
+  await p.waitForTimeout(900);
+
+  // O saldo de ANTES sai do próprio diálogo: "N em estoque".
+  const antesTexto = await p.locator(".take-part-chosen").first().innerText();
+  const antes = Number((antesTexto.match(/(\d+)\s+em estoque/) || [])[1] ?? "0");
+  if (!antes) throw new Error(`a peça escolhida ficou sem saldo: "${antesTexto}"`);
 
   const seletorDaOS = p.locator(".take-part select").first();
   const opcoes = await seletorDaOS.locator("option").allInnerTexts();
@@ -3087,12 +3100,18 @@ await passo("pegar peça: a peça entra NA OS escolhida e o saldo cai no mesmo m
   await fecharQualquerDialogo();
   await p.waitForTimeout(1200);
 
-  // 3. E o saldo caiu?
-  await ir("Produtos e estoque");
-  await p.waitForTimeout(1800);
-  const depois = numeros(await p.locator("tbody tr", { hasText: nomeDaPeca.slice(0, 8) }).first().innerText());
-  const caiu = antes.some((valor, indice) => depois[indice] !== undefined && depois[indice] < valor);
-  if (!caiu) throw new Error(`o saldo não caiu ao pegar a peça: antes ${antes.join("/")} depois ${depois.join("/")}`);
+  // 3. E o saldo caiu? Pergunta feita no mesmo lugar que deu o "antes".
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1200);
+  await p.locator(".heading-actions button", { hasText: /Pegar peça/ }).first().click();
+  await p.waitForTimeout(1500);
+  await p.locator(".take-part input").first().fill(nomeDaPeca.slice(0, 10));
+  await p.waitForTimeout(1500);
+  const denovo = p.locator(".take-part-results button").first();
+  if (!(await denovo.count())) throw new Error(`a peça "${nomeDaPeca}" sumiu da busca depois do lançamento`);
+  const depois = Number((await denovo.locator("b").last().innerText()).replace(/\D/g, "")) || 0;
+  if (depois >= antes) throw new Error(`o saldo não caiu ao pegar a peça: antes ${antes}, depois ${depois}`);
+  await fecharQualquerDialogo();
 });
 
 console.log(`\n=== ${falhas} falha(s) ===`);

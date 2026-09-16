@@ -4839,11 +4839,25 @@ export function AppDialog({
                   </select></label>
               </div>
 
-              {escolhida && ordem && quantidade > 0 ? (
-                <div className="info-strip"><Icon name="check" size={17}/><span>
-                  Vai lançar <b>{quantidade}x {escolhida.name}</b> na <b>{ordem.id}</b> ({ordem.plate || "sem placa"}) por {formatBRL(toAmount(escolhida.price) * quantidade)}. O estoque cai de {escolhida.stock ?? 0} para <b>{Number(escolhida.stock ?? 0) - quantidade}</b>.
-                </span></div>
-              ) : null}
+              {/* O aviso diz o que VAI acontecer — ou por que NÃO VAI.
+
+                  Antes ele era sempre verde: mostrava "Vai lançar 1x ÓLEO na
+                  OS-0007. O estoque cai de 0 para -1" e só recusava DEPOIS do
+                  clique, com a faixa vermelha. Quem estava no balcão escolhia a
+                  peça, escolhia a OS, clicava, e a peça não ia para a OS — sem
+                  entender por quê. O motivo agora aparece na hora de escolher. */}
+              {(() => {
+                if (!escolhida || !ordem || !(quantidade > 0)) return null;
+                const problemas = problemasDoPedido({ peca: escolhida, quantidade, ordem }, settings?.blockZeroStockSale !== false);
+                if (problemas.length) {
+                  return <div className="dialog-error-strip" role="alert"><Icon name="alert" size={17}/><span>{problemas.join(" ")}</span></div>;
+                }
+                return (
+                  <div className="info-strip"><Icon name="check" size={17}/><span>
+                    Vai lançar <b>{quantidade}x {escolhida.name}</b> na <b>{ordem.id}</b> ({ordem.plate || "sem placa"}) por {formatBRL(toAmount(escolhida.price) * quantidade)}. O estoque cai de {escolhida.stock ?? 0} para <b>{Number(escolhida.stock ?? 0) - quantidade}</b>.
+                  </span></div>
+                );
+              })()}
               {!disponiveis.length ? <div className="admin-pending"><Icon name="alert" size={20}/><div><strong>Nenhuma OS aberta</strong><small>A peça precisa ir para alguma moto. Abra a OS antes de pegar a peça.</small></div></div> : null}
             </div>
           );
