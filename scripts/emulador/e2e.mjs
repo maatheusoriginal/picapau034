@@ -105,8 +105,31 @@ const fecharQualquerDialogo = async () => {
   }
 };
 
-/** Abre a primeira OS da lista, na visão que estiver ativa. */
+/**
+ * Escolhe a visão da tela de OS: Quadro, Cartões ou Lista.
+ *
+ * O Quadro é a de abertura, e passos que falam de cartão ou de filtro de etapa
+ * precisam dizer em qual visão estão — senão testam o que der na telha do
+ * padrão do dia.
+ */
+const visaoDaOficina = async (nome) => {
+  const botao = p.locator(".view-switch button", { hasText: new RegExp(`^${nome}$`) }).first();
+  if (!(await botao.count())) throw new Error(`não achei a visão "${nome}" na tela da oficina`);
+  await botao.click();
+  await p.waitForTimeout(1200);
+};
+
+/**
+ * Abre a primeira OS, na visão que estiver ativa.
+ *
+ * São três agora: o Quadro (que é a de abertura), os Cartões e a Lista. O
+ * roteiro não fixa a visão de propósito — assim ele continua valendo se a
+ * oficina mudar a preferida, e falha de verdade se alguma delas parar de abrir
+ * a OS.
+ */
 const abrirPrimeiraOS = async () => {
+  const noQuadro = p.locator(".board-card button", { hasText: /Abrir OS/ }).first();
+  if (await noQuadro.count()) { await noQuadro.click(); return; }
   const noCartao = p.locator(".work-order-card button", { hasText: /Abrir OS/ }).first();
   if (await noCartao.count()) { await noCartao.click(); return; }
   await p.locator("tbody tr button", { hasText: /^Abrir$/ }).first().click();
@@ -114,8 +137,10 @@ const abrirPrimeiraOS = async () => {
 
 /** Abre a OS de uma placa, no cartão ou na linha da lista. */
 const abrirOSdaPlaca = async (placa) => {
+  const noQuadro = p.locator(".board-card", { hasText: placa }).locator("button", { hasText: /Abrir OS/ }).first();
   const noCartao = p.locator(".work-order-card", { hasText: placa }).locator("button", { hasText: /Abrir OS/ }).first();
-  if (await noCartao.count()) await noCartao.click();
+  if (await noQuadro.count()) await noQuadro.click();
+  else if (await noCartao.count()) await noCartao.click();
   else await p.locator("tr", { hasText: placa }).locator("button", { hasText: /^Abrir$/ }).first().click();
   await p.waitForTimeout(2500);
 };
@@ -2803,7 +2828,18 @@ await passo("dois cliques no cartão abrem a OS, e o botão não abre duas vezes
   await ir("Ordens de serviço");
   await p.waitForTimeout(1500);
 
-  // Visão de cartões: dois cliques no corpo do cartão, longe de qualquer botão.
+  // No QUADRO primeiro, que é a visão de abertura: dois cliques no corpo do
+  // card, longe de qualquer botão.
+  await visaoDaOficina("Quadro");
+  const noQuadro = p.locator(".board-card").first();
+  if (!(await noQuadro.count())) throw new Error("nenhuma OS no quadro para testar o duplo clique");
+  await noQuadro.locator("header strong").first().dblclick();
+  await p.waitForTimeout(2000);
+  if (!(await p.locator(".dialog-body.order-detail").count())) throw new Error("dois cliques no card do quadro não abriram a OS");
+  await fecharQualquerDialogo();
+
+  // E na visão de cartões, que continua existindo.
+  await visaoDaOficina("Cartões");
   const cartao = p.locator(".work-order-card").first();
   if (!(await cartao.count())) throw new Error("nenhuma OS na lista para testar o duplo clique");
   await cartao.locator("h2").first().dblclick();
@@ -3000,6 +3036,9 @@ await passo("apagar OS devolve a peça ao estoque, e OS encerrada não some", as
   // encerrada. Teste que mente é pior do que teste que falta.
   // O rótulo do filtro traz a CONTAGEM colada ("Entregues3"), então a âncora de
   // fim de texto sozinha nunca casa.
+  // A régua de etapas vive nas visões de Cartões e Lista; o Quadro mostra as
+  // colunas em vez dela, e OS entregue não fica no quadro.
+  await visaoDaOficina("Cartões");
   const filtroEntregues = p.locator(".order-status-filters button", { hasText: /^Entregues\d*$/ }).first();
   if (!(await filtroEntregues.count())) throw new Error("não achei o filtro 'Entregues' na tela da oficina");
   await filtroEntregues.click();
@@ -3146,6 +3185,136 @@ await passo("baixar a OS em PDF entrega um arquivo de verdade, e o cupom continu
   if (bytes.length < 1200) throw new Error(`o PDF veio pequeno demais para ter conteúdo: ${bytes.length} bytes`);
 
   await fecharQualquerDialogo();
+});
+
+await passo("arrastar o card no quadro muda a etapa da OS, e no celular a régua troca de coluna", async () => {
+  await ir("Ordens de serviço");
+  await visaoDaOficina("Quadro");
+  await p.waitForTimeout(1200);
+
+  const problemas = [];
+
+  // As seis etapas da oficina viram seis colunas. Menos que isso e alguma moto
+  // fica sem lugar para estar.
+  const colunas = await p.locator(".order-board-column").count();
+  if (colunas !== 6) problemas.push(`o quadro tem ${colunas} coluna(s), e a oficina tem 6 etapas`);
+
+  const card = p.locator(".board-card").first();
+  if (!(await card.count())) throw new Error("nenhuma OS no quadro para arrastar");
+  const osArrastada = (await card.locator(".order-number").first().innerText()).trim();
+  const antes = (await banco("serviceOrders")).find((o) => o.id === osArrastada);
+  if (!antes) throw new Error(`não achei a OS ${osArrastada} no banco`);
+
+  // Para onde arrastar: uma etapa diferente da atual.
+  const destino = antes.status === "Avaliação" ? "Aprovação" : "Avaliação";
+  const coluna = p.locator(`.order-board-column[data-status="${destino}"]`).first();
+  if (!(await coluna.count())) throw new Error(`não achei a coluna "${destino}"`);
+  // Seis colunas não cabem numa tela: a de destino precisa estar VISÍVEL, senão
+  // o ponteiro vai parar fora da janela e não há coluna nenhuma debaixo dele.
+  // Foi exatamente assim que este passo reprovou da primeira vez, com a tela
+  // certa e o teste errado.
+  await coluna.scrollIntoViewIfNeeded();
+  await p.waitForTimeout(400);
+
+  /*
+    O arrastar é feito com o ponteiro, passo a passo.
+
+    O card não usa o drag-and-drop do HTML — usa eventos de ponteiro, porque o
+    nativo não dispara `dragstart` neste navegador nem pelo método próprio do
+    Playwright, e recurso que não se consegue provar é recurso que a oficina
+    descobre quebrado sozinha. Aqui a sequência é a real: apertar no card,
+    andar o suficiente para virar arrasto, parar sobre a outra coluna e soltar.
+  */
+  const doCard = await card.boundingBox();
+  const daColuna = await coluna.boundingBox();
+  if (!doCard || !daColuna) throw new Error("card ou coluna fora da tela");
+  await p.mouse.move(doCard.x + doCard.width / 2, doCard.y + 20);
+  await p.mouse.down();
+  await p.mouse.move(doCard.x + doCard.width / 2 + 30, doCard.y + 45, { steps: 5 });
+  // No meio do caminho a coluna de destino tem de se acender: é o que diz para
+  // quem arrasta onde o card vai cair.
+  await p.mouse.move(daColuna.x + daColuna.width / 2, daColuna.y + 90, { steps: 12 });
+  await p.waitForTimeout(400);
+  if (!(await p.locator(`.order-board-column[data-status="${destino}"].is-target`).count())) {
+    problemas.push("a coluna sob o cursor não se acendeu durante o arrasto");
+  }
+  await p.mouse.up();
+  await p.waitForTimeout(2600);
+
+  const depois = (await banco("serviceOrders")).find((o) => o.id === osArrastada);
+  if (depois?.status !== destino) {
+    problemas.push(`arrastei a OS ${osArrastada} para "${destino}" e o banco continua em "${depois?.status}"`);
+  } else {
+    // A etapa mudou de fora da OS: o histórico dela tem de registrar isso, ou
+    // ninguém sabe depois quem moveu a moto de lugar.
+    const eventos = JSON.stringify(depois.events ?? []);
+    if (!eventos.includes(destino)) problemas.push("a etapa mudou e o histórico da OS não registrou a mudança");
+  }
+
+  // No celular a régua de etapas aparece e mostra UMA coluna por vez: seis
+  // colunas de dois centímetros cabem e não se usam.
+  await p.setViewportSize({ width: 390, height: 844 });
+  await p.waitForTimeout(1200);
+  const reguaVisivel = await p.locator(".board-stage-pills").first().isVisible().catch(() => false);
+  if (!reguaVisivel) problemas.push("no celular a régua de etapas não apareceu");
+  const visiveis = await p.locator(".order-board-column:visible").count();
+  if (visiveis !== 1) problemas.push(`no celular ${visiveis} coluna(s) na tela, e o combinado é uma por vez`);
+
+  // E trocar de pílula tem de trocar o que está na tela.
+  const pilula = p.locator(".board-stage-pills button", { hasText: new RegExp(`^${destino}`) }).first();
+  if (await pilula.count()) {
+    await pilula.click();
+    await p.waitForTimeout(900);
+    const naTela = await p.locator(`.order-board-column[data-status="${destino}"]`).first().isVisible().catch(() => false);
+    if (!naTela) problemas.push(`no celular escolhi a etapa "${destino}" e a coluna dela não apareceu`);
+  } else problemas.push(`não achei a pílula da etapa "${destino}" no celular`);
+
+  await foto("quadro-celular");
+  await p.setViewportSize({ width: 1360, height: 950 });
+  await p.waitForTimeout(900);
+
+  if (problemas.length) throw new Error("quadro de OS:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("a moto da OS é escolhida pelo catálogo, igual ao cadastro de moto", async () => {
+  await ir("Ordens de serviço");
+  await visaoDaOficina("Quadro");
+  await p.waitForTimeout(1000);
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(2500);
+
+  const problemas = [];
+  const bloco = p.locator("fieldset.order-followup", { hasText: /Cliente e motocicleta/ }).first();
+  if (!(await bloco.count())) throw new Error("não achei o bloco 'Cliente e motocicleta' na OS");
+
+  // Marca, Modelo e Versão em LISTA, e não em texto livre: é o que impede a
+  // mesma moto entrar como "cg160 fan" numa OS e "CG 160 Fan" no cadastro.
+  for (const rotulo of ["Marca", "Modelo", "Versão"]) {
+    const campo = bloco.locator("label, div").filter({ hasText: new RegExp(`^${rotulo}$`) }).first();
+    if (!(await campo.count())) problemas.push(`não achei o campo "${rotulo}" na edição da OS`);
+  }
+  const listas = await bloco.locator("select").count();
+  if (listas < 2) problemas.push(`esperava listas de marca e modelo na OS, achei ${listas} lista(s)`);
+
+  // Escolher marca e modelo tem de montar o texto que a OS grava.
+  const marca = bloco.locator("select").first();
+  await marca.selectOption({ label: "Honda" }).catch(() => {});
+  await p.waitForTimeout(700);
+  const modelo = bloco.locator("select").nth(1);
+  await modelo.selectOption({ label: "CG 160" }).catch(() => {});
+  await p.waitForTimeout(700);
+  const versao = bloco.locator("select").nth(2);
+  if (await versao.count()) await versao.selectOption({ label: "Fan ESDI" }).catch(() => {});
+  await p.waitForTimeout(700);
+
+  await p.locator(".dialog-footer button", { hasText: /^Salvar/ }).first().click();
+  await p.waitForTimeout(3000);
+  await fecharQualquerDialogo();
+
+  const comHonda = (await banco("serviceOrders")).filter((o) => /Honda CG 160 Fan ESDI/i.test(String(o.bike || "")));
+  if (!comHonda.length) problemas.push("escolhi Honda / CG 160 / Fan ESDI e nenhuma OS no banco ficou com esse texto");
+
+  if (problemas.length) throw new Error("moto da OS pelo catálogo:\n      - " + problemas.join("\n      - "));
 });
 
 console.log(`\n=== ${falhas} falha(s) ===`);

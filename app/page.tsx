@@ -46,6 +46,7 @@ import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, copie
 import { PrintCopiesMenu } from "../src/components/PrintCopiesMenu";
 import { LedgerWorkspace } from "../src/components/LedgerWorkspace";
 import { OrderRemovalButton } from "../src/components/OrderRemovalButton";
+import { BikeModelFields } from "../src/components/BikeModelFields";
 import { buildOrderPdfModel, orderPdfFileName } from "../src/order-pdf";
 import { openWhatsapp, printDocument } from "./printing";
 import { clearReloadMark, ErrorBoundary } from "./ErrorBoundary";
@@ -2398,7 +2399,7 @@ export function ModuleWorkspace({
     );
   }
 
-  if (active === "Ordens de serviço" || active === "Orçamentos") return <OrdersWorkspace orders={orders} budget={active === "Orçamentos"} canCreate={canCreateOrders} canTakePart={canOperate} openDialog={openDialog} initialFilter={initialFilter}/>;
+  if (active === "Ordens de serviço" || active === "Orçamentos") return <OrdersWorkspace orders={orders} budget={active === "Orçamentos"} canCreate={canCreateOrders} canTakePart={canOperate} openDialog={openDialog} initialFilter={initialFilter} canMove={canOperate} onMove={(order, status) => onAdvanceOrder(order, status, order.mechanicIds ?? [])}/>;
 
   if (active === "Produtos e estoque") {
     // A lista do balcão: procurar por código, referência de fábrica, código de
@@ -5705,7 +5706,22 @@ export function AppDialog({
                   ) : null}
                   <div className="form-grid">
                     <label className="field"><span>Cliente</span><input value={orderCustomer} onChange={(event) => setOrderCustomer(emMaiusculo(event.target.value))} placeholder="Nome de quem responde pela moto"/></label>
-                    <label className="field"><span>Motocicleta</span><input value={orderBike} onChange={(event) => setOrderBike(emMaiusculo(event.target.value))} placeholder="Ex.: HONDA CG 160 FAN"/></label>
+                    {/* Marca, modelo e versão pelo catálogo — a MESMA peça do
+                        cadastro de moto. Aqui era texto livre, e a moto que o
+                        balcão acertava depois entrava como "cg160 fan" ou "CG
+                        FAN 160": duas grafias da mesma moto, e o histórico dela
+                        deixava de juntar. A peça grava o mesmo texto único que
+                        o cadastro grava, que é o que a OS imprime e o PDF do
+                        cliente mostra. */}
+                    <BikeModelFields
+                      brand={separarMarcaEModelo(orderBike, systemList(lists, "motorcycleBrands")).marca}
+                      model={separarMarcaEModelo(orderBike, systemList(lists, "motorcycleBrands")).modelo}
+                      onChange={(valor) => setOrderBike([valor.brand, valor.model].filter(Boolean).join(" ").trim())}
+                      brandOptions={systemList(lists, "motorcycleBrands")}
+                      estilo="dialogo"
+                      obrigatorio={false}
+                      dica={false}
+                    />
                     <label className="field"><span>Placa</span><input value={orderPlate} onChange={(event) => setOrderPlate(formatPlate(event.target.value))} placeholder="ABC-1D23"/></label>
                     <label className="field"><span>Quilometragem</span><input value={orderMileage} onChange={(event) => setOrderMileage(event.target.value)} placeholder="Ex.: 42500" inputMode="numeric"/></label>
                     <label className="field field-full"><span>Problema relatado</span><textarea value={orderProblem} onChange={(event) => setOrderProblem(emMaiusculo(event.target.value))} placeholder="O que o cliente contou ao deixar a moto"/></label>
@@ -6284,21 +6300,48 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
    * conta aqui faria a peça sair do estoque duas vezes ou nenhuma, dependendo
    * de por onde a situação foi mudada.
    */
+  /**
+   * Muda a situação de uma OS de fora do diálogo dela.
+   *
+   * Dois lugares chamam: o mecânico pegando a OS na tela dele, e o card
+   * arrastado de uma coluna para outra no quadro de Ordens de serviço. É a
+   * mesma mudança que trocar a situação dentro da OS, então usa as mesmas
+   * peças — `shouldReserveStock` decide se a peça sai da prateleira agora e
+   * `stockDeltas` calcula o que mexer. Uma segunda regra aqui seria a porta
+   * para a OS arrastada baixar estoque diferente da OS alterada pela tela, e
+   * ninguém descobriria isso olhando: só contando peça no fim do mês.
+   */
   const advanceOrder = useCallback(async (order: OrderRecord, status: ServiceOrderStatus, mechanicIds: string[]) => {
     const deductStockOnlyWhenStarted = workshopSettings?.deductStockOnlyWhenUsed !== false;
     const partsOfOrder = mergeParts((order.items ?? [])
       .filter((item) => item.type === "Peça" && item.productId)
       .map((item) => ({ productId: item.productId!, quantity: item.quantity ?? 1 })));
     const reserved = (order.deductedItems ?? []) as ReservedPart[];
-    const target = shouldReserveStock(status, deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOfOrder : [];
-    await saveOrderWithStock(order.id, {
+    /*
+      OS antiga, sem itens detalhados, fica como está.
+
+      Sem esta guarda o alvo seria uma lista vazia e o estoque devolveria as
+      peças que a OS já tinha baixado — por causa de um avanço de situação, em
+      silêncio. O diálogo da OS sempre teve esta guarda; aqui faltava, e agora
+      que o quadro também passa por este caminho ela precisa valer nos dois.
+    */
+    const semItens = !order.items?.length;
+    const target = semItens ? reserved : shouldReserveStock(status, deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOfOrder : [];
+    const mudancas = {
       status,
       tone: statusTone(status),
       mechanicIds,
       mechanic: users.find((user) => user.id === mechanicIds[0])?.name ?? order.mechanic,
       deductedItems: target,
+    };
+    // A linha do histórico da OS: sem ela, a situação mudava e o "Histórico
+    // desta OS" não contava quem mudou nem quando.
+    const anotacoes = changeEvents(order, mudancas, currentUserName);
+    await saveOrderWithStock(order.id, {
+      ...mudancas,
+      ...(anotacoes.length ? { events: appendEvents(order.events, anotacoes) } : {}),
     }, stockDeltas(target, reserved));
-  }, [workshopSettings, users]);
+  }, [workshopSettings, users, currentUserName]);
 
   const dashboardCash = openSession(cashSessions);
   const dashboardDrawer = cashSummary(dashboardCash, { sales, orders, expenses, accounts }).expected;

@@ -332,3 +332,75 @@ table td strong, table td span { font-size: .875rem; }
 .order-actions .removal-trigger:hover { color: #8c4a30; text-decoration: underline; }
 .removal-box .removal-exit { margin-top: 10px; }
 .removal-box .removal-error { margin-top: 12px; color: #a8412c; font-weight: 600; }
+
+/* ---------------------------------------------------------------------------
+   Quadro das Ordens de serviço
+
+   Uma coluna por etapa da oficina, o card arrastável entre elas. No celular o
+   mesmo quadro vira uma etapa por vez, escolhida pela régua de pílulas: seis
+   colunas num telefone seriam seis tiras de dois centímetros — cabe e não se
+   usa. Quem decide é a largura da tela, aqui, e não uma medição em JavaScript.
+--------------------------------------------------------------------------- */
+.order-board-wrap { background: #fafbf7; border-top: 1px solid var(--line); }
+/* A régua de etapas é do celular. No computador as colunas já dizem tudo. */
+.board-stage-pills { display: none; }
+.order-board { display: flex; gap: 13px; align-items: flex-start; padding: 16px; overflow-x: auto; scrollbar-width: thin; }
+.order-board-column { flex: 0 0 236px; display: flex; flex-direction: column; min-height: 140px; max-height: 68vh; border: 1px solid #e2e7d9; border-radius: 11px; background: #fff; overflow: hidden; }
+/* A coluna que vai receber o card fica evidente antes de soltar: soltar no
+   lugar errado muda a etapa de uma moto, e desfazer isso é ir na OS. */
+.order-board-column.is-target { border-color: #8aa86a; box-shadow: 0 0 0 3px #e7f0da; }
+.order-board-column > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 13px; border-bottom: 1px solid #edf0e8; font-size: .875rem; font-weight: 650; color: #46533b; background: #f6f8f1; }
+.order-board-column > header b { min-width: 22px; text-align: center; padding: 1px 7px; border-radius: 20px; background: #fff; border: 1px solid #e2e7d9; font-variant-numeric: tabular-nums; font-size: .8125rem; }
+.order-board-column > header.stage-green { background: #eef6e8; color: #3d5730; }
+.order-board-column > header.stage-amber { background: #fdf3e2; color: #79561a; }
+.order-board-column > header.stage-red { background: #fceeea; color: #8f3a27; }
+.order-board-column > header.stage-violet { background: #f2eefa; color: #574080; }
+.order-board-column > header.stage-blue { background: #eaf1f8; color: #2f4d69; }
+.order-board-cards { display: flex; flex-direction: column; gap: 10px; padding: 11px; overflow-y: auto; }
+.order-board-empty { margin: 0; padding: 18px 10px; text-align: center; font-size: .8125rem; color: #8b9680; }
+
+.board-card { position: relative; padding: 12px; border: 1px solid #e3e8da; border-radius: 9px; background: #fff; }
+.board-card.can-drag { cursor: grab; }
+.board-card.can-drag:active { cursor: grabbing; }
+/* O card em movimento fica invisível ao ponteiro: sem isso a coluna debaixo do
+   cursor seria sempre a de origem, que é onde o card ainda está desenhado. */
+.board-card.is-dragging { opacity: .4; pointer-events: none; }
+.board-card.is-late { border-color: #e6bda1; background: #fffaf5; }
+.board-card > header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.board-card > header strong { font-size: .9375rem; line-height: 1.35; }
+.board-card .order-number { font-size: .6875rem; white-space: nowrap; }
+.board-card-bike { margin: 7px 0 0; font-size: .8125rem; color: #66715d; }
+.board-card-plate { margin: 3px 0 0; font-size: .75rem; font-family: ui-monospace,monospace; color: #8a9280; }
+.board-card > footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 9px; border-top: 1px solid #eef1e9; font-size: .75rem; }
+.board-card-who { display: flex; align-items: center; gap: 6px; color: #6b795e; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-card-who i { display: grid; place-items: center; width: 19px; height: 19px; flex-shrink: 0; border-radius: 50%; background: #e9eee0; color: #55663f; font-style: normal; font-size: .6875rem; font-weight: 700; }
+.board-card-due { color: #8a9280; white-space: nowrap; }
+.board-card-late { color: #a8492f; font-weight: 650; white-space: nowrap; }
+.board-card-total { display: block; margin-top: 8px; font-size: .875rem; color: #6b5a33; font-variant-numeric: tabular-nums; }
+.board-card-open { width: 100%; margin-top: 9px; display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; border: 1px solid var(--line); border-radius: 7px; background: #fff; font-size: .8125rem; color: #55663f; }
+.order-board-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 13px 18px; border-top: 1px solid var(--line); font-size: .8125rem; color: var(--muted); background: #fff; }
+
+@media (max-width: 900px) {
+  /* Uma etapa por vez, escolhida na régua: é o que cabe no polegar. */
+  .board-stage-pills { display: flex; gap: 7px; padding: 14px 14px 0; overflow-x: auto; scrollbar-width: thin; }
+  .board-stage-pills button { display: flex; align-items: center; gap: 7px; white-space: nowrap; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 8px 12px; font-size: .875rem; color: #637057; min-height: 40px; }
+  .board-stage-pills button.selected { background: #36432e; border-color: #36432e; color: #fff; }
+  .board-stage-pills b { padding: 1px 7px; border-radius: 20px; background: #ffffff2e; font-variant-numeric: tabular-nums; font-size: .8125rem; }
+  .board-stage-pills button:not(.selected) b { background: #eff2e7; color: #5c6b4c; }
+  .order-board { display: block; padding: 14px; overflow: visible; }
+  .order-board-column { max-height: none; border: 0; background: transparent; }
+  .order-board-column > header { display: none; }
+  .order-board-cards { padding: 0; gap: 11px; overflow: visible; }
+  /* Só a etapa escolhida fica na tela. O atributo vem do quadro; no
+     computador ele existe e não faz nada, que é o combinado. */
+  .order-board[data-etapa="Recepção"] .order-board-column:not([data-status="Recepção"]),
+  .order-board[data-etapa="Avaliação"] .order-board-column:not([data-status="Avaliação"]),
+  .order-board[data-etapa="Aprovação"] .order-board-column:not([data-status="Aprovação"]),
+  .order-board[data-etapa="Em serviço"] .order-board-column:not([data-status="Em serviço"]),
+  .order-board[data-etapa="Aguardando peça"] .order-board-column:not([data-status="Aguardando peça"]),
+  .order-board[data-etapa="Entrega"] .order-board-column:not([data-status="Entrega"]) { display: none; }
+  /* Arrastar com o dedo briga com rolar a tela: no celular a etapa se muda
+     abrindo a OS, que é onde o mecânico já está. */
+  .board-card { cursor: default; padding: 14px; }
+  .board-card-open { min-height: 42px; }
+}
