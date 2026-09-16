@@ -407,14 +407,17 @@ table td strong, table td span { font-size: .875rem; }
   .order-board-column { max-height: none; border: 0; padding: 0; background: transparent; }
   .order-board-column > header { display: none; }
   .order-board-cards { padding: 0; gap: 11px; overflow: visible; }
-  /* Só a etapa escolhida fica na tela. O atributo vem do quadro; no
-     computador ele existe e não faz nada, que é o combinado. */
-  .order-board[data-etapa="Recepção"] .order-board-column:not([data-status="Recepção"]),
-  .order-board[data-etapa="Avaliação"] .order-board-column:not([data-status="Avaliação"]),
-  .order-board[data-etapa="Aprovação"] .order-board-column:not([data-status="Aprovação"]),
-  .order-board[data-etapa="Em serviço"] .order-board-column:not([data-status="Em serviço"]),
-  .order-board[data-etapa="Aguardando peça"] .order-board-column:not([data-status="Aguardando peça"]),
-  .order-board[data-etapa="Entrega"] .order-board-column:not([data-status="Entrega"]) { display: none; }
+  /*
+    Só a etapa escolhida fica na tela.
+
+    A marca vem do React, e não de uma lista de nomes de etapa escrita aqui.
+    A primeira versão enumerava as seis etapas em seis seletores; quando a
+    oficina passou para quatro, duas delas ficaram sem regra e o celular voltou
+    a mostrar todas as colunas de uma vez — em silêncio, porque nada quebra:
+    a tela só fica errada. Com a marca, renomear ou acrescentar etapa não
+    consegue mais furar isto.
+  */
+  .order-board-column:not(.is-active-stage) { display: none; }
   /* Arrastar com o dedo briga com rolar a tela: no celular a etapa se muda
      abrindo a OS, que é onde o mecânico já está. */
   .board-card { cursor: default; padding: 14px; }

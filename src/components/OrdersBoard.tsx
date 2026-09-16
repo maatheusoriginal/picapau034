@@ -115,7 +115,6 @@ export function OrdersBoard({ orders, canMove, onMove, openDialog, onShowDeliver
 
     <div
       className="order-board"
-      data-etapa={etapaNoCelular}
       onPointerMove={aoMover}
       onPointerUp={aoSoltar}
       onPointerCancel={aoSoltar}
@@ -124,7 +123,10 @@ export function OrdersBoard({ orders, canMove, onMove, openDialog, onShowDeliver
         const doStatus = daEtapa(status);
         return <section
           key={status}
-          className={`order-board-column ${alvo === status && arrastando ? "is-target" : ""}`}
+          // `is-active-stage` é a etapa escolhida na régua do celular. No
+          // computador a marca existe e o CSS a ignora: todas as colunas
+          // aparecem, que é o combinado.
+          className={`order-board-column ${etapaNoCelular === status ? "is-active-stage" : ""} ${alvo === status && arrastando ? "is-target" : ""}`}
           data-status={status}
         >
           <header className={`stage-${statusTone(status)}`}><span>{status}</span><b>{doStatus.length}</b></header>
