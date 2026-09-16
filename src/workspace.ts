@@ -6,7 +6,7 @@ export const routePaths: Record<string, string> = {
   "Produtos e estoque": "/estoque", "Compras e entradas": "/compras", "Ajuste de estoque": "/inventario",
   "Fornecedores": "/fornecedores", "Clientes": "/clientes", "Motocicletas": "/motos",
   "Funcionários": "/equipe", "Financeiro": "/financeiro", "Contas a receber": "/receber",
-  "Contas a pagar": "/pagar", "Histórico de caixas": "/caixas", "Relatórios": "/relatorios",
+  "Contas a pagar": "/pagar", "Histórico geral": "/historico", "Histórico de caixas": "/caixas", "Relatórios": "/relatorios",
   "Configurações": "/configuracoes", "Usuários e acessos": "/acessos", "Administração": "/admin",
 };
 
@@ -22,6 +22,15 @@ export const workspacePermissions: Record<string, FirebasePermission[]> = {
   "Histórico geral": ["finance.view"], "Histórico de caixas": ["finance.view"], "Relatórios": ["finance.view"], "Configurações": ["settings.view"],
 };
 
+/**
+ * Pode entrar nesta tela?
+ *
+ * A primeira linha é a que pega: destino SEM ENDEREÇO não existe para a
+ * navegação, e `navigateTo` desiste em silêncio. É a armadilha de quem
+ * acrescenta uma tela — o item aparece no menu, o roteador tem o caso pronto, e
+ * clicar não faz nada. Aconteceu com o "Histórico geral"; `check:workspace`
+ * agora cobra que os três lugares (menu, endereço e permissão) andem juntos.
+ */
 export function canVisit(destination: string, role: UserRole, permissions: FirebasePermission[]): boolean {
   if (!routePaths[destination]) return false;
   if (role === "Super Admin" || destination === "Visão geral") return true;

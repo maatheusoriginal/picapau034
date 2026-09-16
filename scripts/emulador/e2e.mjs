@@ -2954,7 +2954,7 @@ await passo("apagar OS devolve a peça ao estoque, e OS encerrada não some", as
   await ir("Ordens de serviço");
   await p.waitForTimeout(1500);
   await abrirNovaOS();
-  await preencherEtapa1({ nome: `DESCARTE ${Date.now().toString().slice(-4)}`, placa: "DEL-1D23", modelo: "CG 160" });
+  await preencherEtapa1({ nome: `DESCARTE ${Date.now().toString().slice(-4)}`, telefone: "34988881111", placa: "DEL-1D23", marca: "Honda", modelo: "CG 160" });
   await irParaServico();
   await p.locator(`${CAMADA} textarea`).first().fill("OS PARA APAGAR");
   await conferirEAbrir();
@@ -3014,7 +3014,7 @@ await passo("pegar peça: a peça entra NA OS escolhida e o saldo cai no mesmo m
   await ir("Ordens de serviço");
   await p.waitForTimeout(1500);
   await abrirNovaOS();
-  await preencherEtapa1({ nome: `PEGA PECA ${Date.now().toString().slice(-4)}`, placa: "PEC-1A23", modelo: "CG 160" });
+  await preencherEtapa1({ nome: `PEGA PECA ${Date.now().toString().slice(-4)}`, telefone: "34988882222", placa: "PEC-1A23", marca: "Honda", modelo: "CG 160" });
   await irParaServico();
   await p.locator(`${CAMADA} textarea`).first().fill("OS PARA PEGAR PECA");
   await conferirEAbrir();

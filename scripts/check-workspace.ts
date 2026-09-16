@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { canVisit, destinationForPath, routePaths, calendarDay, todayKey, orderMatchesFilter, orderAttention, sortOrders, searchProducts, lowStock, matchesSearch } from "../src/workspace";
+import { canVisit, destinationForPath, routePaths, workspacePermissions, calendarDay, todayKey, orderMatchesFilter, orderAttention, sortOrders, searchProducts, lowStock, matchesSearch } from "../src/workspace";
 import { itemUnitPrice, withItemQuantity } from "../src/order-items";
 import { stockDeltas } from "../src/inventory";
 import { partnerTotals } from "../src/partner";
@@ -16,6 +16,43 @@ check("mechanic cannot open financial report", canVisit("Relatórios", "Mecânic
 check("unknown route is never implicitly authorized", canVisit("Tela inexistente", "Super Admin", []), false);
 check("trailing slash", destinationForPath("/oficina/"), "Ordens de serviço");
 for (const [name, path] of Object.entries(routePaths)) check(`route ${name}`, destinationForPath(path), name);
+/*
+  Tela sem ENDEREÇO é tela inalcançável.
+
+  `canVisit` começa recusando destino que não está em `routePaths`, e
+  `navigateTo` desiste em silêncio quando ela recusa. Então acrescentar uma tela
+  em três lugares (menu, roteador e permissão) e esquecer o QUARTO — o endereço
+  — produz exatamente isto: o item aparece no menu, o clique não dá erro, e a
+  tela nunca abre. Aconteceu com o "Histórico geral", e só o navegador pegou.
+
+  Estas duas linhas cobram que endereço e permissão andem juntos, para o erro
+  morrer aqui, em meio segundo, em vez de numa rodada de trinta minutos.
+*/
+for (const nome of Object.keys(workspacePermissions)) {
+  check(`tela "${nome}" tem endereço`, Boolean(routePaths[nome]), true);
+}
+/*
+  As telas que NÃO declaram permissão, e por quê.
+
+  `canVisit` devolve `[].some(...)` — falso — para destino sem permissão
+  declarada, e antes disso libera o Super Admin. Então ficar de fora desta lista
+  é o jeito de dizer "só o Super Admin entra". É intencional para as três
+  abaixo, e a lista existe para que a quarta não entre aqui por esquecimento.
+*/
+const soDoSuperAdmin = ["Usuários e acessos", "Administração"];
+for (const nome of Object.keys(routePaths)) {
+  // "Visão geral" é a porta de entrada: abre para todo mundo que entrou no
+  // sistema, então não tem permissão própria de propósito.
+  if (nome === "Visão geral" || soDoSuperAdmin.includes(nome)) continue;
+  check(`tela "${nome}" diz quem pode entrar`, Boolean(workspacePermissions[nome]), true);
+}
+for (const nome of soDoSuperAdmin) {
+  check(`"${nome}" continua só do Super Admin`, canVisit(nome, "Balcão", ["settings.manage", "team.manage", "finance.manage"]), false);
+  check(`e o Super Admin entra em "${nome}"`, canVisit(nome, "Super Admin", []), true);
+}
+check("e quem vê valores entra no histórico geral", canVisit("Histórico geral", "Balcão", ["finance.view"]), true);
+check("quem não vê valores não entra", canVisit("Histórico geral", "Mecânico", ["orders.view"]), false);
+
 check("BR dates are local days", calendarDay("07/09/2026"), "2026-09-07");
 check("ISO date", calendarDay("2026-09-07"), "2026-09-07");
 check("invalid date rejected", calendarDay("31/02/2026"), "");
