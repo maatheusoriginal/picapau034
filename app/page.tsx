@@ -2397,7 +2397,7 @@ export function ModuleWorkspace({
     );
   }
 
-  if (active === "Ordens de serviço" || active === "Orçamentos") return <OrdersWorkspace orders={orders} budget={active === "Orçamentos"} canCreate={canCreateOrders} openDialog={openDialog} initialFilter={initialFilter}/>;
+  if (active === "Ordens de serviço" || active === "Orçamentos") return <OrdersWorkspace orders={orders} budget={active === "Orçamentos"} canCreate={canCreateOrders} canTakePart={canOperate} openDialog={openDialog} initialFilter={initialFilter}/>;
 
   if (active === "Produtos e estoque") {
     // A lista do balcão: procurar por código, referência de fábrica, código de

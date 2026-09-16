@@ -2921,16 +2921,18 @@ await passo("o histórico geral junta OS encerrada, balcão e serviço rápido",
   const linhas = await p.locator("tbody tr").count();
   if (linhas < 3) throw new Error(`o histórico geral trouxe só ${linhas} linha(s) depois de OS, venda e serviço rápido`);
 
-  const texto = await p.locator("tbody").first().innerText();
+  // `text-transform: uppercase` no rótulo do tipo: o innerText do Playwright
+  // devolve o texto COMO ESTÁ NA TELA, então a comparação precisa ignorar caixa.
+  const texto = (await p.locator("tbody").first().innerText()).toUpperCase();
   for (const tipo of ["Ordem de serviço", "PDV Balcão", "Serviço rápido"]) {
-    if (!texto.includes(tipo)) throw new Error(`falta "${tipo}" no histórico geral`);
+    if (!texto.includes(tipo.toUpperCase())) throw new Error(`falta "${tipo}" no histórico geral`);
   }
 
   // Filtrar por tipo tem de recortar de verdade.
   await p.locator(".report-period .filter-pills button", { hasText: /^Serviço rápido$/ }).first().click();
   await p.waitForTimeout(1500);
-  const soRapido = await p.locator("tbody").first().innerText();
-  if (soRapido.includes("PDV Balcão")) throw new Error("o filtro de tipo não recortou: o balcão continuou na lista");
+  const soRapido = (await p.locator("tbody").first().innerText()).toUpperCase();
+  if (soRapido.includes("PDV BALCÃO")) throw new Error("o filtro de tipo não recortou: o balcão continuou na lista");
 
   // E a busca.
   await p.locator(".report-period .filter-pills button", { hasText: /^Todos$/ }).first().click();
@@ -2989,10 +2991,18 @@ await passo("apagar OS devolve a peça ao estoque, e OS encerrada não some", as
   if (naLista.includes("DEL-1D23")) throw new Error("a OS apagada continua na lista da oficina");
 
   // 4. E a OS encerrada NÃO pode ser apagada: o dinheiro dela já entrou.
-  await p.locator(".order-status-filters button", { hasText: /^Entregues$/ }).first().click().catch(() => {});
-  await p.waitForTimeout(1800);
+  //
+  // O filtro é clicado SEM engolir a falha: antes eu tinha posto um catch aqui,
+  // e quando o clique não pegava o passo seguia com a lista de OS abertas — a
+  // prova dizia "OS encerrada aceitou a exclusão" sobre uma OS que nem estava
+  // encerrada. Teste que mente é pior do que teste que falta.
+  const filtroEntregues = p.locator(".order-status-filters button", { hasText: /^Entregues$/ }).first();
+  if (!(await filtroEntregues.count())) throw new Error("não achei o filtro 'Entregues' na tela da oficina");
+  await filtroEntregues.click();
+  await p.waitForTimeout(2000);
   const encerradas = await p.locator(".work-order-card, tbody tr").count();
-  if (encerradas) {
+  if (!encerradas) throw new Error("nenhuma OS entregue na lista para provar a trava do dinheiro");
+  {
     await abrirPrimeiraOS();
     await p.waitForTimeout(2200);
     const botao = p.locator(".order-actions .removal-trigger").first();
@@ -3033,14 +3043,8 @@ await passo("pegar peça: a peça entra NA OS escolhida e o saldo cai no mesmo m
   // Pegar a peça pela tela do mecânico.
   await ir("Ordens de serviço");
   await p.waitForTimeout(1200);
-  const botaoPegar = p.locator("button", { hasText: /Pegar peça/ }).first();
-  if (!(await botaoPegar.count())) {
-    // O atalho mora na visão do mecânico e no painel do dia.
-    await ir("Painel do dia").catch(() => {});
-    await p.waitForTimeout(1200);
-  }
-  const pegar = p.locator("button", { hasText: /Pegar peça/ }).first();
-  if (!(await pegar.count())) throw new Error("não achei o botão 'Pegar peça' em nenhuma tela");
+  const pegar = p.locator(".heading-actions button", { hasText: /Pegar peça/ }).first();
+  if (!(await pegar.count())) throw new Error("não achei o botão 'Pegar peça' na tela de Ordens de serviço");
   await pegar.click();
   await p.waitForTimeout(1500);
 

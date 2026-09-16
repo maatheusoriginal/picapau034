@@ -4,7 +4,7 @@ import { serviceOrderStatuses, statusTone } from "../types";
 import { matchesSearch, money, orderAttention, orderIsLate, orderMatchesFilter, shortDate, sortOrders } from "../workspace";
 import { Icon } from "./WorkshopIcon";
 
-export function OrdersWorkspace({ orders, budget, canCreate, openDialog, initialFilter }: { orders: OrderRecord[]; budget: boolean; canCreate: boolean; openDialog: OpenDialog; initialFilter?: string }) {
+export function OrdersWorkspace({ orders, budget, canCreate, canTakePart, openDialog, initialFilter }: { orders: OrderRecord[]; budget: boolean; canCreate: boolean; canTakePart: boolean; openDialog: OpenDialog; initialFilter?: string }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState(initialFilter || "Em aberto");
   const [view, setView] = useState<"cards" | "list">("cards");
@@ -13,7 +13,14 @@ export function OrdersWorkspace({ orders, budget, canCreate, openDialog, initial
   const active = orders.filter((order) => !order.closed);
   const pickFilter = (value: string) => { setFilter(value); setLimit(30); };
   return <div className="orders-workspace">
-    <div className="module-heading"><div><p>Oficina</p><h1>{budget ? "Orçamentos" : "Ordens de serviço"}</h1><span>{budget ? "Da avaliação até a aprovação do cliente." : "Cada moto, seu andamento e o próximo passo."}</span></div>{canCreate && <button className="primary-button" onClick={() => openDialog(budget ? "os" : "osChoice")}><Icon name="plus" size={18}/>{budget ? "Novo orçamento" : "Novo atendimento"}</button>}</div>
+    <div className="module-heading"><div><p>Oficina</p><h1>{budget ? "Orçamentos" : "Ordens de serviço"}</h1><span>{budget ? "Da avaliação até a aprovação do cliente." : "Cada moto, seu andamento e o próximo passo."}</span></div><div className="heading-actions">
+      {/* "Pegar peça" existia SÓ na tela de quem tem o cargo Mecânico. Quem
+          atende o balcão e o próprio dono não tinham como lançar uma peça na
+          OS por aqui, mesmo tendo permissão de mexer na ordem — e uma oficina
+          pequena é o dono que pega a peça na prateleira metade das vezes. */}
+      {canTakePart && !budget && <button className="outline-button large" onClick={() => openDialog("takePart")}><Icon name="box" size={17}/>Pegar peça</button>}
+      {canCreate && <button className="primary-button" onClick={() => openDialog(budget ? "os" : "osChoice")}><Icon name="plus" size={18}/>{budget ? "Novo orçamento" : "Novo atendimento"}</button>}
+    </div></div>
     <div className="order-overview-strip"><button onClick={() => pickFilter("Em aberto")}><strong>{active.length}</strong><span>na oficina</span></button><button onClick={() => pickFilter("Atrasadas")} className="overdue-metric"><strong>{active.filter((order) => orderIsLate(order)).length}</strong><span>com prazo vencido</span></button><button onClick={() => pickFilter("Prontas")}><strong>{active.filter((order) => order.status === "Entrega").length}</strong><span>prontas para retirar</span></button></div>
     <section className="panel order-board-panel">
       <div className="list-toolbar"><label className="mini-search"><Icon name="search" size={18}/><input aria-label="Buscar atendimento" value={query} onChange={(event) => { setQuery(event.target.value); setLimit(30); }} placeholder="Cliente, placa, OS ou mecânico"/></label><div className="view-switch" aria-label="Visualização"><button aria-pressed={view === "cards"} onClick={() => setView("cards")}>Cartões</button><button aria-pressed={view === "list"} onClick={() => setView("list")}>Lista</button></div></div>
