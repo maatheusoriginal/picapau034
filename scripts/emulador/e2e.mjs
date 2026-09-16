@@ -37,7 +37,9 @@ await fetch("http://127.0.0.1:8080/emulator/v1/projects/picapau-teste/databases/
 execSync(`node ${JSON.stringify(join(AQUI, "semear.mjs"))}`, { stdio: "pipe" });
 
 const b = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
-const p = await b.newPage({ viewport: { width: 1360, height: 950 } });
+// `acceptDownloads` é o que permite provar o "Baixar PDF": sem isso o
+// Playwright cancela o download e o passo nunca vê o arquivo chegar.
+const p = await b.newPage({ viewport: { width: 1360, height: 950 }, acceptDownloads: true });
 const erros = [];
 p.on("pageerror", (e) => erros.push("PAGEERROR: " + String(e).split("\n")[0]));
 p.on("console", (m) => { if (m.type() === "error") erros.push("CONSOLE: " + m.text().split("\n")[0].slice(0, 220)); });
@@ -3111,6 +3113,38 @@ await passo("pegar peça: a peça entra NA OS escolhida e o saldo cai no mesmo m
   if (!(await denovo.count())) throw new Error(`a peça "${nomeDaPeca}" sumiu da busca depois do lançamento`);
   const depois = Number((await denovo.locator("b").last().innerText()).replace(/\D/g, "")) || 0;
   if (depois >= antes) throw new Error(`o saldo não caiu ao pegar a peça: antes ${antes}, depois ${depois}`);
+  await fecharQualquerDialogo();
+});
+
+await passo("baixar a OS em PDF entrega um arquivo de verdade, e o cupom continua no lugar", async () => {
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(2200);
+
+  // O cupom NÃO pode ter sumido: o pedido era acrescentar, não substituir.
+  const imprimir = p.locator(".order-actions .print-copies > button").first();
+  if (!(await imprimir.count())) throw new Error("o botão de imprimir cupom sumiu da OS");
+
+  const baixar = p.locator(".order-actions button", { hasText: /Baixar PDF/ }).first();
+  if (!(await baixar.count())) throw new Error("não achei o botão 'Baixar PDF' na OS");
+
+  // O arquivo tem de chegar. Sem isso o botão é enfeite.
+  const [arquivo] = await Promise.all([
+    p.waitForEvent("download", { timeout: 45000 }),
+    baixar.click(),
+  ]);
+  const nome = arquivo.suggestedFilename();
+  if (!/\.pdf$/.test(nome)) throw new Error(`o arquivo baixado não é PDF: "${nome}"`);
+  if (!/^OS-/.test(nome)) throw new Error(`o arquivo não leva o número da OS no nome: "${nome}"`);
+
+  const caminho = `${OUT}/e2e-os.pdf`;
+  await arquivo.saveAs(caminho);
+  const { readFileSync } = await import("node:fs");
+  const bytes = readFileSync(caminho);
+  if (bytes.subarray(0, 5).toString() !== "%PDF-") throw new Error("o arquivo baixado não começa como PDF");
+  if (bytes.length < 1200) throw new Error(`o PDF veio pequeno demais para ter conteúdo: ${bytes.length} bytes`);
+
   await fecharQualquerDialogo();
 });
 
