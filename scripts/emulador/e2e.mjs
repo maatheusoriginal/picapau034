@@ -30,7 +30,7 @@ const OUT = process.argv[2] ?? AQUI;
 const GRUPO = { "Ordens de serviço":"Oficina","Orçamentos":"Oficina","PDV Balcão":"Balcão","Serviço rápido":"Balcão",
   "Vendas do balcão":"Balcão","Produtos e estoque":"Estoque","Compras e entradas":"Estoque","Ajuste de estoque":"Estoque","Fornecedores":"Estoque",
   "Clientes":"Cadastros","Motocicletas":"Cadastros","Funcionários":"Cadastros","Financeiro":"Gestão",
-  "Contas a receber":"Gestão","Contas a pagar":"Gestão","Histórico de caixas":"Gestão","Relatórios":"Gestão" };
+  "Contas a receber":"Gestão","Contas a pagar":"Gestão","Histórico geral":"Gestão","Histórico de caixas":"Gestão","Relatórios":"Gestão" };
 
 // Banco limpo a cada execução: teste que depende do estado anterior não vale nada.
 await fetch("http://127.0.0.1:8080/emulator/v1/projects/picapau-teste/databases/(default)/documents", { method: "DELETE" });
@@ -2872,6 +2872,245 @@ await passo("o serviço rápido lista o atendimento do dia e imprime a via escol
   if (!(await p.locator(".print-copies-menu").count())) throw new Error("a OS não abriu o seletor de vias");
   await p.locator(".print-copies-menu button", { hasText: /^Via do cliente$/ }).first().click();
   await p.waitForTimeout(1200);
+  await fecharQualquerDialogo();
+});
+
+await passo("dá para pôr o nome do cliente depois de a OS estar aberta", async () => {
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(2200);
+
+  const campo = p.locator(".dialog-body.order-detail input").filter({ hasNot: p.locator("[type=date]") });
+  const cliente = p.locator('.dialog-body.order-detail .field:has(span:text-is("Cliente")) input').first();
+  if (!(await cliente.count())) throw new Error("a OS não tem campo de cliente para editar");
+
+  const nome = `DONO TARDIO ${Date.now().toString().slice(-4)}`;
+  await cliente.fill(nome);
+  const placa = p.locator('.dialog-body.order-detail .field:has(span:text-is("Placa")) input').first();
+  if (await placa.count()) await placa.fill("QQQ-1Q11");
+  await p.locator(".dialog-footer .primary-button").first().click();
+  await p.waitForTimeout(3500);
+  await fecharQualquerDialogo();
+  await p.waitForTimeout(1200);
+
+  // Voltou gravado? A lista da oficina mostra o nome novo.
+  const naLista = await p.locator(".orders-workspace").innerText();
+  if (!naLista.includes(nome)) throw new Error(`o nome informado depois não apareceu na lista da oficina: "${nome}"`);
+
+  // E o histórico da OS registra quem mexeu.
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(2200);
+  const linhaDoTempo = await p.locator(".order-timeline-list").innerText();
+  if (!/Cliente/.test(linhaDoTempo)) throw new Error("a troca de cliente não entrou no histórico da OS");
+  await fecharQualquerDialogo();
+  void campo;
+});
+
+await passo("o histórico geral junta OS encerrada, balcão e serviço rápido", async () => {
+  await ir("Histórico geral");
+  await p.waitForTimeout(2200);
+
+  const tela = await p.locator(".workspace, main, body").first().innerText();
+  if (/Ainda não passou nada pela oficina/.test(tela)) throw new Error("o histórico geral abriu vazio depois de todo o roteiro");
+
+  // "Todos" para não depender do recorte do dia.
+  const todos = p.locator(".report-period .filter-pills button", { hasText: /^Todos$/ }).first();
+  if (await todos.count()) { await todos.click(); await p.waitForTimeout(1500); }
+
+  const linhas = await p.locator("tbody tr").count();
+  if (linhas < 3) throw new Error(`o histórico geral trouxe só ${linhas} linha(s) depois de OS, venda e serviço rápido`);
+
+  // `text-transform: uppercase` no rótulo do tipo: o innerText do Playwright
+  // devolve o texto COMO ESTÁ NA TELA, então a comparação precisa ignorar caixa.
+  const texto = (await p.locator("tbody").first().innerText()).toUpperCase();
+  for (const tipo of ["Ordem de serviço", "PDV Balcão", "Serviço rápido"]) {
+    if (!texto.includes(tipo.toUpperCase())) throw new Error(`falta "${tipo}" no histórico geral`);
+  }
+
+  // Filtrar por tipo tem de recortar de verdade.
+  await p.locator(".report-period .filter-pills button", { hasText: /^Serviço rápido$/ }).first().click();
+  await p.waitForTimeout(1500);
+  const soRapido = (await p.locator("tbody").first().innerText()).toUpperCase();
+  if (soRapido.includes("PDV BALCÃO")) throw new Error("o filtro de tipo não recortou: o balcão continuou na lista");
+
+  // E a busca.
+  await p.locator(".report-period .filter-pills button", { hasText: /^Todos$/ }).first().click();
+  await p.waitForTimeout(1200);
+  await p.locator('input[aria-label="Buscar no histórico"]').fill("ZZZ-0000-NAO-EXISTE");
+  await p.waitForTimeout(1200);
+  if (await p.locator("tbody tr").count()) throw new Error("a busca do histórico não filtrou nada");
+});
+
+await passo("apagar OS devolve a peça ao estoque, e OS encerrada não some", async () => {
+  // 1. Uma OS nova, com peça, só para ser apagada.
+  await ir("Produtos e estoque");
+  await p.waitForTimeout(1500);
+  const saldoDe = async () => {
+    const linha = await p.locator("tbody tr", { hasText: /ÓLEO|Óleo/ }).first().innerText().catch(() => "");
+    const achado = linha.match(/(\d+)\s*(?:un|UN|$)/m) || linha.match(/\b(\d+)\b/);
+    return achado ? Number(achado[1]) : null;
+  };
+  void saldoDe;
+
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirNovaOS();
+  await preencherEtapa1({ nome: `DESCARTE ${Date.now().toString().slice(-4)}`, telefone: "34988881111", placa: "DEL-1D23", marca: "Honda", modelo: "CG 160" });
+  await irParaServico();
+  await p.locator(`${CAMADA} textarea`).first().fill("OS PARA APAGAR");
+  await conferirEAbrir();
+  await p.waitForTimeout(2000);
+
+  // 2. Abrir e apagar.
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirOSdaPlaca("DEL-1D23");
+  const numero = await p.locator(".dialog-body.order-detail .order-timeline-list li strong").first().innerText().catch(() => "");
+  void numero;
+
+  const apagar = p.locator(".order-actions .removal-trigger").first();
+  if (!(await apagar.count())) throw new Error("a OS não tem botão de apagar");
+  await apagar.click();
+  await p.waitForTimeout(900);
+  const caixa = p.locator(".removal-box").first();
+  if (!(await caixa.count())) throw new Error("o botão de apagar não abriu a confirmação");
+  const textoDaCaixa = await caixa.innerText();
+  if (!/Apagar esta ordem de serviço/.test(textoDaCaixa)) throw new Error(`a confirmação não pergunta antes de apagar: "${textoDaCaixa.slice(0, 120)}"`);
+  await caixa.locator("button", { hasText: /^Apagar/ }).first().click();
+  await p.waitForTimeout(3500);
+  await fecharQualquerDialogo();
+  await p.waitForTimeout(1500);
+
+  // 3. Sumiu da lista?
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1800);
+  const todas = p.locator(".order-status-filters button", { hasText: /^Todos\d*$/ }).first();
+  if (await todas.count()) { await todas.click(); await p.waitForTimeout(1500); }
+  const naLista = await p.locator(".orders-workspace").innerText();
+  if (naLista.includes("DEL-1D23")) throw new Error("a OS apagada continua na lista da oficina");
+
+  // 4. E a OS encerrada NÃO pode ser apagada: o dinheiro dela já entrou.
+  //
+  // O filtro é clicado SEM engolir a falha: antes eu tinha posto um catch aqui,
+  // e quando o clique não pegava o passo seguia com a lista de OS abertas — a
+  // prova dizia "OS encerrada aceitou a exclusão" sobre uma OS que nem estava
+  // encerrada. Teste que mente é pior do que teste que falta.
+  // O rótulo do filtro traz a CONTAGEM colada ("Entregues3"), então a âncora de
+  // fim de texto sozinha nunca casa.
+  const filtroEntregues = p.locator(".order-status-filters button", { hasText: /^Entregues\d*$/ }).first();
+  if (!(await filtroEntregues.count())) throw new Error("não achei o filtro 'Entregues' na tela da oficina");
+  await filtroEntregues.click();
+  await p.waitForTimeout(2000);
+  const encerradas = await p.locator(".work-order-card, tbody tr").count();
+  if (!encerradas) throw new Error("nenhuma OS entregue na lista para provar a trava do dinheiro");
+  {
+    await abrirPrimeiraOS();
+    await p.waitForTimeout(2200);
+    const botao = p.locator(".order-actions .removal-trigger").first();
+    if (await botao.count()) {
+      await botao.click();
+      await p.waitForTimeout(900);
+      const aviso = await p.locator(".removal-box").first().innerText();
+      if (!/não pode ser apagada/.test(aviso)) throw new Error(`OS encerrada aceitou a exclusão: "${aviso.slice(0, 160)}"`);
+      if (!/caixa/.test(aviso)) throw new Error("o aviso não explica que o valor entrou no caixa");
+      await p.locator(".removal-box button", { hasText: /Entendi/ }).first().click();
+      await p.waitForTimeout(800);
+    }
+    await fecharQualquerDialogo();
+  }
+});
+
+await passo("pegar peça: a peça entra NA OS escolhida e o saldo cai no mesmo movimento", async () => {
+  // Uma OS só desta prova, para não depender do que sobrou dos outros passos.
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirNovaOS();
+  await preencherEtapa1({ nome: `PEGA PECA ${Date.now().toString().slice(-4)}`, telefone: "34988882222", placa: "PEC-1A23", marca: "Honda", modelo: "CG 160" });
+  await irParaServico();
+  await p.locator(`${CAMADA} textarea`).first().fill("OS PARA PEGAR PECA");
+  await conferirEAbrir();
+  await p.waitForTimeout(2000);
+
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1200);
+  const pegar = p.locator(".heading-actions button", { hasText: /Pegar peça/ }).first();
+  if (!(await pegar.count())) throw new Error("não achei o botão 'Pegar peça' na tela de Ordens de serviço");
+  await pegar.click();
+  await p.waitForTimeout(1500);
+
+  /*
+    A peça é escolhida COM SALDO, pela própria lista do diálogo.
+
+    A rodada anterior pegava a primeira peça que casasse pelo nome, e no fim do
+    roteiro ela já estava zerada: o sistema recusou, certíssimo, e a prova
+    reprovou por um motivo que não era o que ela queria provar. O saldo de cada
+    peça está ali no resultado da busca, então é de lá que a escolha sai.
+  */
+  await p.locator(".take-part input").first().fill("a");
+  await p.waitForTimeout(1500);
+  const resultados = p.locator(".take-part-results button");
+  const quantos = await resultados.count();
+  if (!quantos) throw new Error("a busca do 'pegar peça' não trouxe peça nenhuma");
+  let escolhida = null;
+  let nomeDaPeca = "";
+  for (let indice = 0; indice < quantos; indice += 1) {
+    const linha = resultados.nth(indice);
+    const saldo = Number((await linha.locator("b").last().innerText()).replace(/\D/g, "")) || 0;
+    if (saldo >= 1) { escolhida = linha; nomeDaPeca = (await linha.locator("strong").first().innerText()).trim(); break; }
+  }
+  if (!escolhida) throw new Error("nenhuma peça com saldo na busca do 'pegar peça'");
+  await escolhida.click();
+  await p.waitForTimeout(900);
+
+  // O saldo de ANTES sai do próprio diálogo: "N em estoque".
+  const antesTexto = await p.locator(".take-part-chosen").first().innerText();
+  const antes = Number((antesTexto.match(/(\d+)\s+em estoque/) || [])[1] ?? "0");
+  if (!antes) throw new Error(`a peça escolhida ficou sem saldo: "${antesTexto}"`);
+
+  const seletorDaOS = p.locator(".take-part select").first();
+  const opcoes = await seletorDaOS.locator("option").allInnerTexts();
+  const daProva = opcoes.find((texto) => /PEC-1A23/.test(texto));
+  if (!daProva) throw new Error(`a OS da prova não apareceu na lista do 'para qual OS': ${opcoes.join(" | ")}`);
+  await seletorDaOS.selectOption({ label: daProva });
+  await p.waitForTimeout(800);
+
+  // A tela precisa dizer o que vai acontecer ANTES de confirmar.
+  const previa = await p.locator(".take-part .info-strip").first().innerText().catch(() => "");
+  if (!/Vai lançar/.test(previa)) throw new Error("a tela não mostrou a prévia do lançamento");
+
+  await p.locator(".dialog-footer .primary-button").first().click();
+  await p.waitForTimeout(3500);
+  const erroNaTela = await p.locator(".dialog-error-strip").first().innerText().catch(() => "");
+  if (erroNaTela.trim()) throw new Error(`o lançamento reclamou: "${erroNaTela.trim().slice(0, 200)}"`);
+  await fecharQualquerDialogo();
+  await p.waitForTimeout(1500);
+
+  // 1. A peça está DENTRO da OS?
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirOSdaPlaca("PEC-1A23");
+  await p.waitForTimeout(2200);
+  const naOS = await p.locator(".dialog-body.order-detail").innerText();
+  if (!naOS.toUpperCase().includes(nomeDaPeca.slice(0, 8).toUpperCase())) {
+    throw new Error(`a peça não entrou na OS. A OS mostra: ${naOS.slice(0, 400)}`);
+  }
+  // 2. E o histórico da OS registrou o lançamento?
+  if (!/Inclu/.test(naOS)) throw new Error("o lançamento da peça não entrou no histórico da OS");
+  await fecharQualquerDialogo();
+  await p.waitForTimeout(1200);
+
+  // 3. E o saldo caiu? Pergunta feita no mesmo lugar que deu o "antes".
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1200);
+  await p.locator(".heading-actions button", { hasText: /Pegar peça/ }).first().click();
+  await p.waitForTimeout(1500);
+  await p.locator(".take-part input").first().fill(nomeDaPeca.slice(0, 10));
+  await p.waitForTimeout(1500);
+  const denovo = p.locator(".take-part-results button").first();
+  if (!(await denovo.count())) throw new Error(`a peça "${nomeDaPeca}" sumiu da busca depois do lançamento`);
+  const depois = Number((await denovo.locator("b").last().innerText()).replace(/\D/g, "")) || 0;
+  if (depois >= antes) throw new Error(`o saldo não caiu ao pegar a peça: antes ${antes}, depois ${depois}`);
   await fecharQualquerDialogo();
 });
 

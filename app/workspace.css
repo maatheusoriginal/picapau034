@@ -313,3 +313,22 @@ table td strong, table td span { font-size: .875rem; }
 /* O cabeçalho do painel do serviço rápido ganhou o "Ver todos" ao lado do
    contador. */
 .panel-header-actions { display: flex; align-items: center; gap: 14px; }
+
+/* ---------------------------------------------------------------------------
+   Histórico geral
+
+   Uma linha por atendimento, das três origens. O tipo fica embaixo do nome,
+   numa terceira linha discreta: quem olha a tabela procura primeiro a pessoa e
+   o valor, e só depois quer saber se aquilo foi OS, balcão ou serviço rápido.
+   --------------------------------------------------------------------------- */
+.ledger-kind { display: block; margin-top: 2px; color: #a7a7ab; font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; }
+.ledger-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+@media(max-width:800px) { .ledger-row-actions { flex-wrap: wrap; justify-content: flex-start; } }
+
+/* O "Apagar OS" fica ao lado de imprimir e WhatsApp, mas em vermelho e sem
+   moldura: é ação destrutiva, não pode competir de igual para igual com as
+   outras duas nem ser clicada por engano na pressa do balcão. */
+.order-actions .removal-trigger { display: flex; align-items: center; height: 31px; padding: 0 10px; border: 0; background: transparent; color: #ab715a; font-size: .875rem; font-weight: 700; }
+.order-actions .removal-trigger:hover { color: #8c4a30; text-decoration: underline; }
+.removal-box .removal-exit { margin-top: 10px; }
+.removal-box .removal-error { margin-top: 12px; color: #a8412c; font-weight: 600; }

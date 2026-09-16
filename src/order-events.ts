@@ -98,6 +98,24 @@ export function changeEvents(
     if (retirados.length) anotar(`Retirado: ${retirados.join(", ")}`);
   }
 
+  // Cliente e moto corrigidos depois da abertura. É o caso da moto que chega no
+  // guincho: a OS abre sem nome e o nome aparece por telefone uma hora depois.
+  // Quem corrigiu e quando fica registrado, porque trocar o dono de uma OS é
+  // exatamente o tipo de mexida que alguém vai querer explicar um dia.
+  if (after.customer !== undefined && texto(after.customer) !== texto(before.customer) && texto(after.customer)) {
+    anotar(texto(before.customer)
+      ? `Cliente: ${texto(before.customer)} → ${texto(after.customer)}`
+      : `Cliente identificado: ${texto(after.customer)}`);
+  }
+
+  if (after.bike !== undefined && texto(after.bike) !== texto(before.bike) && texto(after.bike)) {
+    anotar(`Motocicleta: ${texto(after.bike)}`);
+  }
+
+  if (after.plate !== undefined && texto(after.plate) !== texto(before.plate) && texto(after.plate)) {
+    anotar(`Placa: ${texto(after.plate)}`);
+  }
+
   if (after.mechanic !== undefined && texto(after.mechanic) !== texto(before.mechanic) && texto(after.mechanic)) {
     anotar(`Mecânico: ${texto(after.mechanic)}`);
   }
