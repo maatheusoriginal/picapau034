@@ -16,7 +16,7 @@
 import { inflateSync } from "node:zlib";
 import { buildOrderPdfModel } from "../src/order-pdf";
 import { renderOrderPdf } from "../app/order-pdf-file";
-import type { ClientRecord, MotorcycleRecord, OrderRecord, SettingsConfig } from "../src/types";
+import type { ClientRecord, MotorcycleRecord, OrderRecord, ServiceOrderItem, SettingsConfig } from "../src/types";
 
 const settings: Partial<SettingsConfig> = {
   workshopName: "PICA PAU MOTOS", cnpj: "12.345.678/0001-90",
@@ -46,6 +46,49 @@ const osTipica: OrderRecord = {
   ],
   total: 360,
 };
+
+/*
+  A OS COMO A OFICINA PREENCHE DE VERDADE.
+
+  A de cima é a troca de óleo: dois itens, cadastro pela metade, textos curtos.
+  Ela sempre coube em uma folha — e foi por isso que o documento passou a ficar
+  com DUAS páginas sem ninguém perceber. Com o cliente tendo endereço e e-mail,
+  a moto tendo chassi e cilindrada, e o problema e o diagnóstico escritos por
+  extenso, o conteúdo passava de 340 mm numa folha que oferece 263 mm.
+
+  Este é o caso que o dono da oficina reclamou, então é o caso que fica escrito.
+*/
+const settingsCheio: Partial<SettingsConfig> = {
+  ...settings,
+  secondaryPhone: "(34) 99999-0000",
+  address: "AV. RONDON PACHECO, 1200 - CENTRO - UBERLANDIA/MG",
+  defaultOsNotes: "PECAS SUBSTITUIDAS FICAM A DISPOSICAO DO CLIENTE POR 30 DIAS.",
+};
+const clienteCheio: ClientRecord = {
+  ...cliente, name: "JOAO CARLOS DE OLIVEIRA SILVA",
+  address: "RUA DAS ACACIAS, 450, APTO 12 - BAIRRO SANTA MONICA - UBERLANDIA/MG",
+  email: "joao.oliveira@exemplo.com.br",
+};
+const motoCheia: MotorcycleRecord = { ...moto, chassis: "9C2KC1670LR123456", engineSize: "160" };
+
+const pecasDe = (quantas: number): ServiceOrderItem[] => {
+  const nomes = ["KIT RELACAO COM CORRENTE", "OLEO MOTOR 20W50 SEMISSINTETICO", "PASTILHA DE FREIO DIANTEIRA", "VELA DE IGNICAO NGK", "FILTRO DE AR", "ROLAMENTO DE RODA TRASEIRA", "CABO DE EMBREAGEM", "LAMPADA FAROL H4", "PNEU TRASEIRO 90/90-18", "CAMARA DE AR ARO 18", "RELE DE PARTIDA", "BATERIA 12V 5AH"];
+  return Array.from({ length: quantas }, (_, i) => ({ id: `PC${i}`, type: "Peça" as const, productId: `PRD-${i}`, name: nomes[i % nomes.length], price: 90 + i * 7, quantity: 1, cost: 40 + i * 3 }));
+};
+const servicosDe = (quantos: number): ServiceOrderItem[] => {
+  const nomes = ["TROCA DO KIT RELACAO", "TROCA DE OLEO E FILTRO", "REVISAO DOS FREIOS", "LIMPEZA DE CARBURADOR"];
+  return Array.from({ length: quantos }, (_, i) => ({ id: `MO${i}`, type: "Mão de obra" as const, name: nomes[i % nomes.length], price: 60 + i * 10 }));
+};
+
+const osCheia = (itens: ServiceOrderItem[]): OrderRecord => ({
+  ...osTipica, id: "OS-001650", customer: clienteCheio.name,
+  closedAt: "16/09/2026, 17:40", delivery: "16/09/2026", priority: "Normal",
+  fuelLevel: "1/2 TANQUE", mileage: "41200",
+  problem: "MOTO FALHANDO EM ALTA ROTACAO, BARULHO NA CORRENTE, FREIO DIANTEIRO RASPANDO E FAROL QUEIMADO. CLIENTE RELATA QUE COMECOU DEPOIS DE PEGAR CHUVA FORTE NA SEMANA PASSADA.",
+  solution: "SUBSTITUIDO KIT RELACAO COMPLETO, TROCADO OLEO E FILTRO, PASTILHAS DIANTEIRAS SUBSTITUIDAS, CARBURADOR LIMPO E REGULADO, LAMPADA DO FAROL TROCADA. TESTE DE RODAGEM REALIZADO SEM FALHAS.",
+  notes: "CLIENTE PEDIU PARA AVISAR NO WHATSAPP ANTES DE ENTREGAR. PROXIMA REVISAO EM 3000 KM.",
+  items: itens,
+});
 
 /**
  * Lê o texto escrito no PDF.
@@ -132,6 +175,52 @@ async function main() {
     // A oficina pediu para NÃO ter assinatura neste documento.
     ["e não há campo de assinatura", /assinatura/i.test(texto), false],
   ];
+
+  /*
+    UMA FOLHA SÓ, com a OS cheia.
+
+    Cabe numa página é metade do que interessa: o documento também cabe se
+    alguém resolver esconder o endereço, o chassi ou o diagnóstico. Então cada
+    informação que a folha ganhou de aperto é procurada dentro do arquivo
+    gerado, uma por uma.
+  */
+  const cheia = await renderOrderPdf(buildOrderPdfModel({
+    order: osCheia([...servicosDe(4), ...pecasDe(14)]),
+    client: clienteCheio, motorcycle: motoCheia, settings: settingsCheio, mechanics: "RONALDO + CARLOS",
+  }));
+  const textoCheia = textoDoPdf(Buffer.from(cheia.output("arraybuffer")));
+  casos.push(
+    ["a OS cheia, com 18 itens e cadastro completo, cabe em uma folha", cheia.getNumberOfPages(), 1],
+    ["e nada foi escondido para caber: o endereço continua lá", textoCheia.includes("RUA DAS ACACIAS"), true],
+    ["o e-mail", textoCheia.includes("joao.oliveira@exemplo.com.br"), true],
+    ["o chassi", textoCheia.includes("9C2KC1670LR123456"), true],
+    ["a quilometragem", textoCheia.includes("41.200 km"), true],
+    ["o combustível na entrada", textoCheia.includes("1/2 TANQUE"), true],
+    ["a data de fechamento", textoCheia.includes("17:40"), true],
+    ["o problema relatado, por extenso", textoCheia.includes("PEGAR CHUVA FORTE NA SEMANA PASSADA"), true],
+    ["o diagnóstico, por extenso", textoCheia.includes("TESTE DE RODAGEM REALIZADO SEM FALHAS"), true],
+    ["as observações", textoCheia.includes("PROXIMA REVISAO EM 3000 KM"), true],
+    ["a primeira peça da lista", textoCheia.includes("KIT RELACAO COM CORRENTE"), true],
+    ["e a última, que é a que sumiria se a folha cortasse", textoCheia.includes("BATERIA 12V 5AH"), true],
+    ["o custo continua fora do arquivo", /\bcusto|\bmargem|\blucro/i.test(textoCheia), false],
+  );
+
+  /*
+    E o piso: OS gigante NÃO vira uma folha ilegível.
+
+    O ajuste de escala poderia, em tese, espremer 40 itens numa página em letra
+    de bula. Isso caberia e não serviria para nada. Abaixo do piso o documento
+    aceita a segunda folha — este caso existe para provar que o piso segura.
+  */
+  const gigante = await renderOrderPdf(buildOrderPdfModel({
+    order: osCheia([...servicosDe(4), ...pecasDe(36)]),
+    client: clienteCheio, motorcycle: motoCheia, settings: settingsCheio, mechanics: "RONALDO",
+  }));
+  casos.push(
+    ["OS de 40 itens prefere a segunda folha a ficar ilegível", gigante.getNumberOfPages() > 1, true],
+    ["e aí sim a paginação aparece", textoDoPdf(Buffer.from(gigante.output("arraybuffer"))).includes("Página 1 de"), true],
+    ["que a de uma folha não mostra", texto.includes("Página 1 de"), false],
+  );
 
   let falhas = 0;
   for (const [nome, obtido, esperado] of casos) {
