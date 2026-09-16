@@ -13,7 +13,7 @@ import { AttendanceSummary, AttendanceReview, type AttendanceSummaryProps } from
 import { OrderItemsEditor } from "../src/components/OrderItemsEditor";
 import { Icon } from "../src/components/WorkshopIcon";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { defaultPaymentMachines, defaultPaymentMethods, defaultProductCategories, isMechanicUser, orDefault, serviceOrderStatuses, statusTone, systemList } from "../src/types";
+import { defaultPaymentMachines, normalizeOrderStatus, defaultPaymentMethods, defaultProductCategories, isMechanicUser, orDefault, serviceOrderStatuses, statusTone, systemList } from "../src/types";
 import { NumberField } from "../src/components/NumberField";
 import { MoneyField } from "../src/components/MoneyField";
 import { formatTyped, valorDigitado } from "../src/number-input";
@@ -29,6 +29,7 @@ import { emMaiusculo } from "../src/text-case";
 import { dataBrasileira, problemasDaOSAntiga, registroDaOSAntiga, separarMarcaEModelo } from "../src/backfill";
 import { acharPecas, itensDepoisDePegar, osQuePodemReceber, problemasDoPedido, rotuloDaOS, textoDoLancamento, totalDepoisDePegar } from "../src/take-part";
 import { appendEvents, changeEvents, eventStamp, eventTime, orderEvent, orderTimeline } from "../src/order-events";
+import { buildReturnPlan, canReturn } from "../src/order-return";
 import { mensagemDoErro } from "../src/firebase-errors";
 import { clientHistory, motorcycleHistory } from "../src/history";
 import { employeeForAccount, employeeFromAccount, mechanicsForOrders, mechanicsWithoutEmployee, type AccessAccount } from "../src/team-link";
@@ -1967,7 +1968,7 @@ function AdminWorkspace({
   const summary = useMemo(() => financeSummary(sales, orders, expenses, accounts), [sales, orders, expenses, accounts]);
   const activeUsers = users.filter((user) => user.active !== false);
   const lowStock = products.filter((product) => product.stock <= product.minimum);
-  const openOrders = orders.filter((order) => !order.closed && order.status !== "Entrega");
+  const openOrders = orders.filter((order) => !order.closed && normalizeOrderStatus(order.status) !== "Finalizada");
   const activeMethods = paymentMethods.filter((method) => method.active);
   const activeMachines = paymentMachines.filter((machine) => machine.active);
   const activeQuickServices = quickServices.filter((service) => service.active);
@@ -2198,6 +2199,7 @@ export function ModuleWorkspace({
   viewerIsMechanic,
   canCheckoutOrders,
   onAdvanceOrder,
+  onReturnOrder,
   openSettings,
   settingsTab,
   settings,
@@ -2245,6 +2247,8 @@ export function ModuleWorkspace({
   /** Pode cobrar o cliente e encerrar a OS sem abrir o financeiro. */
   canCheckoutOrders: boolean;
   onAdvanceOrder: (order: OrderRecord, status: ServiceOrderStatus, mechanicIds: string[]) => Promise<void>;
+  /** Abrir a OS de retorno de uma moto já entregue. */
+  onReturnOrder: (order: OrderRecord) => Promise<void>;
   openSettings: (tab: SettingsTab) => void;
   settingsTab: SettingsTab;
   settings: Partial<SettingsConfig> | null;
@@ -2325,7 +2329,7 @@ export function ModuleWorkspace({
             {/* A moto está pronta e ele pode receber: o caminho antigo era
                 abrir a OS e procurar o botão lá dentro. Com a mão suja, no
                 celular, isso é um toque a mais em cima de outro. */}
-            {order.status === "Entrega" && canCheckoutOrders
+            {normalizeOrderStatus(order.status) === "Finalizada" && canCheckoutOrders
               ? <button className="primary-button" onClick={() => openDialog("order", order.id)}>Receber</button> : null}
             {row.actions.filter(() => canOperate).map((action) => (
               <button key={action.label} onClick={() => void onAdvanceOrder(order, action.target, mechanicsAfterTaking(order, viewerEmployeeId, allowMultiple))
@@ -2399,7 +2403,7 @@ export function ModuleWorkspace({
     );
   }
 
-  if (active === "Ordens de serviço" || active === "Orçamentos") return <OrdersWorkspace orders={orders} budget={active === "Orçamentos"} canCreate={canCreateOrders} canTakePart={canOperate} openDialog={openDialog} initialFilter={initialFilter} canMove={canOperate} onMove={(order, status) => onAdvanceOrder(order, status, order.mechanicIds ?? [])}/>;
+  if (active === "Ordens de serviço" || active === "Orçamentos") return <OrdersWorkspace orders={orders} budget={active === "Orçamentos"} canCreate={canCreateOrders} canTakePart={canOperate} openDialog={openDialog} initialFilter={initialFilter} canMove={canOperate} onMove={(order, status) => onAdvanceOrder(order, status, order.mechanicIds ?? [])} onReturn={canCreateOrders ? onReturnOrder : undefined}/>;
 
   if (active === "Produtos e estoque") {
     // A lista do balcão: procurar por código, referência de fábrica, código de
@@ -2994,7 +2998,7 @@ export function AppDialog({
   // estado deixado pela ordem aberta anteriormente.
   useEffect(() => {
     if (dialog !== "order" || !currentOrder) return;
-    setOrderStatus((serviceOrderStatuses as readonly string[]).includes(currentOrder.status) ? currentOrder.status as ServiceOrderStatus : "Recepção");
+    setOrderStatus(normalizeOrderStatus(currentOrder.status));
     setOrderMechanicIds(currentOrder.mechanicIds?.length ? currentOrder.mechanicIds : []);
     setOrderItems((currentOrder.items ?? []).map((item) => ({ ...item })));
     setOrderCustomer(currentOrder.customerPending ? "" : currentOrder.customer || "");
@@ -3681,7 +3685,7 @@ export function AppDialog({
 
     // Com a trava desligada, a peça já sai do estoque na abertura; com ela
     // ligada, a OS nasce sem reservar nada e a baixa espera o serviço começar.
-    const reservedOnCreate = shouldReserveStock("Recepção", deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(osItems) : [];
+    const reservedOnCreate = shouldReserveStock("Em avaliação", deductStockOnlyWhenStarted, serviceOrderStatuses) ? partsOf(osItems) : [];
     // A abertura é o primeiro carimbo do histórico da OS, e é o mesmo instante
     // que vai para `time`: os dois precisam bater, senão a linha do tempo
     // contradiz o cabeçalho da própria OS.
@@ -3700,8 +3704,8 @@ export function AppDialog({
       // que volta depois de um ano, o papel não dizia se foi este setembro ou
       // o passado, que é exatamente o que o histórico existe para responder.
       time: aberturaEm,
-      status: "Recepção",
-      tone: statusTone("Recepção"),
+      status: "Em avaliação",
+      tone: statusTone("Em avaliação"),
       items: osItems,
       problem: osProblem,
       mileage: osMileage,
@@ -4347,8 +4351,8 @@ export function AppDialog({
           await saveOrderWithStock(currentOrder.id, {
             items: checkoutItems,
             total: checkoutTotal,
-            status: "Entrega",
-            tone: statusTone("Entrega"),
+            status: "Finalizada",
+            tone: statusTone("Finalizada"),
             paymentMethod: splitPayment ? (effectivePayments[0]?.method ?? paymentMethod) : paymentMethod,
             ...(splitPayment ? { payments: effectivePayments } : {}),
             closed: true,
@@ -4361,7 +4365,7 @@ export function AppDialog({
             // porque "encerrada" sem dizer como o dinheiro entrou não responde
             // nada de útil depois.
             events: appendEvents(currentOrder.events, [
-              ...changeEvents(currentOrder, { items: checkoutItems, status: "Entrega" }, operadorAtual, fechadoEm.toISOString()),
+              ...changeEvents(currentOrder, { items: checkoutItems, status: "Finalizada" }, operadorAtual, fechadoEm.toISOString()),
               orderEvent(`Encerrada · ${splitPayment ? (effectivePayments[0]?.method ?? paymentMethod) : paymentMethod} · ${formatBRL(checkoutTotal)}`, operadorAtual, fechadoEm.toISOString()),
             ]),
             ...(faltamDados ? {
@@ -4400,7 +4404,7 @@ export function AppDialog({
               notify(`${currentOrder.id} encerrada, mas a conta a receber não foi criada: ${error instanceof Error ? error.message : "erro desconhecido"}. Lance a cobrança em Contas a receber.`);
             }
           }
-          printOrder({ ...currentOrder, items: checkoutItems, total: checkoutTotal, status: "Entrega", paymentMethod });
+          printOrder({ ...currentOrder, items: checkoutItems, total: checkoutTotal, status: "Finalizada", paymentMethod });
         }
       } catch (error) {
         setSaving(false);
@@ -4796,7 +4800,7 @@ export function AppDialog({
     record: "Fechar",
   };
 
-  if (attendanceSaved) return <div className="dialog-layer attendance-layer"><section className="dialog attendance-dialog attendance-success" role="dialog" aria-modal="true" aria-labelledby="attendance-success-title"><header className="dialog-header"><div><span>Atendimento registrado</span></div><button type="button" aria-label="Fechar confirmação" onClick={() => finish(`${attendanceSaved.id} salvo com sucesso.`)}>×</button></header><div className="dialog-body"><span className="attendance-success-icon"><Icon name="check" size={32}/></span><p className="attendance-success-id">{attendanceSaved.id}</p><h2 id="attendance-success-title" tabIndex={-1}>{attendanceSaved.kind === "os" ? "Ordem de serviço aberta!" : "Serviço rápido registrado!"}</h2><p>{attendanceSaved.kind === "os" ? "A moto já está na fila da oficina, na etapa Recepção." : "O lançamento está disponível no histórico de serviços rápidos."}</p><div className="attendance-success-detail"><strong>{attendanceSaved.customer}</strong><span>{[attendanceSaved.bike, attendanceSaved.plate].filter(Boolean).join(" · ") || "Atendimento sem motocicleta informada"}</span><b>{formatBRL(attendanceSaved.total)}</b></div></div><footer className="dialog-footer"><button type="button" className="outline-button" onClick={() => changeDialog("osChoice")}>Novo atendimento</button>{attendanceSaved.kind === "os" ? <button type="button" className="primary-button" onClick={() => changeDialog("order", attendanceSaved.id)}>Acompanhar OS <Icon name="arrow" size={18}/></button> : <button type="button" className="primary-button" onClick={() => finish(`${attendanceSaved.id} salvo com sucesso.`)}>Concluir <Icon name="check" size={18}/></button>}</footer></section></div>;
+  if (attendanceSaved) return <div className="dialog-layer attendance-layer"><section className="dialog attendance-dialog attendance-success" role="dialog" aria-modal="true" aria-labelledby="attendance-success-title"><header className="dialog-header"><div><span>Atendimento registrado</span></div><button type="button" aria-label="Fechar confirmação" onClick={() => finish(`${attendanceSaved.id} salvo com sucesso.`)}>×</button></header><div className="dialog-body"><span className="attendance-success-icon"><Icon name="check" size={32}/></span><p className="attendance-success-id">{attendanceSaved.id}</p><h2 id="attendance-success-title" tabIndex={-1}>{attendanceSaved.kind === "os" ? "Ordem de serviço aberta!" : "Serviço rápido registrado!"}</h2><p>{attendanceSaved.kind === "os" ? "A moto já está na fila da oficina, na etapa Em avaliação." : "O lançamento está disponível no histórico de serviços rápidos."}</p><div className="attendance-success-detail"><strong>{attendanceSaved.customer}</strong><span>{[attendanceSaved.bike, attendanceSaved.plate].filter(Boolean).join(" · ") || "Atendimento sem motocicleta informada"}</span><b>{formatBRL(attendanceSaved.total)}</b></div></div><footer className="dialog-footer"><button type="button" className="outline-button" onClick={() => changeDialog("osChoice")}>Novo atendimento</button>{attendanceSaved.kind === "os" ? <button type="button" className="primary-button" onClick={() => changeDialog("order", attendanceSaved.id)}>Acompanhar OS <Icon name="arrow" size={18}/></button> : <button type="button" className="primary-button" onClick={() => finish(`${attendanceSaved.id} salvo com sucesso.`)}>Concluir <Icon name="check" size={18}/></button>}</footer></section></div>;
 
   return (
     <div className={`dialog-layer ${["os", "osChoice", "quick", "osPast"].includes(dialog) ? "attendance-layer" : ""}`} role="presentation" onMouseDown={(event) => !saving && event.target === event.currentTarget && close()}>
@@ -5689,8 +5693,8 @@ export function AppDialog({
           <div className="dialog-body order-detail">
             {currentOrder ? (
               <>
-                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{currentOrder.closed ? "Entregue e encerrada" : orderStatus === "Entrega" ? "Pronta para entrega" : orderStatus}</span><div className="order-actions"><PrintCopiesMenu label={settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"} onPrint={(choice) => printOrder(currentOrder, choice)}/><button disabled={baixandoPdf} onClick={() => void baixarOrdemEmPdf(currentOrder)}><Icon name="file" size={16}/>{baixandoPdf ? "Gerando..." : "Baixar PDF"}</button><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button><OrderRemovalButton order={currentOrder} podeApagar={canOperate} actor={{ uid: currentUser?.uid ?? "", name: operadorAtual }} notify={notify} onRemoved={() => close()}/></div></div>
-                <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Entrega" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select disabled={!canOperate || !!currentOrder.closed} value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as ServiceOrderStatus)}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button disabled={!canOperate || !!currentOrder.closed} className={orderStatus === "Entrega" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Entrega" ? "Em serviço" : "Entrega")}><Icon name={orderStatus === "Entrega" ? "wrench" : "check"} size={17}/>{orderStatus === "Entrega" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
+                <div className="order-detail-top"><span className={`status ${orderStatusTone}`}><i/>{currentOrder.closed ? "Entregue e encerrada" : orderStatus}</span><div className="order-actions"><PrintCopiesMenu label={settings?.printThreeCopies !== false ? "Imprimir 3 vias" : "Imprimir OS"} onPrint={(choice) => printOrder(currentOrder, choice)}/><button disabled={baixandoPdf} onClick={() => void baixarOrdemEmPdf(currentOrder)}><Icon name="file" size={16}/>{baixandoPdf ? "Gerando..." : "Baixar PDF"}</button><button onClick={() => sendOrderWhatsapp(currentOrder)}><Icon name="arrow" size={16}/>WhatsApp</button><OrderRemovalButton order={currentOrder} podeApagar={canOperate} actor={{ uid: currentUser?.uid ?? "", name: operadorAtual }} notify={notify} onRemoved={() => close()}/></div></div>
+                <section className="order-status-control"><div><span>Situação atual da OS</span><strong>{orderStatus === "Finalizada" ? "Serviço pronto — aguardando entrega" : orderStatus}</strong><small>Os mecânicos atribuídos podem atualizar esta situação.</small></div><label className="field"><span>Alterar situação</span><select disabled={!canOperate || !!currentOrder.closed} value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as ServiceOrderStatus)}>{serviceOrderStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><button disabled={!canOperate || !!currentOrder.closed} className={orderStatus === "Finalizada" ? "ready-action done" : "ready-action"} onClick={() => setOrderStatus(orderStatus === "Finalizada" ? "Em serviço" : "Finalizada")}><Icon name={orderStatus === "Finalizada" ? "wrench" : "check"} size={17}/>{orderStatus === "Finalizada" ? "Voltar para em serviço" : "Marcar como pronta"}</button></section>
                 <div className="order-info-grid"><div><span>Cliente / pagador</span><strong>{currentOrder.customer}</strong><small>{currentOrder.origin}</small></div><div><span>Motocicleta</span><strong>{currentOrder.bike}</strong><small>{currentOrder.plate}</small></div><div><span>Mecânicos</span><strong>{orderMechanics.map((mechanic) => mechanic.name).join(" + ") || currentOrder.mechanic}</strong><small>{orderMechanics.length || 1} responsável(is)</small></div><div><span>Previsão</span><strong>{currentOrder.delivery}</strong><small>Prioridade {currentOrder.priority}</small></div></div>
                 {/* Cliente e moto, editáveis com a OS aberta.
                     A moto chega no guincho, ou o cliente deixa e sai correndo:
@@ -5892,7 +5896,7 @@ export function AppDialog({
           <div className="intake-footer-actions"><button type="button" className="outline-button" disabled={saving || Boolean(pendingOrder.current)} onClick={() => step === 1 ? close() : goToIntakeStep(step - 1)}>{step === 1 ? "Cancelar" : "Voltar"}</button><button type="button" className="primary-button" disabled={saving || !canOperate} onClick={() => step < 3 ? goToIntakeStep(step + 1) : void submit()}>{saving ? "Salvando..." : pendingOrder.current ? "Concluir baixa das peças" : step === 1 ? "Ir para serviço" : step === 2 ? "Conferir atendimento" : "Abrir ordem de serviço"}<Icon name={step === 3 ? "check" : "arrow"} size={18}/></button></div>
         </footer> : dialog !== "osChoice" ? <footer className="dialog-footer">
           <button className="ghost-button" onClick={close} disabled={saving}>Cancelar</button>
-          <div>{dialog === "order" && currentOrder && !currentOrder.closed && orderStatus === "Entrega" && canCheckoutOrders && <button className="outline-button" disabled={saving} onClick={() => void receiveOrder()}>Receber e entregar <Icon name="wallet" size={16}/></button>}
+          <div>{dialog === "order" && currentOrder && !currentOrder.closed && orderStatus === "Finalizada" && canCheckoutOrders && <button className="outline-button" disabled={saving} onClick={() => void receiveOrder()}>Receber e entregar <Icon name="wallet" size={16}/></button>}
           {canOperate && !(dialog === "order" && currentOrder?.closed) ? <button className="primary-button" disabled={saving} onClick={() => void submit()}>{saving ? "Salvando..." : dialog === "quick" ? `Confirmar · ${formatBRL(quickTotal)}` : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button> : <span className="readonly-footer">Somente consulta</span>}</div>
         </footer> : <footer className="dialog-footer choice-footer"><span>Escolha uma opção para começar.</span><button className="ghost-button" onClick={close}>Cancelar</button></footer>}
 
@@ -6343,6 +6347,42 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
     }, stockDeltas(target, reserved));
   }, [workshopSettings, users, currentUserName]);
 
+  /**
+   * A moto voltou: abre a OS de retorno ligada à que já foi entregue.
+   *
+   * O que a oficina ganha é não redigitar cliente, moto, placa e parceira. O
+   * que ela NÃO pode ganhar é a conta do serviço anterior de novo — por isso a
+   * OS nova nasce sem itens e sem valor (ver src/order-return.ts, conferido em
+   * `npm run check:order-return`).
+   *
+   * A OS antiga não é tocada no dinheiro: recebe só uma linha no histórico
+   * dizendo para onde a moto foi. Reabri-la faria um caixa já fechado voltar a
+   * ter OS aberta dentro.
+   */
+  const abrirRetorno = useCallback(async (order: OrderRecord) => {
+    if (!canReturn(order)) { notify(`A ${order.id} ainda não foi entregue: não há retorno a abrir.`); return; }
+    const agora = new Date();
+    const prefixo = workshopSettings?.osPrefix || "OS";
+    const plano = buildReturnPlan({
+      order,
+      novoId: "",
+      quando: agora.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+      quem: currentUserName,
+    });
+    try {
+      const novoId = await createServiceOrder(prefixo, highestSequence(orders, prefixo) + 1, plano.novaOrdem);
+      // A marca na OS antiga só é escrita DEPOIS de a nova existir, e com o
+      // número dela: apontar para uma OS que falhou ao nascer seria pior do
+      // que não apontar para nada.
+      const marca = buildReturnPlan({ order, novoId, quando: "", quem: currentUserName }).marcaNaAntiga;
+      await saveFirestoreDoc("serviceOrders", order.id, { events: appendEvents(order.events, [marca]) });
+      notify(`${novoId} aberta como retorno da ${order.id}.`);
+      openDialog("order", novoId);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Não foi possível abrir o retorno.");
+    }
+  }, [orders, workshopSettings, currentUserName]);
+
   const dashboardCash = openSession(cashSessions);
   const dashboardDrawer = cashSummary(dashboardCash, { sales, orders, expenses, accounts }).expected;
 
@@ -6414,11 +6454,11 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
   const goToSearchResult = (destination: string, filter = "") => { navigateTo(destination, filter); setShowNotifications(false); };
   const notices = [
     ...(canViewOrders && orders.some((order) => orderIsLate(order)) ? [{ title: `${orders.filter((order) => orderIsLate(order)).length} OS com prazo vencido`, detail: "Conferir prazo e atualizar o cliente", destination: "Ordens de serviço", filter: "Atrasadas", icon: "clock" as IconName }] : []),
-    ...(canViewOrders && orders.some((order) => !order.closed && order.status === "Aprovação") ? [{ title: `${orders.filter((order) => !order.closed && order.status === "Aprovação").length} aguardando aprovação`, detail: "Retornar ao cliente", destination: "Ordens de serviço", filter: "Aprovação", icon: "file" as IconName }] : []),
+    ...(canViewOrders && orders.some((order) => !order.closed && normalizeOrderStatus(order.status) === "Em avaliação") ? [{ title: `${orders.filter((order) => !order.closed && normalizeOrderStatus(order.status) === "Em avaliação").length} em avaliação`, detail: "Ainda fora da bancada", destination: "Ordens de serviço", filter: "Em avaliação", icon: "file" as IconName }] : []),
     ...(canViewInventory && products.some(lowStock) ? [{ title: `${products.filter(lowStock).length} peças para repor`, detail: "Consultar estoque e reposição", destination: "Produtos e estoque", filter: "Reposição", icon: "box" as IconName }] : []),
     ...(canSeeFinance && summary.overdueCount ? [{ title: `${summary.overdueCount} contas vencidas`, detail: formatBRL(summary.overdueExpenses), destination: "Contas a pagar", filter: "", icon: "wallet" as IconName }] : []),
   ];
-  const badges: Record<string, number> = { "Ordens de serviço": orders.filter((order) => !order.closed).length, "Orçamentos": orders.filter((order) => !order.closed && order.status === "Aprovação").length, "Produtos e estoque": products.filter(lowStock).length, "Contas a pagar": summary.overdueCount, "PDV Balcão": cart.length + parked.length };
+  const badges: Record<string, number> = { "Ordens de serviço": orders.filter((order) => !order.closed).length, "Orçamentos": orders.filter((order) => !order.closed && normalizeOrderStatus(order.status) === "Em avaliação").length, "Produtos e estoque": products.filter(lowStock).length, "Contas a pagar": summary.overdueCount, "PDV Balcão": cart.length + parked.length };
 
   return (
     <main className={`app-shell workshop-v3 ${sidebarHidden ? "sidebar-hidden" : ""}`} onClickCapture={(event) => { if (dialog && (event.target as HTMLElement).closest(".ready-action, .mechanic-picker button, .order-progress button, .editable-order-line button, .order-item-result, .attendance-dialog .os-search-results button, .attendance-dialog .vehicle-choice-list button, .attendance-dialog .os-search-actions button, .attendance-dialog .os-party-switch button, .attendance-dialog .quick-service-options button, .attendance-dialog .intake-duplicate button")) dirtyDialog.current = true; }} onInputCapture={() => { if (dialog) dirtyDialog.current = true; }} onChangeCapture={() => { if (dialog) dirtyDialog.current = true; }}>
@@ -6516,7 +6556,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
           {active === "Visão geral" ? (
           <OperationsOverview name={currentUserName} orders={orders} products={products} summary={summary} cash={dashboardCash ?? undefined} drawer={dashboardDrawer} can={hasPermission} navigate={navigateTo} openDialog={openDialog}/>
           ) : (
-            <ModuleWorkspace key={`${active}:${navRevision}`} canCheckoutOrders={canCheckoutOrders} initialFilter={moduleFilter} initialQuery={moduleQuery} stockEntries={stockEntries} parked={parked} setParked={setParked} canManageFinance={canManageFinance} canManageSettings={canManageSettings} stockAdjustments={stockAdjustments} active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
+            <ModuleWorkspace key={`${active}:${navRevision}`} canCheckoutOrders={canCheckoutOrders} initialFilter={moduleFilter} initialQuery={moduleQuery} stockEntries={stockEntries} parked={parked} setParked={setParked} canManageFinance={canManageFinance} canManageSettings={canManageSettings} stockAdjustments={stockAdjustments} active={active} canOperate={canOperate} canCreateOrders={canCreateOrders} firebaseConnected={firebaseEnabled} currentFirebaseUser={firebaseSession.user} openFirebaseAccess={() => notify("Sua sessão está conectada ao Firebase.")} openDialog={openDialog} notify={notify} navigate={setActive} expenses={expenses} users={users} setUsers={setUsers} partners={partners} setPartners={setPartners} quickServices={quickServices} setQuickServices={setQuickServices} categories={categories} setCategories={setCategories} suppliers={suppliers} setSuppliers={setSuppliers} paymentMachines={paymentMachines} setPaymentMachines={setPaymentMachines} paymentMethods={paymentMethods} setPaymentMethods={setPaymentMethods} orders={orders} products={products} clients={clients} motorcycles={motorcycles} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} accounts={accounts} cashSessions={cashSessions} movements={movements} viewerEmployeeId={firebaseSession.profile?.employeeId ?? ""} viewerIsMechanic={firebaseSession.profile?.role === "Mecânico"} onAdvanceOrder={advanceOrder} onReturnOrder={abrirRetorno} openSettings={openSettings} settingsTab={settingsTab} settings={workshopSettings}/>
           )}
         </div>
       </section>

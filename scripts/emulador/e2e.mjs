@@ -3196,17 +3196,23 @@ await passo("arrastar o card no quadro muda a etapa da OS, e no celular a régua
 
   // As seis etapas da oficina viram seis colunas. Menos que isso e alguma moto
   // fica sem lugar para estar.
+  // Quatro etapas: Em avaliação, Em serviço, Aguardando peça e Finalizada.
   const colunas = await p.locator(".order-board-column").count();
-  if (colunas !== 6) problemas.push(`o quadro tem ${colunas} coluna(s), e a oficina tem 6 etapas`);
+  if (colunas !== 4) problemas.push(`o quadro tem ${colunas} coluna(s), e a oficina tem 4 etapas`);
+  const etapas = await p.locator(".order-board-column > header span").allInnerTexts();
+  const esperadas = ["Em avaliação", "Em serviço", "Aguardando peça", "Finalizada"];
+  if (etapas.join("|") !== esperadas.join("|")) problemas.push(`as etapas do quadro são [${etapas.join(", ")}] e deveriam ser [${esperadas.join(", ")}]`);
 
   const card = p.locator(".board-card").first();
   if (!(await card.count())) throw new Error("nenhuma OS no quadro para arrastar");
   const osArrastada = (await card.locator(".order-number").first().innerText()).trim();
-  const antes = (await banco("serviceOrders")).find((o) => o.id === osArrastada);
+  // O número da OS é o NOME do documento (`_id`), não um campo: a OS criada
+  // pelo sistema não grava `id` dentro dela.
+  const antes = (await banco("serviceOrders")).find((o) => o._id === osArrastada);
   if (!antes) throw new Error(`não achei a OS ${osArrastada} no banco`);
 
   // Para onde arrastar: uma etapa diferente da atual.
-  const destino = antes.status === "Avaliação" ? "Aprovação" : "Avaliação";
+  const destino = antes.status === "Em serviço" ? "Aguardando peça" : "Em serviço";
   const coluna = p.locator(`.order-board-column[data-status="${destino}"]`).first();
   if (!(await coluna.count())) throw new Error(`não achei a coluna "${destino}"`);
   // Seis colunas não cabem numa tela: a de destino precisa estar VISÍVEL, senão
@@ -3241,7 +3247,7 @@ await passo("arrastar o card no quadro muda a etapa da OS, e no celular a régua
   await p.mouse.up();
   await p.waitForTimeout(2600);
 
-  const depois = (await banco("serviceOrders")).find((o) => o.id === osArrastada);
+  const depois = (await banco("serviceOrders")).find((o) => o._id === osArrastada);
   if (depois?.status !== destino) {
     problemas.push(`arrastei a OS ${osArrastada} para "${destino}" e o banco continua em "${depois?.status}"`);
   } else {
@@ -3317,6 +3323,64 @@ await passo("a moto da OS é escolhida pelo catálogo, igual ao cadastro de moto
   if (!comHonda.length) problemas.push("escolhi Honda / CG 160 / Fan ESDI e nenhuma OS no banco ficou com esse texto");
 
   if (problemas.length) throw new Error("moto da OS pelo catálogo:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("a moto entregue volta em retorno: OS nova com o cadastro e sem a conta antiga", async () => {
+  await ir("Ordens de serviço");
+  await visaoDaOficina("Cartões");
+  await p.waitForTimeout(1000);
+
+  const problemas = [];
+  const filtro = p.locator(".order-status-filters button", { hasText: /^Finalizadas \(/ }).first();
+  if (!(await filtro.count())) throw new Error("não achei o filtro das finalizadas entregues");
+  await filtro.click();
+  await p.waitForTimeout(2000);
+
+  const cartao = p.locator(".work-order-card").first();
+  if (!(await cartao.count())) throw new Error("nenhuma OS entregue para provar o retorno");
+  const original = (await cartao.locator(".order-number").first().innerText()).trim().split(" ")[0];
+  const antes = (await banco("serviceOrders")).find((o) => o._id === original);
+  if (!antes) throw new Error(`não achei a ${original} no banco`);
+  if (!antes.closed) problemas.push("o filtro das finalizadas trouxe uma OS que não foi entregue");
+
+  const botao = cartao.locator("button", { hasText: /Retorno/ }).first();
+  if (!(await botao.count())) throw new Error("o cartão da OS entregue não tem o botão Retorno");
+  const quantasAntes = (await banco("serviceOrders")).length;
+  await botao.click();
+  await p.waitForTimeout(5000);
+
+  const todas = await banco("serviceOrders");
+  if (todas.length !== quantasAntes + 1) problemas.push(`o retorno criou ${todas.length - quantasAntes} OS, esperado 1`);
+  const retorno = todas.find((o) => o.returnOfOrderId === original);
+  if (!retorno) throw new Error(`nenhuma OS no banco aponta para a ${original} como retorno`);
+
+  // O cadastro vem junto: é a razão de o botão existir.
+  if (retorno.customer !== antes.customer) problemas.push(`o cliente não veio junto: "${retorno.customer}"`);
+  if (retorno.plate !== antes.plate) problemas.push(`a placa não veio junto: "${retorno.plate}"`);
+  if (retorno.bike !== antes.bike) problemas.push("a moto não veio junto");
+  if (retorno.status !== "Em avaliação") problemas.push(`o retorno nasceu em "${retorno.status}", esperado Em avaliação`);
+
+  /*
+    E a conta do serviço anterior NÃO vem.
+
+    A OS de origem já foi recebida e o dinheiro entrou no caixa. Se as peças e o
+    total viessem junto, a oficina cobraria a mesma peça duas vezes e ninguém
+    perceberia até o cliente reclamar da segunda conta.
+  */
+  if (Number(retorno.total || 0) !== 0) problemas.push(`o retorno nasceu valendo ${retorno.total}, e devia nascer zerado`);
+  if ((retorno.items ?? []).length) problemas.push(`o retorno trouxe ${retorno.items.length} item(ns) da OS antiga`);
+
+  // A OS antiga não é tocada no dinheiro, só ganha a linha do histórico.
+  const antigaDepois = todas.find((o) => o._id === original);
+  if (!antigaDepois?.closed) problemas.push("a OS antiga deixou de estar encerrada: o caixa dela ia ficar pendurado");
+  if (Number(antigaDepois?.total || 0) !== Number(antes.total || 0)) problemas.push("o valor da OS antiga mudou");
+  if (!JSON.stringify(antigaDepois?.events ?? []).includes("Moto voltou em retorno")) {
+    problemas.push("a OS antiga não registrou para onde a moto foi");
+  }
+
+  await foto("retorno");
+  await fecharQualquerDialogo();
+  if (problemas.length) throw new Error("retorno da moto entregue:\n      - " + problemas.join("\n      - "));
 });
 
 console.log(`\n=== ${falhas} falha(s) ===`);

@@ -54,7 +54,8 @@
     "check:take-part": "tsx scripts/check-take-part.ts",
     "check:attendance": "tsx scripts/check-attendance.ts",
     "check:attendance-render": "node scripts/check-attendance-render.mjs",
-    "check:bundle": "node --import tsx scripts/check-bundle.ts"
+    "check:bundle": "node --import tsx scripts/check-bundle.ts",
+    "check:order-return": "node --import tsx scripts/check-order-return.ts"
   },
   "dependencies": {
     "express": "4.21.2",

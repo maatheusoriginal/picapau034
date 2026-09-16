@@ -11,7 +11,7 @@
  *
  * - A data é a do papel, não a de hoje. Sem isso o histórico mente sobre
  *   quando o serviço foi feito, que é justamente o que se quer saber.
- * - Ela nasce encerrada. Uma OS antiga que entra como "Recepção" aparece na
+ * - Ela nasce encerrada. Uma OS antiga que entra como "Em avaliação" aparece na
  *   fila da oficina como se a moto estivesse lá agora.
  * - Ela não baixa peça do estoque. A peça saiu da prateleira meses atrás; dar
  *   baixa de novo hoje faria o saldo mentir.
@@ -115,7 +115,7 @@ export function registroDaOSAntiga(dados: OSAntiga): Partial<OrderRecord> {
     mechanic: "",
     mechanicIds: [],
     time: data,
-    status: "Entrega",
+    status: "Finalizada",
     tone: "green",
     items: [],
     // O texto do papel vira `service` E `problem`: o primeiro é o que o

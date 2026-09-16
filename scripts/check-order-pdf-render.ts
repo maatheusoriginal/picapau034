@@ -35,7 +35,7 @@ const moto: MotorcycleRecord = {
 /** A OS de rotina da oficina: um serviço, duas peças, textos curtos. */
 const osTipica: OrderRecord = {
   id: "OS-0041", customer: "JOAO DA SILVA", bike: "CG 160 FAN", plate: "ABC-1D23",
-  mechanic: "RONALDO", mechanicIds: [], time: "16/09/2026, 09:15", status: "Entrega", tone: "green",
+  mechanic: "RONALDO", mechanicIds: [], time: "16/09/2026, 09:15", status: "Finalizada", tone: "green",
   clientId: "CLI-1", motorcycleId: "MOTO-1",
   problem: "BARULHO NA CORRENTE E TROCA DE OLEO.",
   solution: "KIT RELACAO SUBSTITUIDO E OLEO TROCADO.",

@@ -5,6 +5,7 @@
  * de venda e custo de peça, então precisam ser conferíveis com dados na mão
  * (ver scripts/check-inventory.ts).
  */
+import { normalizeOrderStatus } from "./types";
 
 /** Preço de venda a partir do custo e do markup. Markup de 45% sobre R$ 100 = R$ 145. */
 export function priceFromMarkup(cost: number, markup: number): number {
@@ -99,14 +100,22 @@ export function mergeParts(parts: ReservedPart[]): ReservedPart[] {
  * A OS já deve ter as peças fora do estoque?
  *
  * Com "baixar somente quando a OS for iniciada" ligado, a peça só sai da
- * prateleira quando o serviço começa — durante recepção, avaliação e aprovação
- * a OS ainda é orçamento, e reservar peça de orçamento some com o estoque de
- * quem está vendendo no balcão. Desligado, a baixa acontece já na abertura.
+ * prateleira quando o serviço começa — enquanto a moto está em avaliação a OS
+ * ainda é orçamento, e reservar peça de orçamento some com o estoque de quem
+ * está vendendo no balcão. Desligado, a baixa acontece já na abertura.
+ *
+ * A ETAPA É TRADUZIDA ANTES DE DECIDIR, e isso não é detalhe.
+ *
+ * A oficina passou de seis etapas para quatro, e as OS gravadas continuam com
+ * as antigas. Uma OS pronta gravada como "Entrega" não está na régua de hoje:
+ * sem a tradução, a posição dela seria -1, a resposta seria "não reservado", e
+ * o próximo salvamento daquela OS DEVOLVERIA ao estoque peças que já foram
+ * usadas na moto. Estoque errado só aparece na hora de vender, e aí já é tarde.
  */
 export function shouldReserveStock(status: string, deductOnlyWhenStarted: boolean, statuses: readonly string[]): boolean {
   if (!deductOnlyWhenStarted) return true;
   const started = statuses.indexOf("Em serviço");
-  const current = statuses.indexOf(status);
+  const current = statuses.indexOf(normalizeOrderStatus(status));
   return started >= 0 && current >= started;
 }
 

@@ -91,11 +91,11 @@ const casos: Array<[string, unknown, unknown]> = [
   ["item sem produto vinculado é ignorado", json(mergeParts([{ productId: "", quantity: 9 }])), json([])],
 
   // Momento da baixa
-  ["com a trava ligada, orçamento não reserva", shouldReserveStock("Avaliação", true, st), false],
-  ["com a trava ligada, aprovação ainda não reserva", shouldReserveStock("Aprovação", true, st), false],
+  ["com a trava ligada, orçamento não reserva", shouldReserveStock("Em avaliação", true, st), false],
+  ["com a trava ligada, aprovação ainda não reserva", shouldReserveStock("Em avaliação", true, st), false],
   ["com a trava ligada, serviço iniciado reserva", shouldReserveStock("Em serviço", true, st), true],
-  ["com a trava ligada, entrega segue reservada", shouldReserveStock("Entrega", true, st), true],
-  ["com a trava desligada, a recepção já reserva", shouldReserveStock("Recepção", false, st), true],
+  ["com a trava ligada, entrega segue reservada", shouldReserveStock("Finalizada", true, st), true],
+  ["com a trava desligada, a recepção já reserva", shouldReserveStock("Em avaliação", false, st), true],
   // --- Histórico de movimentação da peça ---
   ["a peça mostra entradas, saídas e conferências", mov.length, 4],
   ["a mais recente vem primeiro", mov[0]!.documentId, "AJU-0001"],

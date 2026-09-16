@@ -4,10 +4,11 @@ import { itemUnitPrice, withItemQuantity } from "../src/order-items";
 import { stockDeltas } from "../src/inventory";
 import { partnerTotals } from "../src/partner";
 import type { OrderRecord, ProductRecord, ServiceOrderItem } from "../src/types";
+import { normalizeOrderStatus } from "../src/types";
 
 let count = 0;
 const check = (label: string, actual: unknown, expected: unknown) => { assert.deepEqual(actual, expected, label); count += 1; };
-const order = (patch: Partial<OrderRecord>): OrderRecord => ({ id: "OS-1", customer: "JOÃO", plate: "ABC-1D23", bike: "CG 150", mechanic: "", mechanicIds: [], time: "09:00", status: "Recepção", tone: "blue", ...patch });
+const order = (patch: Partial<OrderRecord>): OrderRecord => ({ id: "OS-1", customer: "JOÃO", plate: "ABC-1D23", bike: "CG 150", mechanic: "", mechanicIds: [], time: "09:00", status: "Em avaliação", tone: "blue", ...patch });
 const product = (patch: Partial<ProductRecord>): ProductRecord => ({ id: "p1", code: "PRD-001", name: "ÓLEO 20W50", price: "R$ 30,00", cost: "R$ 15,00", category: "Óleos", stock: 3, minimum: 2, status: "Normal", ...patch });
 
 check("settings view can remain in settings", canVisit("Configurações", "Balcão", ["settings.view"]), true);
@@ -59,13 +60,33 @@ check("invalid date rejected", calendarDay("31/02/2026"), "");
 check("leap year accepted", calendarDay("29/02/2024"), "2024-02-29");
 check("no date does not invent a deadline", calendarDay("Sem previsão"), "");
 check("calendar key", todayKey(new Date(2026, 8, 7, 23)), "2026-09-07");
-const closed = order({ closed: true, status: "Entrega", delivery: "01/09/2026" });
+const closed = order({ closed: true, status: "Finalizada", delivery: "01/09/2026" });
 check("delivered is not awaiting pickup", orderMatchesFilter(closed, "Prontas", "2026-09-07"), false);
 check("closed OS has no warning", orderAttention(closed, "2026-09-07"), "");
 check("closed history remains accessible", orderMatchesFilter(closed, "Entregues"), true);
 check("today is not overdue", orderMatchesFilter(order({ delivery: "07/09/2026" }), "Atrasadas", "2026-09-07"), false);
 check("overdue BR deadline", orderMatchesFilter(order({ delivery: "06/09/2026" }), "Atrasadas", "2026-09-07"), true);
-check("approval action", orderAttention(order({ status: "Aprovação" })), "Pedir aprovação");
+/*
+  AS ETAPAS ANTIGAS NÃO PODEM SUMIR DO QUADRO.
+
+  A oficina passou de seis etapas para quatro, e as OS gravadas no banco
+  continuam com as antigas. Se a tradução falhar, a OS não bate com coluna
+  nenhuma e some da tela — com a moto ainda dentro da oficina. É o defeito mais
+  caro possível numa troca dessas, e o mais silencioso.
+*/
+check("OS antiga em Recepção cai em avaliação", normalizeOrderStatus("Recepção"), "Em avaliação");
+check("Avaliação também", normalizeOrderStatus("Avaliação"), "Em avaliação");
+check("Aprovação também, que era conversa com o cliente", normalizeOrderStatus("Aprovação"), "Em avaliação");
+check("Entrega virou Finalizada", normalizeOrderStatus("Entrega"), "Finalizada");
+check("etapa de hoje passa intacta", normalizeOrderStatus("Aguardando peça"), "Aguardando peça");
+check("etapa vazia não deixa a OS fora do quadro", normalizeOrderStatus(""), "Em avaliação");
+check("etapa que ninguém reconhece também não", normalizeOrderStatus("Qualquer coisa"), "Em avaliação");
+// E a tradução vale nos FILTROS, que é onde a OS antiga apareceria ou sumiria.
+check("OS antiga pronta entra no filtro de prontas", orderMatchesFilter(order({ status: "Entrega" }), "Prontas"), true);
+check("e na coluna Finalizada do quadro", orderMatchesFilter(order({ status: "Entrega" }), "Finalizada"), true);
+check("OS antiga em Recepção entra na coluna Em avaliação", orderMatchesFilter(order({ status: "Recepção" }), "Em avaliação"), true);
+check("moto pronta pede a retirada", orderAttention(order({ status: "Finalizada" })), "Combinar retirada");
+check("e a antiga gravada como Entrega também", orderAttention(order({ status: "Entrega" })), "Combinar retirada");
 check("sorting prioritizes delayed orders", sortOrders([order({ id: "OS-2" }), order({ id: "OS-1", delivery: "01/09/2026" }), closed], "2026-09-07")[0].delivery, "01/09/2026");
 check("inactive stock does not raise an alert", lowStock(product({ active: false, stock: 0 })), false);
 check("opted-out low stock alert", lowStock(product({ alertLowStock: false, stock: 0 })), false);

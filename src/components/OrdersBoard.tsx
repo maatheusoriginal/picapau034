@@ -40,7 +40,7 @@
  */
 import { useRef, useState } from "react";
 import type { OpenDialog, OrderRecord, ServiceOrderStatus } from "../types";
-import { serviceOrderStatuses, statusTone } from "../types";
+import { normalizeOrderStatus, serviceOrderStatuses, statusTone } from "../types";
 import { money, orderIsLate, shortDate } from "../workspace";
 import { Icon } from "./WorkshopIcon";
 
@@ -63,7 +63,9 @@ export function OrdersBoard({ orders, canMove, onMove, openDialog, onShowDeliver
   const partida = useRef<{ x: number; y: number; order: OrderRecord; ponteiro: number } | null>(null);
 
   const abertas = orders.filter((order) => !order.closed);
-  const daEtapa = (status: ServiceOrderStatus) => abertas.filter((order) => order.status === status);
+  // A etapa é lida pela régua de HOJE: OS gravada com as seis etapas antigas
+  // continua caindo na coluna certa em vez de sumir do quadro.
+  const daEtapa = (status: ServiceOrderStatus) => abertas.filter((order) => normalizeOrderStatus(order.status) === status);
 
   const aoApertar = (evento: React.PointerEvent<HTMLElement>, order: OrderRecord) => {
     // Só o mouse arrasta. No toque o gesto é rolar a tela, e disputar com ele
@@ -97,7 +99,7 @@ export function OrdersBoard({ orders, canMove, onMove, openDialog, onShowDeliver
     setArrastando(null);
     setAlvo("");
     if (inicio) { try { evento.currentTarget.releasePointerCapture(inicio.ponteiro); } catch { /* já solto */ } }
-    if (!order || !onMove || !destino || destino === order.status) return;
+    if (!order || !onMove || !destino || destino === normalizeOrderStatus(order.status)) return;
     void onMove(order, destino);
   };
 

@@ -420,3 +420,9 @@ table td strong, table td span { font-size: .875rem; }
   .board-card { cursor: default; padding: 14px; }
   .board-card-open { min-height: 42px; }
 }
+
+/* A OS que é retorno se anuncia na lista: sem isso, a segunda OS da mesma moto
+   parece um serviço novo e o mecânico refaz o diagnóstico do zero. */
+.return-flag { display: flex; align-items: center; gap: 5px; margin: -4px 0 8px; font-size: .75rem; font-weight: 650; color: #96581f; }
+.work-order-card footer .return-button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: #8a5417; border-color: #e3c99f; background: #fffaf1; }
+.board-card .return-flag { margin: 5px 0 0; font-size: .6875rem; }

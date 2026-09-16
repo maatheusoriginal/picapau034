@@ -1,4 +1,5 @@
 import type { OrderRecord, ProductRecord, FirebasePermission, UserRole } from "./types";
+import { normalizeOrderStatus } from "./types";
 
 export const routePaths: Record<string, string> = {
   "Visão geral": "/", "Ordens de serviço": "/oficina", "Orçamentos": "/orcamentos",
@@ -73,9 +74,9 @@ export const orderIsLate = (order: OrderRecord, today = todayKey()) => !order.cl
 export function orderAttention(order: OrderRecord, today = todayKey()): string {
   if (order.closed) return "";
   if (orderIsLate(order, today)) return "Prazo vencido";
-  if (order.status === "Entrega") return "Combinar retirada";
-  if (order.status === "Aguardando peça") return "Conferir reposição";
-  if (order.status === "Aprovação") return "Pedir aprovação";
+  const etapa = normalizeOrderStatus(order.status);
+  if (etapa === "Finalizada") return "Combinar retirada";
+  if (etapa === "Aguardando peça") return "Conferir reposição";
   if (order.customerPending) return "Completar cliente";
   if (searchable(order.priority).includes("urgente") || searchable(order.priority).includes("alta")) return "Prioridade alta";
   if (calendarDay(order.delivery) === today) return "Entrega prevista hoje";
@@ -91,14 +92,17 @@ export function sortOrders(orders: OrderRecord[], today = todayKey()): OrderReco
 
 export function orderMatchesFilter(order: OrderRecord, filter: string, today = todayKey()): boolean {
   if (filter === "Todos") return true;
-  if (filter === "Entregues") return !!order.closed;
+  // "Finalizadas" é a lista de onde sai o RETORNO: a moto já foi entregue e
+  // paga, e voltou. "Entregues" continua valendo como nome antigo do mesmo
+  // recorte, para não quebrar atalho que alguém tenha guardado.
+  if (filter === "Finalizadas (entregues)" || filter === "Finalizadas" || filter === "Entregues") return !!order.closed;
   if (order.closed) return false;
   if (filter === "Em aberto") return true;
   if (filter === "Atenção") return !!orderAttention(order, today);
   if (filter === "Atrasadas") return orderIsLate(order, today);
   if (filter === "Hoje") return calendarDay(order.delivery) === today;
-  if (filter === "Prontas") return order.status === "Entrega";
-  return order.status === filter;
+  if (filter === "Prontas") return normalizeOrderStatus(order.status) === "Finalizada";
+  return normalizeOrderStatus(order.status) === filter;
 }
 
 /** Exact barcode takes precedence, including when another description contains it. */

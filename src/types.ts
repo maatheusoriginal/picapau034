@@ -391,6 +391,11 @@ export type OrderRecord = {
    * receber. Sem isso a oficina fica com serviço feito e ninguém para cobrar.
    */
   customerPending?: boolean;
+  /**
+   * Esta OS é o retorno de outra: a moto saiu, voltou, e este é o segundo
+   * atendimento do mesmo problema. Guarda o número da OS de origem.
+   */
+  returnOfOrderId?: string;
   /** Empresa parceira que encaminhou a moto e responde pela OS. */
   partnerId?: string;
   partnerName?: string;
@@ -748,9 +753,39 @@ export type StockEntryRecord = {
  * foram baixadas, e parar para esperar uma que faltou não devolve as outras
  * para a prateleira.
  */
-export const serviceOrderStatuses = ["Recepção", "Avaliação", "Aprovação", "Em serviço", "Aguardando peça", "Entrega"] as const;
+export const serviceOrderStatuses = ["Em avaliação", "Em serviço", "Aguardando peça", "Finalizada"] as const;
 
 export type ServiceOrderStatus = (typeof serviceOrderStatuses)[number];
+
+/**
+ * As etapas antigas, e para onde cada uma foi.
+ *
+ * A oficina trabalhava com seis etapas e passou a trabalhar com quatro. Só que
+ * as OS que já estão no banco continuam gravadas com as antigas — e uma OS cuja
+ * etapa não existe mais não aparece em coluna nenhuma do quadro: some da tela
+ * com a moto ainda dentro da oficina.
+ *
+ * Nada é reescrito no banco. A tradução acontece na LEITURA, e a etapa nova só
+ * é gravada quando alguém mexe naquela OS. Migração em massa de banco de
+ * produção é irreversível, e o ganho aqui seria zero: a tradução é de uma linha.
+ *
+ * "Recepção", "Avaliação" e "Aprovação" viram uma etapa só porque na prática
+ * eram: a moto chegou e ainda não está na bancada. "Entrega" virou "Finalizada".
+ */
+const ETAPAS_ANTIGAS: Record<string, ServiceOrderStatus> = {
+  "Recepção": "Em avaliação",
+  "Avaliação": "Em avaliação",
+  "Aprovação": "Em avaliação",
+  "Entrega": "Finalizada",
+  "Pronta": "Finalizada",
+};
+
+/** A etapa de uma OS na régua de hoje, venha ela de quando vier. */
+export function normalizeOrderStatus(status: string | undefined | null): ServiceOrderStatus {
+  const texto = String(status ?? "").trim();
+  if ((serviceOrderStatuses as readonly string[]).includes(texto)) return texto as ServiceOrderStatus;
+  return ETAPAS_ANTIGAS[texto] ?? "Em avaliação";
+}
 
 /**
  * Cor do selo de situação. Fonte única: antes a tela do diálogo calculava a
@@ -759,13 +794,13 @@ export type ServiceOrderStatus = (typeof serviceOrderStatuses)[number];
  * sempre.
  */
 export function statusTone(status: string): string {
-  if (status === "Entrega") return "green";
-  if (status === "Em serviço") return "amber";
-  // Vermelho para as duas situações em que a moto está parada esperando outra
-  // pessoa: o cliente aprovar ou o fornecedor entregar. É o que precisa saltar
-  // aos olhos de quem olha o quadro da oficina.
-  if (status === "Aprovação" || status === "Aguardando peça") return "red";
-  if (status === "Avaliação") return "violet";
+  const etapa = normalizeOrderStatus(status);
+  if (etapa === "Finalizada") return "green";
+  if (etapa === "Em serviço") return "amber";
+  // Vermelho para a situação em que a moto está parada esperando outra pessoa:
+  // o fornecedor entregar a peça. É o que precisa saltar aos olhos de quem
+  // olha o quadro da oficina.
+  if (etapa === "Aguardando peça") return "red";
   return "blue";
 }
 
