@@ -3289,8 +3289,10 @@ await passo("a moto da OS é escolhida pelo catálogo, igual ao cadastro de moto
 
   // Marca, Modelo e Versão em LISTA, e não em texto livre: é o que impede a
   // mesma moto entrar como "cg160 fan" numa OS e "CG 160 Fan" no cadastro.
+  // O rótulo é o <span> DENTRO do campo. Procurar pelo texto do campo inteiro
+  // não casa: ele inclui o valor escolhido ("Marca" + "Honda").
   for (const rotulo of ["Marca", "Modelo", "Versão"]) {
-    const campo = bloco.locator("label, div").filter({ hasText: new RegExp(`^${rotulo}$`) }).first();
+    const campo = bloco.locator("span").filter({ hasText: new RegExp(`^${rotulo}$`) }).first();
     if (!(await campo.count())) problemas.push(`não achei o campo "${rotulo}" na edição da OS`);
   }
   const listas = await bloco.locator("select").count();

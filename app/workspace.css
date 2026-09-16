@@ -372,7 +372,9 @@ table td strong, table td span { font-size: .875rem; }
 .order-board-empty { margin: 0; padding: 14px 4px; text-align: center; font-size: .75rem; color: #9aa48e; line-height: 1.45; }
 
 .board-card { position: relative; padding: 10px; border: 1px solid #e3e8da; border-radius: 9px; background: #fff; min-width: 0; }
-.board-card.can-drag { cursor: grab; }
+/* Card que se arrasta não se seleciona: sem isto, puxar o card pintava o nome
+   do cliente e a moto de azul, como quem passa o mouse marcando texto. */
+.board-card.can-drag { cursor: grab; user-select: none; -webkit-user-select: none; }
 .board-card.can-drag:active { cursor: grabbing; }
 /* O card em movimento fica invisível ao ponteiro: sem isso a coluna debaixo do
    cursor seria sempre a de origem, que é onde o card ainda está desenhado. */
