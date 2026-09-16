@@ -30,7 +30,7 @@ const OUT = process.argv[2] ?? AQUI;
 const GRUPO = { "Ordens de serviço":"Oficina","Orçamentos":"Oficina","PDV Balcão":"Balcão","Serviço rápido":"Balcão",
   "Vendas do balcão":"Balcão","Produtos e estoque":"Estoque","Compras e entradas":"Estoque","Ajuste de estoque":"Estoque","Fornecedores":"Estoque",
   "Clientes":"Cadastros","Motocicletas":"Cadastros","Funcionários":"Cadastros","Financeiro":"Gestão",
-  "Contas a receber":"Gestão","Contas a pagar":"Gestão","Histórico de caixas":"Gestão","Relatórios":"Gestão" };
+  "Contas a receber":"Gestão","Contas a pagar":"Gestão","Histórico geral":"Gestão","Histórico de caixas":"Gestão","Relatórios":"Gestão" };
 
 // Banco limpo a cada execução: teste que depende do estado anterior não vale nada.
 await fetch("http://127.0.0.1:8080/emulator/v1/projects/picapau-teste/databases/(default)/documents", { method: "DELETE" });
@@ -2938,6 +2938,75 @@ await passo("o histórico geral junta OS encerrada, balcão e serviço rápido",
   await p.locator('input[aria-label="Buscar no histórico"]').fill("ZZZ-0000-NAO-EXISTE");
   await p.waitForTimeout(1200);
   if (await p.locator("tbody tr").count()) throw new Error("a busca do histórico não filtrou nada");
+});
+
+await passo("apagar OS devolve a peça ao estoque, e OS encerrada não some", async () => {
+  // 1. Uma OS nova, com peça, só para ser apagada.
+  await ir("Produtos e estoque");
+  await p.waitForTimeout(1500);
+  const saldoDe = async () => {
+    const linha = await p.locator("tbody tr", { hasText: /ÓLEO|Óleo/ }).first().innerText().catch(() => "");
+    const achado = linha.match(/(\d+)\s*(?:un|UN|$)/m) || linha.match(/\b(\d+)\b/);
+    return achado ? Number(achado[1]) : null;
+  };
+  void saldoDe;
+
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirNovaOS();
+  await preencherEtapa1({ nome: `DESCARTE ${Date.now().toString().slice(-4)}`, placa: "DEL-1D23", modelo: "CG 160" });
+  await irParaServico();
+  await p.locator(`${CAMADA} textarea`).first().fill("OS PARA APAGAR");
+  await conferirEAbrir();
+  await p.waitForTimeout(2000);
+
+  // 2. Abrir e apagar.
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1500);
+  await abrirOSdaPlaca("DEL-1D23");
+  const numero = await p.locator(".dialog-body.order-detail .order-timeline-list li strong").first().innerText().catch(() => "");
+  void numero;
+
+  const apagar = p.locator(".order-actions .removal-trigger").first();
+  if (!(await apagar.count())) throw new Error("a OS não tem botão de apagar");
+  await apagar.click();
+  await p.waitForTimeout(900);
+  const caixa = p.locator(".removal-box").first();
+  if (!(await caixa.count())) throw new Error("o botão de apagar não abriu a confirmação");
+  const textoDaCaixa = await caixa.innerText();
+  if (!/Apagar esta ordem de serviço/.test(textoDaCaixa)) throw new Error(`a confirmação não pergunta antes de apagar: "${textoDaCaixa.slice(0, 120)}"`);
+  await caixa.locator("button", { hasText: /^Apagar/ }).first().click();
+  await p.waitForTimeout(3500);
+  await fecharQualquerDialogo();
+  await p.waitForTimeout(1500);
+
+  // 3. Sumiu da lista?
+  await ir("Ordens de serviço");
+  await p.waitForTimeout(1800);
+  const todas = p.locator(".order-status-filters button", { hasText: /^Todos$/ }).first();
+  if (await todas.count()) { await todas.click(); await p.waitForTimeout(1500); }
+  const naLista = await p.locator(".orders-workspace").innerText();
+  if (naLista.includes("DEL-1D23")) throw new Error("a OS apagada continua na lista da oficina");
+
+  // 4. E a OS encerrada NÃO pode ser apagada: o dinheiro dela já entrou.
+  await p.locator(".order-status-filters button", { hasText: /^Entregues$/ }).first().click().catch(() => {});
+  await p.waitForTimeout(1800);
+  const encerradas = await p.locator(".work-order-card, tbody tr").count();
+  if (encerradas) {
+    await abrirPrimeiraOS();
+    await p.waitForTimeout(2200);
+    const botao = p.locator(".order-actions .removal-trigger").first();
+    if (await botao.count()) {
+      await botao.click();
+      await p.waitForTimeout(900);
+      const aviso = await p.locator(".removal-box").first().innerText();
+      if (!/não pode ser apagada/.test(aviso)) throw new Error(`OS encerrada aceitou a exclusão: "${aviso.slice(0, 160)}"`);
+      if (!/caixa/.test(aviso)) throw new Error("o aviso não explica que o valor entrou no caixa");
+      await p.locator(".removal-box button", { hasText: /Entendi/ }).first().click();
+      await p.waitForTimeout(800);
+    }
+    await fecharQualquerDialogo();
+  }
 });
 
 console.log(`\n=== ${falhas} falha(s) ===`);

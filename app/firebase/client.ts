@@ -1056,6 +1056,55 @@ export async function settleAccount(accountId: string, settlement: Record<string
   }
 }
 
+/**
+ * Apaga a OS e devolve a peça à prateleira no MESMO movimento.
+ *
+ * Nunca em dois passos. Apagar primeiro e devolver depois deixa, se o segundo
+ * passo falhar, uma peça que saiu do estoque sem nenhuma OS para explicar onde
+ * ela foi parar — e ninguém descobre isso até a próxima contagem.
+ *
+ * A trava de OS encerrada é conferida aqui DENTRO da transação, e não só na
+ * tela: entre abrir a OS e clicar em apagar, outra pessoa pode ter recebido e
+ * encerrado ela no balcão. Ver decidirExclusaoDaOS, em src/order-removal.ts.
+ *
+ * O registro de quem apagou vai junto, na mesma transação, porque a OS some e
+ * o rastro precisa sobreviver a ela.
+ */
+export async function deleteOrderWithStock(
+  orderId: string,
+  log: Record<string, unknown>,
+) {
+  const { db } = services();
+  try {
+    await runTransaction(db, async (transaction) => {
+      const orderRef = doc(db, "serviceOrders", orderId);
+      const current = await transaction.get(orderRef);
+      if (!current.exists()) throw new Error("Esta OS já não existe. Atualize a lista.");
+      const data = current.data();
+      if (data.closed === true && data.backfilled !== true) {
+        throw new Error("Esta OS foi encerrada e recebida enquanto você estava com ela aberta. O valor já entrou no caixa, então ela não pode mais ser apagada.");
+      }
+      const reservadas = Array.isArray(data.deductedItems) ? data.deductedItems as ReservedPart[] : [];
+      const devolver = reservadas.filter((item) => item.productId && Number(item.quantity) > 0);
+      const saldos = await Promise.all(devolver.map(async (item) => {
+        const ref = doc(db, "products", item.productId);
+        const snapshot = await transaction.get(ref);
+        // Peça apagada do cadastro depois de a OS ter baixado dela: a OS ainda
+        // pode ser apagada, só não há para onde devolver o saldo.
+        if (!snapshot.exists()) return null;
+        return { ref, next: Number(snapshot.data().stock ?? 0) + Number(item.quantity) };
+      }));
+      for (const saldo of saldos) {
+        if (saldo) transaction.update(saldo.ref, { stock: saldo.next, updatedAt: serverTimestamp() });
+      }
+      transaction.set(doc(db, "auditLogs", `LOG-${orderId}-${Date.now()}`), { ...withoutUndefined(log), createdAt: serverTimestamp() });
+      transaction.delete(orderRef);
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `serviceOrders/${orderId}`);
+  }
+}
+
 export async function deleteFirestoreDoc(collectionName: string, id: string) {
   const { db } = services();
   try {
