@@ -27,6 +27,8 @@ import {
   increment,
   query,
   runTransaction,
+  type Transaction,
+  type DocumentReference,
   serverTimestamp,
   setDoc,
   where,
@@ -36,6 +38,7 @@ import {
 } from "firebase/firestore";
 import { allFirebasePermissions, defaultPermissionsForRole, type FirebasePermission, type UserRole } from "../../src/types";
 import { costAfterEntry, toAmount, stockDeltas, mergeParts, type ReservedPart } from "../../src/inventory";
+import { buscarNumeroLivre } from "../../src/order-number";
 import { BACKUP_COLLECTIONS } from "../../src/backup";
 
 type FirebaseWebConfig = {
@@ -619,21 +622,64 @@ export async function saveFirestoreDoc<T extends Record<string, unknown>>(collec
  * segunda avança para o número seguinte em vez de sobrescrever a primeira
  * (setDoc com merge não reclamaria da colisão).
  */
-export async function createServiceOrder(prefix: string, startNumber: number, data: Record<string, unknown>) {
+/** O id da OS a partir do número: "OS" + 1651 vira "OS-1651". */
+const idDaOrdem = (prefixo: string, numero: number) => `${prefixo}-${String(numero).padStart(4, "0")}`;
+
+/**
+ * O primeiro número de OS livre, perguntando ao Firestore.
+ *
+ * A DECISÃO mora em src/order-number.ts, conferida por `npm run
+ * check:order-number` — inclusive com o caso que a oficina encontrou: 60 OS no
+ * banco, palpite chegando como 1, e a versão anterior recusando com "não foi
+ * possível gerar um número livre". Aqui fica só a leitura.
+ */
+async function primeiroNumeroLivre(prefixo: string, sugerido: number): Promise<number> {
   const { db } = services();
+  const { numero } = await buscarNumeroLivre(
+    async (candidato) => (await getDoc(doc(db, "serviceOrders", idDaOrdem(prefixo, candidato)))).exists(),
+    sugerido,
+  );
+  return numero;
+}
+
+/**
+ * Grava a OS no primeiro número livre, sem passar por cima de outra.
+ *
+ * A gravação vai numa transação que RELÊ o número antes de escrever. Entre
+ * achar o número livre e gravar, outra pessoa no balcão pode ter levado o
+ * mesmo — e um `set` sem essa conferência substituiria a OS dela pela nova, em
+ * silêncio. A moto dela sumiria do sistema.
+ */
+async function gravarOrdemEmNumeroLivre(
+  prefixo: string,
+  sugerido: number,
+  escrever: (transaction: Transaction, reference: DocumentReference) => void,
+): Promise<string> {
+  const { db } = services();
+  let numero = await primeiroNumeroLivre(prefixo, sugerido);
+  for (let tentativa = 0; tentativa < 10; tentativa += 1) {
+    const id = idDaOrdem(prefixo, numero);
+    let tomado = false;
+    await runTransaction(db, async (transaction) => {
+      const reference = doc(db, "serviceOrders", id);
+      if ((await transaction.get(reference)).exists()) { tomado = true; return; }
+      escrever(transaction, reference);
+    });
+    if (!tomado) return id;
+    numero += 1;
+  }
+  throw new Error("Outra pessoa está abrindo OS neste momento e os números se cruzaram. Tente novamente.");
+}
+
+export async function createServiceOrder(prefix: string, startNumber: number, data: Record<string, unknown>) {
   const safePrefix = (prefix || "OS").trim().replace(/-+$/, "") || "OS";
   try {
-    for (let number = Math.max(1, startNumber); number < startNumber + 50; number += 1) {
-      const id = `${safePrefix}-${String(number).padStart(4, "0")}`;
-      const reference = doc(db, "serviceOrders", id);
-      if ((await getDoc(reference)).exists()) continue;
-      await setDoc(reference, { ...withoutUndefined(data), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-      return id;
-    }
+    return await gravarOrdemEmNumeroLivre(safePrefix, startNumber, (transaction, reference) => {
+      transaction.set(reference, { ...withoutUndefined(data), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, "serviceOrders");
   }
-  throw new Error("Não foi possível gerar um número livre para a ordem de serviço. Tente novamente.");
 }
 
 /**
@@ -661,22 +707,15 @@ export async function createBackfilledOrder(
   const { db } = services();
   const safePrefix = (prefix || "OS").trim().replace(/-+$/, "") || "OS";
   try {
-    for (let number = Math.max(1, startNumber); number < startNumber + 50; number += 1) {
-      const id = `${safePrefix}-${String(number).padStart(4, "0")}`;
-      const reference = doc(db, "serviceOrders", id);
-      if ((await getDoc(reference)).exists()) continue;
-      const batch = writeBatch(db);
-      batch.set(reference, { ...withoutUndefined(data), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    return await gravarOrdemEmNumeroLivre(safePrefix, startNumber, (transaction, reference) => {
+      transaction.set(reference, { ...withoutUndefined(data), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
       for (const { productId, quantity } of stockUpdates) {
-        batch.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
+        transaction.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
       }
-      await batch.commit();
-      return id;
-    }
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, "serviceOrders");
   }
-  throw new Error("Não foi possível gerar um número livre para a ordem de serviço. Tente novamente.");
 }
 
 /**
