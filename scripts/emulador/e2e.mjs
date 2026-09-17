@@ -1347,12 +1347,41 @@ await passo("lista de peças: colunas, filtro por grupo e contagem", async () =>
   const problemas = [];
   await ir("Produtos e estoque");
   const colunas = await p.locator(".stock-table thead th").allInnerTexts();
-  for (const coluna of ["CÓDIGO", "REFERÊNCIA", "CÓD. BARRAS", "DESCRIÇÃO", "GRUPO", "LOCAL", "PREÇO", "ESTOQUE", "UN."]) {
+  // Seis colunas, as que decidem a venda. Eram dez e a tela rolava para o lado.
+  for (const coluna of ["CÓD. BARRAS", "DESCRIÇÃO", "GRUPO", "PREÇO", "ESTOQUE", "UN."]) {
     if (!colunas.some((texto) => texto.trim().toUpperCase() === coluna)) problemas.push(`falta a coluna ${coluna}: ${JSON.stringify(colunas)}`);
   }
   const total = await p.locator(".stock-table tbody tr").count();
   if (!total) problemas.push("a lista de peças veio vazia");
   if (!/registro/.test(await p.locator(".stock-count").innerText())) problemas.push("não mostra quantos registros");
+
+  /*
+    A LISTA CABE NA TELA.
+
+    Conferir preço e saldo é o que se faz o dia inteiro; se a tela rola para o
+    lado, isso vira arrastar a lista com o cliente esperando no balcão. A
+    medida é a real: largura do conteúdo contra a largura disponível.
+  */
+  const larguraDaLista = await p.locator(".stock-table").first().evaluate((el) => el.scrollWidth);
+  const espacoNaTela = await p.locator(".table-scroll").first().evaluate((el) => el.clientWidth);
+  if (larguraDaLista > espacoNaTela + 1) problemas.push(`a lista pede ${larguraDaLista}px e a tela tem ${espacoNaTela}px: rola para o lado`);
+
+  // O que saiu da régua não sumiu: código e referência viraram a segunda linha
+  // da descrição, e continuam à vista.
+  const primeiraLinha = await p.locator(".stock-table td.stock-name small").first().innerText().catch(() => "");
+  if (!/PRD-/.test(primeiraLinha)) problemas.push(`o código da peça sumiu da linha: ${JSON.stringify(primeiraLinha)}`);
+
+  /*
+    E EM ORDEM DE NOME.
+
+    O banco devolve na ordem de cadastro. Quem está no balcão procura pelo nome,
+    e em ordem de cadastro achar na lista é varrer de cima a baixo toda vez.
+  */
+  const nomesNaTela = await p.locator(".stock-table td.stock-name strong").allInnerTexts();
+  const emOrdem = [...nomesNaTela].sort((um, outro) => um.localeCompare(outro, "pt-BR", { sensitivity: "base", numeric: true }));
+  if (nomesNaTela.join("|") !== emOrdem.join("|")) {
+    problemas.push(`a lista não está em ordem de nome:\n        na tela: ${nomesNaTela.join(" · ")}\n        deveria: ${emOrdem.join(" · ")}`);
+  }
 
   // Procurar pelo CÓDIGO, que é como a peça é pedida no balcão.
   await p.locator(".stock-toolbar .mini-search input").fill("PRD-001");

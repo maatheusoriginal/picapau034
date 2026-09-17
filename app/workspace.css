@@ -441,7 +441,7 @@ table td strong, table td span { font-size: .875rem; }
 --------------------------------------------------------------------------- */
 .stock-table { table-layout: fixed; width: 100%; }
 .stock-table .col-barcode { width: 124px; }
-.stock-table .col-group { width: 128px; }
+.stock-table .col-group { width: 148px; }
 .stock-table .col-price { width: 104px; }
 .stock-table .col-stock { width: 96px; }
 .stock-table .col-unit { width: 56px; }
