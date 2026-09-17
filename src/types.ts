@@ -28,7 +28,8 @@ export type DialogKind =
   | "os"
   /**
    * A OS que já aconteceu, lançada depois só para o histórico da moto.
-   * Não entra na fila da oficina, não baixa peça e não mexe no dinheiro.
+   * Não entra na fila da oficina nem mexe no dinheiro. A baixa da peça é
+   * escolhida caso a caso: ver src/backfill.ts.
    * Ver src/backfill.ts.
    */
   | "osPast"

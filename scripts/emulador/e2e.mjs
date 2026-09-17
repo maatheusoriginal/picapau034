@@ -3412,6 +3412,83 @@ await passo("a moto entregue volta em retorno: OS nova com o cadastro e sem a co
   if (problemas.length) throw new Error("retorno da moto entregue:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("OS antiga: puxa o cadastro pela placa e tira a peça do estoque", async () => {
+  const problemas = [];
+  await ir("Ordens de serviço");
+  await p.locator("button", { hasText: /Novo atendimento/ }).first().click();
+  await p.waitForTimeout(2000);
+  await p.locator(".attendance-history").first().click();
+  await p.waitForTimeout(2000);
+
+  /*
+    PUXAR O CADASTRO.
+
+    Digitar o nome à mão criava gente parecida com gente que já existe — "JOÃO
+    DA SILVA" e "JOAO SILVA" viram duas pessoas, e o histórico da moto se parte
+    em dois. Aqui a placa tem de trazer a moto, o modelo e o dono junto.
+  */
+  const motoNoBanco = (await banco("motorcycles")).find((moto) => moto.plate && moto.ownerId);
+  if (!motoNoBanco) throw new Error("nenhuma moto com dono no cadastro para provar a busca");
+  await p.getByPlaceholder(/Placa, nome do cliente ou moto/).fill(motoNoBanco.plate);
+  await p.waitForTimeout(1400);
+  const achadas = await p.locator(".past-lookup .vehicle-choice-list button").count();
+  if (!achadas) throw new Error(`a busca não achou a placa ${motoNoBanco.plate} no cadastro`);
+  await p.locator(".past-lookup .vehicle-choice-list button").first().click();
+  await p.waitForTimeout(900);
+
+  const campo = async (rotulo) => p.locator(".os-past .field").filter({ hasText: new RegExp(`^${rotulo}`) }).first().locator("input").inputValue();
+  if (!(await campo("Placa"))) problemas.push("escolhi a moto e a placa não foi preenchida");
+  if (!(await campo("Motocicleta"))) problemas.push("escolhi a moto e o modelo não foi preenchido");
+  if (!(await campo("Cliente"))) problemas.push("escolhi a moto e o dono não veio junto");
+  if (!(await p.locator(".past-linked").count())) problemas.push("a tela não diz que o lançamento ficou ligado ao cadastro");
+
+  await p.locator('.os-past input[type="date"]').fill("2026-08-20");
+  await p.locator(".os-past textarea").first().fill("TROCA DE OLEO FEITA SEM OS");
+
+  /*
+    E TIRAR A PEÇA DO ESTOQUE.
+
+    É o caso que trouxe este campo para cá: a moto saiu sem OS nenhuma, a peça
+    deixou a prateleira e o sistema nunca soube — o saldo está alto demais e é
+    a baixa que conserta.
+  */
+  const antes = (await banco("products")).find((peca) => Number(peca.stock) > 1 && peca.active !== false);
+  if (!antes) throw new Error("nenhuma peça com saldo para provar a baixa");
+  await p.locator(".order-add-actions button", { hasText: /Adicionar peça/i }).first().click();
+  await p.waitForTimeout(800);
+  await p.locator(".order-item-picker input").first().fill(antes.name);
+  await p.waitForTimeout(1400);
+  if (!(await p.locator(".order-item-result").count())) throw new Error(`não achei "${antes.name}" no buscador de peças da OS antiga`);
+  await p.locator(".order-item-result").first().click();
+  await p.waitForTimeout(1000);
+
+  const interruptor = p.locator(".past-stock-switch input");
+  if (!(await interruptor.count())) problemas.push("com peça na lista, o interruptor da baixa não apareceu");
+  else if (!(await interruptor.isChecked())) problemas.push("o interruptor da baixa deveria vir ligado: é o caso de quem esqueceu de abrir a OS");
+
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(5000);
+  await fecharQualquerDialogo();
+
+  const depois = (await banco("products")).find((peca) => peca._id === antes._id);
+  if (Number(depois?.stock) !== Number(antes.stock) - 1) {
+    problemas.push(`o saldo de ${antes.name} era ${antes.stock} e ficou ${depois?.stock}: esperado ${Number(antes.stock) - 1}`);
+  }
+
+  const lancada = (await banco("serviceOrders")).filter((os) => os.backfilled).pop();
+  if (!lancada) throw new Error("a OS antiga não foi gravada");
+  if (!lancada.clientId) problemas.push("a OS antiga não ficou ligada ao cadastro do cliente");
+  if (!lancada.motorcycleId) problemas.push("a OS antiga não ficou ligada ao cadastro da moto");
+  if (!(lancada.items ?? []).length) problemas.push("a peça não ficou gravada na OS antiga");
+  if (!(lancada.deductedItems ?? []).length) problemas.push("a OS antiga não registrou de onde a peça saiu");
+  // E o que já valia continua valendo: nada disso entra no faturamento.
+  if (!lancada.closed) problemas.push("a OS antiga deveria nascer encerrada, fora da fila da oficina");
+  if (!lancada.backfilled) problemas.push("a OS antiga perdeu a marca que a mantém fora do faturamento");
+
+  await foto("os-antiga");
+  if (problemas.length) throw new Error("OS antiga com cadastro e baixa:\n      - " + problemas.join("\n      - "));
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();
