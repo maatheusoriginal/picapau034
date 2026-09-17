@@ -40,7 +40,7 @@ import { conferirNota, custoUnitario, fatorProblema, lerNfe, quantidadeQueEntra,
 import { HistoryPanel } from "../src/components/HistoryPanel";
 import { accountOpen, accountStatus, openAccounts, changeFor, round2, creditTotal, settledTotal, discountPercent, discountProblem, drawerTotal, financeSummary, isCreditPayment, movementProblem as manualMovementProblem, payableEntries, paymentLabel, receivableAccountEntries, splitInstallments, splitProblem, totalAfterDiscount } from "../src/finance";
 import { buildMovement, cashDifference, cashHistorySummary, cashSummary, closedSessions, differenceLabel, drawerEntries, drawerOrigins, movementProblem, nonDrawerTotal, openSession, sessionIsStale, sessionsInPeriod } from "../src/cash";
-import { mergeParts, priceFromMarkup, shouldReserveStock, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
+import { mergeParts, priceFromMarkup, shouldReserveStock, sortProducts, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoDoServico } from "../src/mechanic";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, copiesToPrint, orderFromQuickService, whatsappUrl, type OrderCopyChoice } from "../src/documents";
@@ -2455,32 +2455,46 @@ export function ModuleWorkspace({
             <button className="outline-button" onClick={() => { setQuery(""); setProductGroup(""); setListFilter("Todos"); }}>Limpar</button>
             <div className="filter-pills">{["Todos", "Reposição", "Crítico", "Sem estoque"].map((filter) => <button className={listFilter === filter ? "selected" : ""} key={filter} onClick={() => setListFilter(filter)}>{filter}</button>)}</div>
           </div>
+          {/*
+            SEIS COLUNAS, E A LISTA CABE NA TELA.
+
+            Eram dez, e a tela rolava para o lado: conferir preço e saldo — que
+            é o que se faz o dia inteiro — exigia arrastar a lista com o cliente
+            esperando no balcão. O que saiu da régua não sumiu: código,
+            referência de fábrica e localização viraram a segunda linha da
+            descrição, onde não custam largura nenhuma e continuam à vista e
+            buscáveis.
+          */}
           <div className="table-scroll">
             <table className="stock-table">
               <thead><tr>
-                <th>Código</th><th className="col-secondary">Referência</th><th className="col-secondary">Cód. barras</th>
-                <th>Descrição</th><th className="col-secondary">Grupo</th><th className="col-secondary">Local</th>
-                <th className="num">Preço</th><th className="num">Estoque</th><th className="col-secondary">Un.</th><th></th>
+                <th className="col-barcode">Cód. barras</th>
+                <th>Descrição</th>
+                <th className="col-group">Grupo</th>
+                <th className="num col-price">Preço</th>
+                <th className="num col-stock">Estoque</th>
+                <th className="col-unit">Un.</th>
+                <th className="col-open"></th>
               </tr></thead>
               <tbody>{filteredProducts.length > 0 ? filteredProducts.map((product) => (
                 <tr key={product.code} onDoubleClick={() => canOperate ? openDialog("product", product.id) : undefined}>
-                  <td className="mono">{product.code}</td>
-                  <td className="col-secondary mono">{product.partNumber || "—"}</td>
-                  <td className="col-secondary mono">{product.barcode || "SEM GTIN"}</td>
-                  <td><strong>{product.name}</strong>{product.active === false ? <span className="inactive-tag">Inativo</span> : null}</td>
-                  <td className="col-secondary">{product.category}</td>
-                  <td className="col-secondary">{product.location || "—"}</td>
-                  <td className="num"><strong className="stock-price">{product.price}</strong></td>
-                  <td className="num">
+                  <td className="mono col-barcode">{product.barcode || "SEM GTIN"}</td>
+                  <td className="stock-name">
+                    <strong>{product.name}</strong>{product.active === false ? <span className="inactive-tag">Inativo</span> : null}
+                    <small>{[product.code, product.partNumber, product.location].filter(Boolean).join(" · ")}</small>
+                  </td>
+                  <td className="col-group">{product.category}</td>
+                  <td className="num col-price"><strong className="stock-price">{product.price}</strong></td>
+                  <td className="num col-stock">
                     <span className={`stock-dot ${product.stock === 0 ? "zero" : product.stock <= product.minimum ? "baixo" : "ok"}`}/>
                     <strong className={product.stock <= product.minimum ? "danger-text" : ""}>{product.stock}</strong>
                   </td>
-                  <td className="col-secondary">{product.unit || "UN"}</td>
-                  <td><button className="row-button" aria-label={`Abrir ${product.name}`} onClick={() => openDialog("product", product.id)}><Icon name="arrow" size={17}/></button></td>
+                  <td className="col-unit">{product.unit || "UN"}</td>
+                  <td className="col-open"><button className="row-button" aria-label={`Abrir ${product.name}`} onClick={() => openDialog("product", product.id)}><Icon name="arrow" size={17}/></button></td>
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>
+                  <td colSpan={7} style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)" }}>
                     {products.length ? "Nenhum produto encontrado com esses filtros." : "Nenhum produto cadastrado no estoque."}
                   </td>
                 </tr>
@@ -6244,7 +6258,16 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
     || (dialog === "orderCheckout" && canCheckoutOrders)
     || (["finance", "expense", "receivable", "payable", "settleReceivable", "settlePayable"].includes(dialog ?? "") && canManageFinance);
   const [orders] = useFirebaseSyncedCollection("serviceOrders", initialOrders, firebaseEnabled && (canViewOrders || canViewBudgets), canCreateOrders || canUpdateOrders, firebaseSession.reportSyncError);
-  const [products] = useFirebaseSyncedCollection("products", initialProducts, firebaseEnabled && canViewInventory, canManageInventory, firebaseSession.reportSyncError);
+  const [produtosDoBanco] = useFirebaseSyncedCollection("products", initialProducts, firebaseEnabled && canViewInventory, canManageInventory, firebaseSession.reportSyncError);
+  /*
+    A ordem alfabética entra AQUI, uma vez só.
+
+    Daqui a lista segue para o estoque, o PDV, a OS, o pegar peça, a contagem e
+    a busca global. Ordenar em cada uma dessas telas seria seis lugares para
+    alguém esquecer de um — e a tela esquecida é a que faz o balcão desconfiar
+    do sistema inteiro.
+  */
+  const products = useMemo(() => sortProducts(produtosDoBanco), [produtosDoBanco]);
   const [clients] = useFirebaseSyncedCollection("clients", initialClients, firebaseEnabled && canViewCustomers, canManageCustomers, firebaseSession.reportSyncError);
   const [motorcycles] = useFirebaseSyncedCollection("motorcycles", initialMotorcycles, firebaseEnabled && canViewCustomers, canManageCustomers, firebaseSession.reportSyncError);
   const [expenses, setExpenses] = useFirebaseSyncedCollection("expenses", initialExpenses, firebaseEnabled && canSeeFinance, canManageFinance, firebaseSession.reportSyncError);

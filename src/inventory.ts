@@ -91,6 +91,25 @@ export function stockDeltas(target: ReservedPart[], reserved: ReservedPart[]): R
     .map(([productId, quantity]) => ({ productId, quantity }));
 }
 
+/**
+ * A lista de peças em ordem alfabética.
+ *
+ * O banco devolve na ordem do código interno (PRD-1, PRD-2...), que é a ordem
+ * em que as peças foram cadastradas — ou seja, nenhuma ordem, do ponto de vista
+ * de quem procura. Quem está no balcão com o cliente na frente procura pelo
+ * NOME: "óleo", "pastilha", "relação". Em ordem de cadastro, achar na lista é
+ * varrer de cima a baixo toda vez.
+ *
+ * `localeCompare` com "pt-BR" é o que faz "Ácido" vir junto de "Acido" e não no
+ * fim da lista, e o desempate pelo código evita que duas peças de mesmo nome
+ * fiquem trocando de lugar a cada atualização da tela.
+ */
+export function sortProducts<T extends { name?: string; code?: string }>(products: T[]): T[] {
+  return [...products].sort((um, outro) =>
+    String(um.name ?? "").localeCompare(String(outro.name ?? ""), "pt-BR", { sensitivity: "base", numeric: true })
+    || String(um.code ?? "").localeCompare(String(outro.code ?? ""), "pt-BR", { numeric: true }));
+}
+
 /** Junta itens repetidos do mesmo produto em uma linha só. */
 export function mergeParts(parts: ReservedPart[]): ReservedPart[] {
   return stockDeltas(parts, []);
