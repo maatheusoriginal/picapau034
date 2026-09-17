@@ -74,6 +74,7 @@ import {
   bootstrapCurrentUserAsSuperAdmin,
   changeOwnPassword,
   createManagedUser,
+  createBackfilledOrder,
   createServiceOrder,
   recordSale,
   saveAccounts,
@@ -2907,6 +2908,7 @@ export function AppDialog({
     }
     if (dialog === "osPast") {
       setAntigaData(""); setAntigaPlaca(""); setAntigaMoto(""); setAntigaCliente(""); setAntigaServico(""); setAntigaValor(""); setAntigaParceiroId(""); setAntigaOsDoParceiro("");
+      setAntigaBusca(""); setAntigaClienteId(""); setAntigaMotoId(""); setAntigaItens([]); setAntigaBaixarEstoque(true);
     }
   }, [dialog]);
 
@@ -2981,6 +2983,23 @@ export function AppDialog({
   const [antigaValor, setAntigaValor] = useState("");
   const [antigaParceiroId, setAntigaParceiroId] = useState("");
   const [antigaOsDoParceiro, setAntigaOsDoParceiro] = useState("");
+  /*
+    A OS antiga puxando cadastro e peça.
+
+    Digitar a placa e o nome à mão criava cliente parecido com um que já
+    existe — "JOÃO DA SILVA" e "JOAO SILVA" viram duas pessoas, e o histórico
+    da moto se parte em dois. A busca aqui encosta o lançamento no cadastro que
+    já existe: escolheu a moto, vem a placa, o modelo e o dono junto.
+
+    As peças existem por causa da moto que saiu sem OS: a peça deixou a
+    prateleira e o sistema nunca soube. Por isso `antigaBaixarEstoque` começa
+    LIGADO — é o caso que trouxe este campo para cá.
+  */
+  const [antigaBusca, setAntigaBusca] = useState("");
+  const [antigaClienteId, setAntigaClienteId] = useState("");
+  const [antigaMotoId, setAntigaMotoId] = useState("");
+  const [antigaItens, setAntigaItens] = useState<ServiceOrderItem[]>([]);
+  const [antigaBaixarEstoque, setAntigaBaixarEstoque] = useState(true);
 
   /**
    * "Pegar peça": o mecânico está com a moto na bancada e vai na prateleira.
@@ -3606,7 +3625,7 @@ export function AppDialog({
     changePassword: "Escolha a senha que você vai usar a partir de agora.",
     osChoice: "Escolha o atendimento que combina com a chegada da moto.",
     os: "Identifique a moto, registre o serviço e confira antes de abrir.",
-    osPast: "Serve para o histórico da moto. Não entra na fila, não baixa peça e não mexe no caixa.",
+    osPast: "Serve para o histórico da moto. Não entra na fila da oficina nem mexe no caixa. As peças podem sair do estoque, se você pedir.",
     takePart: "Escolha a peça e a OS. Ela entra na ordem e sai do estoque no mesmo movimento.",
     quick: "Para trocas e ajustes sem cadastro completo.",
     product: "Cadastre a peça e já defina o saldo inicial.",
@@ -4145,8 +4164,12 @@ export function AppDialog({
         parceiroId: parceira?.id,
         parceiroNome: parceira?.name,
         osDoParceiro: antigaOsDoParceiro,
-        motoId: motorcycles.find((item) => normalizePlate(item.plate) === normalizePlate(antigaPlaca))?.id,
-        clienteId: clients.find((item) => emMaiusculo(item.name) === emMaiusculo(antigaCliente.trim()))?.id,
+        // O cadastro escolhido na busca manda; a placa e o nome só resolvem
+        // quando ninguém escolheu nada, que é o caso de quem digitou direto.
+        motoId: antigaMotoId || motorcycles.find((item) => normalizePlate(item.plate) === normalizePlate(antigaPlaca))?.id,
+        clienteId: antigaClienteId || clients.find((item) => emMaiusculo(item.name) === emMaiusculo(antigaCliente.trim()))?.id,
+        itens: antigaItens,
+        baixarEstoque: antigaBaixarEstoque,
       };
       const problemas = problemasDaOSAntiga(dados);
       if (problemas.length) return setDialogError(problemas.join(" "));
@@ -4172,8 +4195,14 @@ export function AppDialog({
           });
           dados.motoId = novaId;
         }
-        await createServiceOrder(osPrefix, nextOrderNumber, registroDaOSAntiga(dados) as Record<string, unknown>);
-        return finish(`OS de ${dataBrasileira(antigaData)} lançada no histórico da placa ${antigaPlaca}.`);
+        const registro = registroDaOSAntiga(dados);
+        // A OS e a baixa das peças saem no MESMO lote: se o estoque recusar, a
+        // OS não nasce dizendo que baixou peça que continua na prateleira.
+        const baixadas = (registro.deductedItems ?? []) as ReservedPart[];
+        await createBackfilledOrder(osPrefix, nextOrderNumber, registro as Record<string, unknown>, baixadas);
+        return finish(baixadas.length
+          ? `OS de ${dataBrasileira(antigaData)} lançada na placa ${antigaPlaca}, e ${baixadas.length} peça(s) saíram do estoque.`
+          : `OS de ${dataBrasileira(antigaData)} lançada no histórico da placa ${antigaPlaca}.`);
       } catch (falha) {
         return setDialogError(mensagemDoErro(falha, { acao: "lançar a OS no histórico", temPermissao: canOperate }));
       } finally {
@@ -4832,9 +4861,89 @@ export function AppDialog({
           </div>
         ) : null}
 
-        {dialog === "osPast" ? (
+        {dialog === "osPast" ? (() => {
+          /*
+            A busca do cadastro: uma caixa só, procurando placa, cliente e moto.
+
+            Digitar o nome à mão criava gente parecida com gente que já existe —
+            "JOÃO DA SILVA" e "JOAO SILVA" viram duas pessoas, e o histórico da
+            moto se parte em dois. Escolhendo a moto, vem a placa, o modelo e o
+            dono junto, tudo apontando para o cadastro certo.
+          */
+          const procurando = antigaBusca.trim();
+          const motosAchadas = procurando
+            ? motorcycles.filter((moto) => matchesSearch(procurando, moto.plate, moto.brand, moto.model, moto.ownerName, moto.partnerName)).slice(0, 8)
+            : [];
+          const clientesAchados = procurando
+            ? clients.filter((cliente) => matchesSearch(procurando, cliente.name, cliente.phone, cliente.document)).slice(0, 6)
+            : [];
+          const escolherMoto = (moto: MotorcycleRecord) => {
+            setAntigaMotoId(moto.id);
+            setAntigaPlaca(formatPlate(moto.plate || ""));
+            setAntigaMoto([moto.brand, moto.model].filter(Boolean).join(" "));
+            const dono = clients.find((cliente) => cliente.id === moto.ownerId);
+            if (dono) { setAntigaClienteId(dono.id); setAntigaCliente(dono.name); }
+            else if (moto.ownerName) setAntigaCliente(moto.ownerName);
+            setAntigaBusca("");
+          };
+          const escolherCliente = (cliente: ClientRecord) => {
+            setAntigaClienteId(cliente.id);
+            setAntigaCliente(cliente.name);
+            // Uma moto só no nome dele: não há o que escolher, então já vai.
+            const dele = motorcycles.filter((moto) => moto.ownerId === cliente.id);
+            if (dele.length === 1) {
+              setAntigaMotoId(dele[0].id);
+              setAntigaPlaca(formatPlate(dele[0].plate || ""));
+              setAntigaMoto([dele[0].brand, dele[0].model].filter(Boolean).join(" "));
+            }
+            setAntigaBusca("");
+          };
+          const pecasParaBaixar = antigaItens.filter((item) => item.type !== "Mão de obra" && item.productId);
+          const somaDosItens = partnerTotals(antigaItens, 0).total;
+          return (
           <div className="dialog-body os-past">
-            <div className="info-strip"><Icon name="check" size={17}/><span>A OS entra encerrada no <b>histórico da moto</b>, com a data informada. Não altera a fila da oficina, o estoque, o caixa ou o faturamento.</span></div>
+            <div className="info-strip"><Icon name="check" size={17}/><span>A OS entra encerrada no <b>histórico da moto</b>, com a data informada. Não altera a fila da oficina, o caixa ou o faturamento.</span></div>
+
+            {/* Procurar antes de digitar: é o que liga o lançamento ao cadastro
+                que já existe, em vez de criar um parecido. */}
+            <label className="field field-full"><span>Procurar no cadastro</span>
+              <input value={antigaBusca} onChange={(event) => setAntigaBusca(event.target.value)} placeholder="Placa, nome do cliente ou moto"/></label>
+            {procurando && (motosAchadas.length || clientesAchados.length) ? (
+              <div className="past-lookup">
+                {motosAchadas.length ? <>
+                  <div className="os-list-label"><b>Motos</b><span>{motosAchadas.length}</span></div>
+                  <div className="vehicle-choice-list">
+                    {motosAchadas.map((moto) => (
+                      <button key={moto.id} className={antigaMotoId === moto.id ? "selected" : ""} onClick={() => escolherMoto(moto)}>
+                        <span className="catalog-code">{(moto.model || "MT").slice(0, 2).toUpperCase()}</span>
+                        <div><strong>{[moto.brand, moto.model].filter(Boolean).join(" ") || "Moto sem modelo"}</strong><small>{formatPlate(moto.plate)} · {moto.ownerName || moto.partnerName || "sem dono cadastrado"}</small></div>
+                        {antigaMotoId === moto.id ? <i>✓</i> : null}
+                      </button>
+                    ))}
+                  </div>
+                </> : null}
+                {clientesAchados.length ? <>
+                  <div className="os-list-label"><b>Clientes</b><span>{clientesAchados.length}</span></div>
+                  <div className="vehicle-choice-list">
+                    {clientesAchados.map((cliente) => (
+                      <button key={cliente.id} className={antigaClienteId === cliente.id ? "selected" : ""} onClick={() => escolherCliente(cliente)}>
+                        <span className="catalog-code">{cliente.name.slice(0, 2).toUpperCase()}</span>
+                        <div><strong>{cliente.name}</strong><small>{cliente.phone || "sem telefone"}</small></div>
+                        {antigaClienteId === cliente.id ? <i>✓</i> : null}
+                      </button>
+                    ))}
+                  </div>
+                </> : null}
+              </div>
+            ) : null}
+            {procurando && !motosAchadas.length && !clientesAchados.length ? (
+              <div className="os-search-empty"><span>Nada com "{procurando}" no cadastro. Preencha os campos abaixo e o sistema cria o que faltar.</span></div>
+            ) : null}
+            {antigaMotoId || antigaClienteId ? (
+              <div className="past-linked"><Icon name="check" size={16}/><span>Ligado ao cadastro{antigaMotoId ? " da moto" : ""}{antigaMotoId && antigaClienteId ? " e" : ""}{antigaClienteId ? " do cliente" : ""}. O histórico desta OS vai aparecer lá.</span>
+                <button className="text-button" onClick={() => { setAntigaMotoId(""); setAntigaClienteId(""); }}>Desfazer</button></div>
+            ) : null}
+
             <div className="form-grid">
               <label className="field"><span>Data do serviço <b className="req">*</b></span>
                 <input type="date" value={antigaData} max={new Date().toISOString().slice(0, 10)} onChange={(event) => setAntigaData(event.target.value)}/></label>
@@ -4854,10 +4963,35 @@ export function AppDialog({
               <label className="field field-full"><span>O que foi feito <b className="req">*</b></span>
                 <textarea value={antigaServico} onChange={(event) => setAntigaServico(event.target.value)} placeholder="Copie do papel: verificar barulho na parte de trás, trocar capa do banco..."/></label>
               <label className="field"><span>Valor cobrado</span>
-                <MoneyField value={antigaValor} onChange={setAntigaValor} placeholder="0,00"/></label>
+                <MoneyField value={antigaValor} onChange={setAntigaValor} placeholder="0,00"/>
+                {antigaItens.length ? <small className="field-help">Os itens somam {formatBRL(somaDosItens)}. O valor cobrado é o do papel — pode ser outro.</small> : null}</label>
             </div>
+
+            {/*
+              As peças do papel.
+
+              Existe para a moto que saiu sem OS nenhuma: a peça deixou a
+              prateleira e o sistema nunca soube, então o saldo está mentindo
+              para mais e é a baixa que conserta. É o mesmo editor de itens da
+              OS normal — o balcão não precisa aprender outra tela.
+            */}
+            <div className="order-section">
+              <OrderItemsEditor items={antigaItens} onChange={setAntigaItens} products={products} editable={canOperate}/>
+            </div>
+            {pecasParaBaixar.length ? (
+              <label className={antigaBaixarEstoque ? "past-stock-switch is-on" : "past-stock-switch"}>
+                <input type="checkbox" checked={antigaBaixarEstoque} onChange={(event) => setAntigaBaixarEstoque(event.target.checked)}/>
+                <span>
+                  <strong>Tirar estas {pecasParaBaixar.length} peça(s) do estoque agora</strong>
+                  <small>{antigaBaixarEstoque
+                    ? "Marque quando a moto saiu sem OS: a peça sumiu da prateleira e o sistema nunca soube, então o saldo está alto demais."
+                    : "Desmarcado: a saída destas peças já foi registrada na época, e baixar de novo faria o saldo ficar baixo demais."}</small>
+                </span>
+              </label>
+            ) : null}
           </div>
-        ) : null}
+          );
+        })() : null}
 
         {dialog === "takePart" ? (() => {
           const achadas = acharPecas(products, pecaBusca);

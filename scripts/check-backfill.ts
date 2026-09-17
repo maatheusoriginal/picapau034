@@ -8,7 +8,7 @@
  *
  * Rode com: npm run check:backfill
  */
-import { dataBrasileira, instanteDaOSAntiga, problemasDaOSAntiga, registroDaOSAntiga, separarMarcaEModelo, type OSAntiga } from "../src/backfill";
+import { dataBrasileira, instanteDaOSAntiga, pecasDaOSAntiga, problemasDaOSAntiga, registroDaOSAntiga, separarMarcaEModelo, type OSAntiga } from "../src/backfill";
 import { historySortKey, motorcycleHistory } from "../src/history";
 import { revenueEntries } from "../src/finance";
 import type { MotorcycleRecord, OrderRecord, SaleRecord } from "../src/types";
@@ -112,6 +112,66 @@ const casos: Array<[string, unknown, unknown]> = [
   ["o que foi feito aparece na linha",
     historico.entries[1]?.services, "Verificar barulho na parte de trás da moto"],
 ];
+
+/*
+  AS PEÇAS DO LANÇAMENTO, E A BAIXA DO ESTOQUE.
+
+  Existem dois casos opostos, e quem sabe qual é quem estava lá:
+
+  - A moto saiu SEM OS nenhuma. A peça deixou a prateleira e o sistema nunca
+    soube, então o saldo já está mentindo PARA MAIS: é a baixa que conserta.
+  - A saída já foi registrada na época. Dar baixa de novo hoje faz o saldo
+    mentir PARA MENOS, e a oficina compra peça que já tem.
+
+  Por isso a baixa é escolhida, e por isso ela é conferida nos dois sentidos.
+*/
+const comPecas = {
+  data: "2026-09-03", placa: "ABC-1D23", moto: "Honda CG 160", cliente: "JOAO",
+  servico: "TROCA DE OLEO", valor: 180,
+  itens: [
+    { id: "L1", type: "Mão de obra" as const, name: "TROCA DE OLEO", price: 60 },
+    { id: "P1", type: "Peça" as const, productId: "PRD-2", name: "OLEO 20W50", price: 90, quantity: 2 },
+    { id: "P2", type: "Peça" as const, productId: "PRD-5", name: "FILTRO", price: 30, quantity: 1 },
+  ],
+};
+
+const baixando = registroDaOSAntiga({ ...comPecas, baixarEstoque: true });
+const semBaixar = registroDaOSAntiga({ ...comPecas, baixarEstoque: false });
+
+casos.push(
+  ["as peças do papel ficam gravadas na OS", (baixando.items ?? []).length, 3],
+  ["e ficam gravadas mesmo sem baixar o estoque", (semBaixar.items ?? []).length, 3],
+
+  ["pedindo a baixa, as duas peças saem do estoque", JSON.stringify(baixando.deductedItems),
+    JSON.stringify([{ productId: "PRD-2", quantity: 2 }, { productId: "PRD-5", quantity: 1 }])],
+  ["sem pedir, nada sai", JSON.stringify(semBaixar.deductedItems), "[]"],
+
+  // Mão de obra não tem prateleira.
+  ["a mão de obra não vira baixa de estoque",
+    JSON.stringify(pecasDaOSAntiga({ ...comPecas, baixarEstoque: true }).map((p) => p.productId)),
+    JSON.stringify(["PRD-2", "PRD-5"])],
+
+  // Peça digitada à mão, sem produto do cadastro: o estoque não sabe de qual
+  // saldo descontar, e inventar um seria pior do que não descontar.
+  ["peça avulsa, sem cadastro, não baixa nada",
+    pecasDaOSAntiga({ ...comPecas, baixarEstoque: true, itens: [{ id: "X", type: "Peça", name: "PARAFUSO SOLTO", price: 5, quantity: 3 }] }).length, 0],
+
+  // A mesma peça em duas linhas vira uma baixa só, com a soma.
+  ["a mesma peça em duas linhas vira uma baixa só",
+    JSON.stringify(pecasDaOSAntiga({ ...comPecas, baixarEstoque: true, itens: [
+      { id: "A", type: "Peça", productId: "PRD-2", name: "OLEO", price: 45, quantity: 1 },
+      { id: "B", type: "Peça", productId: "PRD-2", name: "OLEO", price: 45, quantity: 2 },
+    ] })),
+    JSON.stringify([{ productId: "PRD-2", quantity: 3 }])],
+
+  // Sem itens, o lançamento continua sendo o de sempre: só o histórico.
+  ["lançamento sem peça nenhuma continua não mexendo no estoque",
+    JSON.stringify(registroDaOSAntiga({ ...comPecas, itens: [], baixarEstoque: true }).deductedItems), "[]"],
+
+  // E o que já valia continua valendo: nada disso entra no faturamento.
+  ["com peça e tudo, o lançamento continua fora do faturamento", baixando.backfilled, true],
+  ["e continua nascendo encerrado", baixando.closed, true],
+);
 
 let falhas = 0;
 for (const [nome, obtido, esperado] of casos) {

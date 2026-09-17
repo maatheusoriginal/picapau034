@@ -461,3 +461,19 @@ table td strong, table td span { font-size: .875rem; }
   .stock-table .col-price { width: 92px; }
   .stock-table .col-stock { width: 78px; }
 }
+
+/* ---------------------------------------------------------------------------
+   OS antiga: puxar cadastro e baixar peça
+--------------------------------------------------------------------------- */
+.past-lookup { margin: -6px 0 4px; }
+.past-linked { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding: 10px 12px; border-radius: 8px; background: #eef5e5; color: #3f5731; font-size: .8125rem; }
+.past-linked > span { flex: 1; min-width: 180px; }
+/* O interruptor da baixa fica evidente de propósito: é o único campo desta
+   tela que mexe no saldo da prateleira, e marcá-lo por engano tira peça que
+   nunca saiu. */
+.past-stock-switch { display: flex; align-items: flex-start; gap: 11px; margin-top: 14px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 9px; background: #fff; cursor: pointer; }
+.past-stock-switch.is-on { border-color: #cbb08a; background: #fffaf2; }
+.past-stock-switch input { width: 19px; height: 19px; margin-top: 1px; flex-shrink: 0; accent-color: #a8722c; }
+.past-stock-switch strong { display: block; font-size: .9375rem; }
+.past-stock-switch small { display: block; margin-top: 3px; font-size: .8125rem; color: var(--muted); line-height: 1.45; }
+.os-past .order-items-editor { margin-top: 16px; }

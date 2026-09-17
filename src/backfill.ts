@@ -13,8 +13,12 @@
  *   quando o serviço foi feito, que é justamente o que se quer saber.
  * - Ela nasce encerrada. Uma OS antiga que entra como "Em avaliação" aparece na
  *   fila da oficina como se a moto estivesse lá agora.
- * - Ela não baixa peça do estoque. A peça saiu da prateleira meses atrás; dar
- *   baixa de novo hoje faria o saldo mentir.
+ * - A baixa da peça é ESCOLHIDA, e não automática. Existem os dois casos, e
+ *   eles são opostos: se a saída da peça já foi registrada na época, dar baixa
+ *   de novo hoje faz o saldo mentir para menos; se a moto saiu da oficina sem
+ *   OS nenhuma — que é o caso do "esqueci de abrir" —, a peça sumiu da
+ *   prateleira e o sistema nunca soube, então o saldo já está mentindo para
+ *   mais e é a baixa que conserta. Quem sabe qual dos dois é quem estava lá.
  * - Ela não entra no caixa nem no relatório financeiro. O dinheiro já foi
  *   contado onde quer que a oficina contasse antes; somar de novo inventaria
  *   faturamento que não existiu. Por isso o registro sai marcado com
@@ -23,7 +27,8 @@
  * O valor continua gravado, porque no histórico ele responde a outra pergunta:
  * quanto o cliente já gastou nessa moto.
  */
-import type { OrderRecord } from "./types";
+import type { OrderRecord, ServiceOrderItem } from "./types";
+import { mergeParts } from "./inventory";
 
 export type OSAntiga = {
   /** Data do atendimento, como vem do <input type="date">: aaaa-mm-dd. */
@@ -41,6 +46,16 @@ export type OSAntiga = {
   osDoParceiro?: string;
   clienteId?: string;
   motoId?: string;
+  /** Peças e mão de obra do papel, quando a oficina quiser detalhar. */
+  itens?: ServiceOrderItem[];
+  /**
+   * Tirar estas peças do estoque agora.
+   *
+   * Vale para a moto que saiu sem OS: a peça deixou a prateleira e o sistema
+   * nunca soube. Se a saída já tiver sido registrada na época, isto fica
+   * desligado, senão a peça é descontada duas vezes.
+   */
+  baixarEstoque?: boolean;
 };
 
 /**
@@ -105,9 +120,24 @@ export function problemasDaOSAntiga(dados: Partial<OSAntiga>, hoje: Date = new D
  * Nasce encerrada, com a data do papel nos dois campos que o histórico lê
  * (`time` e `closedAt`), sem item nenhum e sem baixa de estoque.
  */
+/**
+ * As peças do lançamento, juntas por produto, no formato do estoque.
+ *
+ * Mão de obra fica de fora — ela não tem prateleira. Peça digitada à mão, sem
+ * produto do cadastro, também: o estoque não sabe de qual saldo descontar, e
+ * inventar um seria pior do que não descontar.
+ */
+export function pecasDaOSAntiga(dados: OSAntiga): Array<{ productId: string; quantity: number }> {
+  if (!dados.baixarEstoque) return [];
+  return mergeParts((dados.itens ?? [])
+    .filter((item) => item.type !== "Mão de obra" && !!item.productId)
+    .map((item) => ({ productId: item.productId!, quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1 })));
+}
+
 export function registroDaOSAntiga(dados: OSAntiga): Partial<OrderRecord> {
   const data = dataBrasileira(dados.data);
   const servico = String(dados.servico ?? "").trim();
+  const itens = (dados.itens ?? []).map((item) => ({ ...item }));
   return {
     customer: String(dados.cliente ?? "").trim() || "Cliente não identificado",
     bike: String(dados.moto ?? "").trim() || "Motocicleta",
@@ -117,7 +147,7 @@ export function registroDaOSAntiga(dados: OSAntiga): Partial<OrderRecord> {
     time: data,
     status: "Finalizada",
     tone: "green",
-    items: [],
+    items: itens,
     // O texto do papel vira `service` E `problem`: o primeiro é o que o
     // histórico mostra na linha, o segundo é o que aparece ao abrir a OS.
     service: servico,
@@ -129,7 +159,9 @@ export function registroDaOSAntiga(dados: OSAntiga): Partial<OrderRecord> {
     // Sem esta marca a OS entraria no faturamento do período em que foi feita,
     // inventando receita que a oficina já contou de outro jeito.
     backfilled: true,
-    deductedItems: [],
+    // O que sai do estoque por causa deste lançamento. Lista vazia quando a
+    // oficina disse que a peça já tinha sido baixada na época.
+    deductedItems: dados.baixarEstoque ? pecasDaOSAntiga(dados) : [],
     origin: dados.parceiroNome ? `Encaminhado por ${dados.parceiroNome}` : "Cliente direto",
     ...(dados.clienteId ? { clientId: dados.clienteId } : {}),
     ...(dados.motoId ? { motorcycleId: dados.motoId } : {}),

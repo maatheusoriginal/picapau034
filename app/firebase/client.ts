@@ -637,6 +637,49 @@ export async function createServiceOrder(prefix: string, startNumber: number, da
 }
 
 /**
+ * A OS antiga e a baixa das peças, no MESMO lote.
+ *
+ * `saveOrderWithStock` não serve aqui, e por um bom motivo: ela recusa OS
+ * encerrada, para ninguém mexer no estoque de uma ordem que já foi recebida. A
+ * OS antiga nasce encerrada — é o que a mantém fora da fila da oficina —, então
+ * ela bate exatamente nessa trava.
+ *
+ * O caminho certo é o mesmo da venda do balcão: um lote só. Se a baixa for
+ * recusada, a OS também não nasce. O contrário — a OS gravada dizendo que
+ * baixou peça que continua na prateleira — é estoque mentindo com papel
+ * assinado, e ninguém descobre até contar a prateleira.
+ *
+ * `increment` em vez de gravar (saldo - baixado) porque o saldo que a tela
+ * conhece foi lido quando a peça entrou na lista e pode estar velho.
+ */
+export async function createBackfilledOrder(
+  prefix: string,
+  startNumber: number,
+  data: Record<string, unknown>,
+  stockUpdates: Array<{ productId: string; quantity: number }>,
+) {
+  const { db } = services();
+  const safePrefix = (prefix || "OS").trim().replace(/-+$/, "") || "OS";
+  try {
+    for (let number = Math.max(1, startNumber); number < startNumber + 50; number += 1) {
+      const id = `${safePrefix}-${String(number).padStart(4, "0")}`;
+      const reference = doc(db, "serviceOrders", id);
+      if ((await getDoc(reference)).exists()) continue;
+      const batch = writeBatch(db);
+      batch.set(reference, { ...withoutUndefined(data), createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      for (const { productId, quantity } of stockUpdates) {
+        batch.set(doc(db, "products", productId), { stock: increment(-quantity), updatedAt: serverTimestamp() }, { merge: true });
+      }
+      await batch.commit();
+      return id;
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "serviceOrders");
+  }
+  throw new Error("Não foi possível gerar um número livre para a ordem de serviço. Tente novamente.");
+}
+
+/**
  * Grava a venda e a baixa de estoque no MESMO lote.
  *
  * Os dois precisam acontecer juntos: uma venda registrada sem a baixa deixa o
