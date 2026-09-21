@@ -3637,7 +3637,9 @@ await passo("a lista de peças abre sem digitar, busca pelo nome, e o desconto e
     await abrirRecebimento();
     const resumo = (await p.locator(".checkout-totals").first().innerText().catch(() => "")).replace(/\n/g, " ");
     if (!/Desconto/i.test(resumo)) problemas.push(`o resumo do encerramento não mostra o desconto: "${resumo}"`);
-    const cobrado = dinheiro((resumo.match(/Total da OS\s*([^A-Za-z]+)/) ?? [])[1] ?? "");
+    // O valor vem do ELEMENTO, e não de um recorte do texto: "R$" começa com
+    // letra, e a primeira tentativa de recortar por aqui leu vazio e virou 0.
+    const cobrado = dinheiro(await p.locator(".checkout-totals strong b").first().innerText().catch(() => ""));
     if (Math.abs(cobrado - (cheio - desconto)) > 0.02) {
       problemas.push(`o encerramento vai cobrar ${cobrado} e a OS com desconto vale ${cheio - desconto}`);
     }
