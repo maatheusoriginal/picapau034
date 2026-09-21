@@ -3654,10 +3654,22 @@ await passo("a lista de peças abre sem digitar, busca pelo nome, e o desconto e
   */
   await p.setViewportSize({ width: 390, height: 844 });
   await p.waitForTimeout(1500);
-  // No celular o quadro mostra uma etapa por vez: a pílula escolhe qual.
-  const pilula = p.locator(".board-stage-pills button.selected, .board-stage-pills button").first();
-  if (await pilula.count()) { await pilula.click(); await p.waitForTimeout(1000); }
-  await abrirPrimeiraOS();
+  /*
+    No celular o quadro mostra UMA etapa por vez, e a pílula escolhe qual. A
+    etapa aberta pode estar vazia — este passo acabou de levar a OS para
+    Finalizada —, e aí o card existe no DOM mas escondido: clicar nele espera
+    trinta segundos por algo que nunca fica visível. Então a pílula é escolhida
+    pelo que tem card À VISTA, e não pela ordem.
+  */
+  const pilulas = p.locator(".board-stage-pills button");
+  let abriu = false;
+  for (let i = 0; i < (await pilulas.count()); i += 1) {
+    await pilulas.nth(i).click();
+    await p.waitForTimeout(1000);
+    const card = p.locator(".order-board-column:visible .board-card button", { hasText: /Abrir OS/ }).first();
+    if (await card.count() && await card.isVisible().catch(() => false)) { await card.click(); abriu = true; break; }
+  }
+  if (!abriu) throw new Error("no celular nenhuma etapa do quadro tinha OS à vista para abrir");
   await p.waitForTimeout(3000);
   await p.locator(".order-add-actions button", { hasText: /Adicionar peça/i }).first().click();
   await p.waitForTimeout(1500);
