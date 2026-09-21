@@ -477,3 +477,48 @@ table td strong, table td span { font-size: .875rem; }
 .past-stock-switch strong { display: block; font-size: .9375rem; }
 .past-stock-switch small { display: block; margin-top: 3px; font-size: .8125rem; color: var(--muted); line-height: 1.45; }
 .os-past .order-items-editor { margin-top: 16px; }
+
+/* ---------------------------------------------------------------------------
+   Desconto na OS
+
+   Fica colado no total de propósito: é ali que a pessoa olha quando o cliente
+   pergunta "quanto fica". A linha de subtotal e a porcentagem existem para a
+   conta fechar na frente dele, sem ninguém precisar confiar.
+--------------------------------------------------------------------------- */
+.order-discount { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; margin-top: 14px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 9px; background: #fffdf8; }
+.order-discount .field { width: 150px; flex-shrink: 0; }
+.order-discount-hint { flex: 1; min-width: 170px; display: flex; flex-direction: column; gap: 2px; font-size: .8125rem; color: var(--muted); }
+.order-discount-hint b { color: #8a5417; font-size: .9375rem; font-variant-numeric: tabular-nums; }
+.order-discount-hint em { font-style: normal; color: #a8492f; }
+.order-discount .text-button { flex-shrink: 0; color: #8a5417; }
+@media (max-width: 560px) {
+  .order-discount { gap: 10px; padding: 12px; }
+  .order-discount .field { width: 100%; }
+  .order-discount-hint { flex-basis: 100%; }
+}
+
+/* ---------------------------------------------------------------------------
+   Buscador de peça da OS
+
+   A lista abre já com as peças, antes de qualquer busca: no celular o mecânico
+   não sabe se a peça foi cadastrada como "OLEO" ou "ÓLEO MOTOR", e cada
+   tentativa errada devolvia tela vazia. Com a lista à vista ele reconhece pelo
+   nome em vez de acertar a palavra.
+
+   O quadro rola POR DENTRO — sem isso, quarenta peças empurram o diálogo e o
+   botão de salvar some do alcance do polegar.
+--------------------------------------------------------------------------- */
+.order-item-results { max-height: 46vh; overflow-y: auto; scrollbar-width: thin; border: 1px solid var(--line); border-radius: 9px; margin-top: 10px; background: #fff; }
+.order-item-results .order-item-result { padding: 12px 11px; }
+.order-item-results .order-item-result:last-child { border-bottom: 0; }
+.order-item-picker .mini-search { position: sticky; top: 0; z-index: 2; }
+
+@media (max-width: 560px) {
+  /* No telefone a lista para ANTES do rodapé do diálogo: com 52vh ela passava
+     da borda de baixo da tela e o botão de salvar ficava atrás de um rolar a
+     mais. Quarenta por cento da altura ainda mostra seis peças de uma vez. */
+  .order-item-results { max-height: 40vh; }
+  .order-item-results .order-item-result { padding: 14px 12px; min-height: 56px; }
+  .order-item-result strong { font-size: .9375rem; }
+  .order-item-picker { padding: 0 13px 14px; }
+}

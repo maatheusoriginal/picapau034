@@ -106,6 +106,51 @@ const casos: Array<[string, unknown, unknown]> = [
   ["moto sem dono não mostra separador solto", motorcycleLabel({ plate: "ABC-1D23", model: "Honda CG 160" }), "Honda CG 160 · ABC-1D23"],
 ];
 
+/*
+  O DESCONTO QUE A OFICINA DÁ NO BALCÃO.
+
+  Itens: R$ 200 de mão de obra e R$ 100 de peça = R$ 300.
+
+  É diferente do desconto da parceira e os dois convivem. O da parceira é
+  contrato e só pega mão de obra; o do balcão é "leva por 250" e pega o que
+  sobrou, peça incluída — quem decide abrir mão é o dono.
+*/
+casos.push(
+  ["sem desconto nenhum, paga os 300", partnerTotals(itens, 0, 0).total, 300],
+  ["R$ 50 de desconto no balcão: paga 250", partnerTotals(itens, 0, 50).total, 250],
+  ["e o desconto aparece separado para a tela mostrar", partnerTotals(itens, 0, 50).manualDiscount, 50],
+
+  // Os dois juntos: 15% sobre 200 de mão de obra = 30, sobram 270, menos 20.
+  ["parceira e balcão somam, sem se atrapalhar", partnerTotals(itens, 15, 20).total, 250],
+  ["o desconto da parceira continua separado", partnerTotals(itens, 15, 20).partnerDiscount, 30],
+  ["o do balcão também", partnerTotals(itens, 15, 20).manualDiscount, 20],
+  ["e o desconto somado é o que o cliente vê no papel", partnerTotals(itens, 15, 20).discount, 50],
+
+  /*
+    O TOTAL NUNCA FICA NEGATIVO.
+
+    Desconto maior que a conta vira a conta inteira, e não dinheiro a devolver.
+    Sem isto, um zero a mais digitado com o cliente na frente viraria uma OS de
+    valor negativo entrando no caixa como se a oficina devesse a ele.
+  */
+  ["desconto maior que a conta zera, não inverte", partnerTotals(itens, 0, 5000).total, 0],
+  ["e o desconto registrado é o da conta, não o digitado", partnerTotals(itens, 0, 5000).manualDiscount, 300],
+  ["com a parceira junto, o teto é o que sobrou dela", partnerTotals(itens, 15, 5000).manualDiscount, 270],
+
+  // Campo digitado por gente com o cliente na frente: nada disso pode derrubar
+  // a conta nem virar acréscimo.
+  ["desconto negativo não vira acréscimo", partnerTotals(itens, 0, -80).total, 300],
+  ["desconto quebrado vale zero", partnerTotals(itens, 0, Number.NaN).total, 300],
+  ["desconto de centavos é respeitado", partnerTotals(itens, 0, 0.55).total, 299.45],
+
+  // Peça sozinha também aceita o desconto do balcão — é o que o diferencia do
+  // desconto da parceira, que só pega mão de obra.
+  ["OS só de peça aceita desconto do balcão", partnerTotals([itens[1]!, itens[2]!], 0, 30).total, 70],
+  ["mas continua sem desconto de parceira", partnerTotals([itens[1]!, itens[2]!], 15, 0).total, 100],
+
+  ["OS vazia com desconto continua zerada", partnerTotals([], 0, 50).total, 0],
+);
+
 let falhas = 0;
 for (const [nome, obtido, esperado] of casos) {
   const ok = obtido === esperado;

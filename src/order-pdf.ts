@@ -113,7 +113,9 @@ export type OrderPdfInput = {
 
 export function buildOrderPdfModel({ order, client, motorcycle, settings, mechanics, laborDiscountPercent = 0 }: OrderPdfInput): OrderPdfModel {
   const items = order.items ?? [];
-  const totais = partnerTotals(items, laborDiscountPercent);
+  // O desconto sai da PRÓPRIA OS, e não de um parâmetro: assim o papel do
+  // cliente não tem como mostrar um total diferente do que está gravado.
+  const totais = partnerTotals(items, laborDiscountPercent, Number(order.discount ?? 0));
   const servicos = items.filter((item) => item.type === "Mão de obra");
   const pecas = items.filter((item) => item.type !== "Mão de obra");
 

@@ -2785,6 +2785,15 @@ export function AppDialog({
   const [orderDelivery, setOrderDelivery] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
   const [orderSolution, setOrderSolution] = useState("");
+  /*
+    O desconto desta OS, em reais, como o balcão digita.
+
+    Guardado como texto porque é o que o MoneyField edita — "leva por 250" é
+    digitado com o cliente na frente, e o campo precisa aceitar apagar tudo sem
+    voltar para 0 sozinho. A conta usa `valorDigitado`, que é a mesma conversão
+    do resto do sistema.
+  */
+  const [orderDiscount, setOrderDiscount] = useState("");
   const [quickService, setQuickService] = useState(quickServices[0]?.name ?? "Serviço rápido");
   const [quickProduct, setQuickProduct] = useState("Sem produto");
   const [quickCustomer, setQuickCustomer] = useState("");
@@ -3042,6 +3051,7 @@ export function AppDialog({
     setOrderDelivery(calendarDay(currentOrder.delivery));
     setOrderNotes(currentOrder.notes || "");
     setOrderSolution(currentOrder.solution || "");
+    setOrderDiscount(currentOrder.discount ? String(currentOrder.discount).replace(".", ",") : "");
     setDialogError("");
   }, [dialog, currentOrder?.id]);
 
@@ -3367,7 +3377,6 @@ export function AppDialog({
   const expenseMargin = expenseCharged - expenseCost;
   const checkoutPartsTotal = checkoutItems.filter((item) => item.type === "Peça").reduce((sum, item) => sum + item.price, 0);
   const checkoutLaborTotal = checkoutItems.filter((item) => item.type === "Mão de obra").reduce((sum, item) => sum + item.price, 0);
-  const checkoutRawTotal = checkoutPartsTotal + checkoutLaborTotal;
   // Numa OS de empresa parceira, o desconto combinado sai do total ANTES de
   // virar fatura. Mostrar o desconto na tela e cobrar o valor cheio — que era
   // o que acontecia — é pior do que não ter desconto nenhum: a empresa confere
@@ -3375,11 +3384,17 @@ export function AppDialog({
   const checkoutPartner = currentOrder && isPartnerBilled(currentOrder)
     ? partners.find((item) => item.id === currentOrder.partnerId) ?? null
     : null;
+  /*
+    O que o cliente paga no encerramento.
+
+    Passa pela MESMA conta da tela da OS, com o desconto gravado na ordem: sem
+    isso a moto sairia cobrada pelo valor cheio, com o cupom dizendo outro.
+    A OS antiga, sem itens detalhados, continua valendo pelo total guardado.
+  */
+  const checkoutContas = partnerTotals(checkoutItems, checkoutPartner?.laborDiscount ?? 0, Number(currentOrder?.discount ?? 0));
   const checkoutTotal = !currentOrder?.items?.length && !checkoutItems.length && (currentOrder?.total ?? 0) > 0
     ? currentOrder!.total!
-    : checkoutPartner
-    ? partnerTotals(checkoutItems, checkoutPartner.laborDiscount ?? 0).total
-    : checkoutRawTotal;
+    : checkoutContas.total;
   const tradeCompensated = Math.min(Math.max(valorDigitado(tradeValue) || 0, 0), checkoutTotal);
   const tradeRemaining = Math.max(checkoutTotal - tradeCompensated, 0);
   const tradeCreditRemaining = Math.max((valorDigitado(tradeValue) || 0) - checkoutTotal, 0);
@@ -3996,7 +4011,12 @@ export function AppDialog({
     const partner = partners.find((item) => item.id === currentOrder.partnerId);
     const itemsChanged = JSON.stringify(orderItems) !== JSON.stringify(currentOrder.items ?? []);
     const mudancas = {
-      ...(itemsChanged ? { items: orderItems, total: partnerTotals(orderItems, partner?.laborDiscount ?? 0).total } : {}),
+      // O desconto e os itens andam juntos na mesma conta: mudar um sem
+      // recalcular o total deixaria a OS com um valor que não é o dela.
+      discount: partnerTotals(orderItems, partner?.laborDiscount ?? 0, valorDigitado(orderDiscount)).manualDiscount,
+      ...(itemsChanged || valorDigitado(orderDiscount) !== Number(currentOrder.discount ?? 0)
+        ? { items: orderItems, total: partnerTotals(orderItems, partner?.laborDiscount ?? 0, valorDigitado(orderDiscount)).total }
+        : {}),
       delivery: orderDelivery, notes: orderNotes, solution: orderSolution,
       // Cliente e moto podem ser corrigidos depois: é o caso da moto que chega
       // no guincho. Nome em branco não apaga o que já estava gravado, senão
@@ -5902,7 +5922,43 @@ export function AppDialog({
                 <div className="order-section">
                   <OrderItemsEditor items={orderItems} onChange={setOrderItems} products={products} editable={canOperate && !currentOrder.closed && !(!currentOrder.items?.length && (currentOrder.total ?? 0) > 0)}/>
                   {!currentOrder.items?.length && (currentOrder.total ?? 0) > 0 && <p className="readonly-notice">Registro antigo sem itens detalhados. Total preservado: {formatBRL(currentOrder.total ?? 0)}.</p>}
-                  <div className="order-total"><span>Total do atendimento</span><strong>{formatBRL(!currentOrder.items?.length && !orderItems.length ? currentOrder.total ?? 0 : partnerTotals(orderItems, partners.find((partner) => partner.id === currentOrder.partnerId)?.laborDiscount ?? 0).total)}</strong></div>
+                  {(() => {
+                    /*
+                      O total com o desconto, na MESMA conta do resto.
+
+                      `partnerTotals` é a conta da OS — a tela, o cupom, o PDF e
+                      o encerramento chamam todos ela. O desconto entra por
+                      dentro dela, e não subtraído aqui na tela: um cálculo
+                      separado aqui mostraria um total que o cupom não repete.
+                    */
+                    const semItens = !currentOrder.items?.length && !orderItems.length;
+                    const descontoDaParceira = partners.find((partner) => partner.id === currentOrder.partnerId)?.laborDiscount ?? 0;
+                    const contas = partnerTotals(orderItems, descontoDaParceira, valorDigitado(orderDiscount));
+                    const podeDarDesconto = canOperate && !currentOrder.closed && !semItens;
+                    return <>
+                      {podeDarDesconto ? (
+                        <div className="order-discount">
+                          <label className="field">
+                            <span>Desconto (R$)</span>
+                            <MoneyField value={orderDiscount} onChange={setOrderDiscount} placeholder="0,00"/>
+                          </label>
+                          <div className="order-discount-hint">
+                            {contas.manualDiscount > 0 ? <>
+                              <span>Subtotal {formatBRL(contas.total + contas.manualDiscount)}</span>
+                              <b>− {formatBRL(contas.manualDiscount)}{contas.total + contas.manualDiscount > 0 ? ` · ${(Math.round((contas.manualDiscount / (contas.total + contas.manualDiscount)) * 1000) / 10).toLocaleString("pt-BR")}%` : ""}</b>
+                              {/* O teto avisa em vez de aceitar calado: desconto
+                                  maior que a conta vira a conta inteira. */}
+                              {valorDigitado(orderDiscount) > contas.manualDiscount
+                                ? <em>Desconto maior que o atendimento: vale {formatBRL(contas.manualDiscount)}.</em>
+                                : null}
+                            </> : <span>Sem desconto neste atendimento.</span>}
+                          </div>
+                          {contas.manualDiscount > 0 ? <button className="text-button" onClick={() => setOrderDiscount("")}>Tirar desconto</button> : null}
+                        </div>
+                      ) : null}
+                      <div className="order-total"><span>Total do atendimento</span><strong>{formatBRL(semItens ? currentOrder.total ?? 0 : contas.total)}</strong></div>
+                    </>;
+                  })()}
                 </div>
                 <fieldset className="order-followup" disabled={!canOperate || !!currentOrder.closed}><legend>Acompanhamento</legend><div className="form-grid"><label className="field"><span>Previsão de entrega</span><input type="date" value={orderDelivery} onChange={(event) => setOrderDelivery(event.target.value)}/></label><label className="field field-full"><span>Diagnóstico e serviço realizado</span><textarea value={orderSolution} onChange={(event) => setOrderSolution(event.target.value)} placeholder="O que foi identificado e realizado na moto"/></label><label className="field field-full"><span>Observações</span><textarea value={orderNotes} onChange={(event) => setOrderNotes(event.target.value)} placeholder="Peça aguardada, retorno do cliente ou outras informações"/></label></div></fieldset>
                 <div className="order-progress interactive">{serviceOrderStatuses.map((item, index) => { const currentIndex = serviceOrderStatuses.indexOf(orderStatus); return <button disabled={!canOperate || !!currentOrder.closed} className={index <= currentIndex ? "done" : ""} key={item} onClick={() => setOrderStatus(item)}><i>{index < currentIndex ? "✓" : index + 1}</i><span>{item}</span></button>; })}</div>
@@ -5942,7 +5998,7 @@ export function AppDialog({
               <section className="checkout-items-panel">
                 <div className="checkout-panel-title"><div><strong>Peças e mão de obra finais</strong><small>Você ainda pode corrigir os itens antes de cobrar.</small></div><span>{checkoutItems.length} itens</span></div>
                 <div className="checkout-item-list">{checkoutItems.length ? checkoutItems.map((item, index) => <div className="checkout-item" key={item.id}><span className={`item-type ${item.type === "Peça" ? "part" : "labor"}`}>{item.type}</span><div><strong>{item.name}</strong><small>{item.type === "Peça" ? "Preço fixo do produto" : "Valor informado nesta OS"}</small></div><b>{formatBRL(item.price)}</b><button aria-label={`Remover ${item.name}`} onClick={() => setCheckoutItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>) : <div className="empty-panel"><Icon name="box" size={20}/><span>Nenhum item adicionado ao fechamento.</span></div>}</div>
-                <div className="checkout-totals"><span>Peças <b>{formatBRL(checkoutPartsTotal)}</b></span><span>Mão de obra <b>{formatBRL(checkoutLaborTotal)}</b></span><strong>Total da OS <b>{formatBRL(checkoutTotal)}</b></strong></div>
+                <div className="checkout-totals"><span>Peças <b>{formatBRL(checkoutPartsTotal)}</b></span><span>Mão de obra <b>{formatBRL(checkoutLaborTotal)}</b></span>{checkoutContas.discount > 0 ? <span>Desconto <b>− {formatBRL(checkoutContas.discount)}</b></span> : null}<strong>Total da OS <b>{formatBRL(checkoutTotal)}</b></strong></div>
 
                 <div className="checkout-add-block"><div className="checkout-add-title"><Icon name="box" size={17}/><div><strong>Adicionar outra peça</strong><small>O valor de venda vem bloqueado do cadastro.</small></div></div><label className="mini-search"><Icon name="search" size={16}/><input value={checkoutPieceSearch} onChange={(event) => setCheckoutPieceSearch(event.target.value)} placeholder="Buscar peça ou código"/></label><div className="checkout-product-results">{produtosAtivos.filter((product) => product.stock > 0 && `${product.name} ${product.code}`.toLowerCase().includes(checkoutPieceSearch.toLowerCase())).slice(0, 3).map((product) => { const added = checkoutItems.some((item) => item.id === product.code); return <button className={added ? "added" : ""} key={product.code} disabled={added} onClick={() => setCheckoutItems((current) => [...current, { id: product.code, productId: product.id, type: "Peça", name: product.name, price: parseBRL(product.price), cost: parseBRL(product.cost) }])}><span className="catalog-code">{product.code.slice(-2)}</span><div><strong>{product.name}</strong><small>{product.stock} em estoque · preço fixo</small></div><b>{product.price}</b><i>{added ? "✓" : "+"}</i></button>; })}</div></div>
 
@@ -5974,11 +6030,17 @@ export function AppDialog({
                     <div className="partner-billing-card">
                       <div className="partner-billing-head"><span><Icon name="users" size={18}/></span><div><strong>{currentOrder.partnerName || "Empresa parceira"}</strong><small>Faturado, não recebido agora</small></div></div>
                       <div className="partner-billing-lines">
-                        <div><span>Mão de obra</span><b>{formatBRL(partnerTotals(checkoutItems, 0).labor)}</b></div>
-                        {partnerTotals(checkoutItems, checkoutPartner?.laborDiscount ?? 0).discount > 0
-                          ? <div className="partner-billing-discount"><span>Desconto de {checkoutPartner?.laborDiscount}% na mão de obra</span><b>− {formatBRL(partnerTotals(checkoutItems, checkoutPartner?.laborDiscount ?? 0).discount)}</b></div>
+                        <div><span>Mão de obra</span><b>{formatBRL(checkoutContas.labor)}</b></div>
+                        {/* Os DOIS descontos, cada um na sua linha e com seu nome.
+                            Somar os dois aqui faria a empresa conferir a fatura
+                            contra o contrato e achar diferença sem explicação. */}
+                        {checkoutContas.partnerDiscount > 0
+                          ? <div className="partner-billing-discount"><span>Desconto de {checkoutPartner?.laborDiscount}% na mão de obra</span><b>− {formatBRL(checkoutContas.partnerDiscount)}</b></div>
                           : null}
-                        <div><span>Peças</span><b>{formatBRL(partnerTotals(checkoutItems, 0).parts)}</b></div>
+                        <div><span>Peças</span><b>{formatBRL(checkoutContas.parts)}</b></div>
+                        {checkoutContas.manualDiscount > 0
+                          ? <div className="partner-billing-discount"><span>Desconto dado nesta OS</span><b>− {formatBRL(checkoutContas.manualDiscount)}</b></div>
+                          : null}
                         <div className="partner-billing-total"><span>Vai para a fatura</span><b>{formatBRL(checkoutTotal)}</b></div>
                       </div>
                       <div className="info-strip"><Icon name="clock" size={17}/><span>Vence em <b>{nextBillingDate()}</b>, o primeiro dia do mês seguinte. A conta aparece em Contas a receber no nome da empresa; a baixa do estoque acontece agora, como em qualquer OS.</span></div>
