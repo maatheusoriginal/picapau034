@@ -3489,6 +3489,218 @@ await passo("OS antiga: puxa o cadastro pela placa e tira a peça do estoque", a
   if (problemas.length) throw new Error("OS antiga com cadastro e baixa:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("a lista de peças abre sem digitar, busca pelo nome, e o desconto entra na conta", async () => {
+  /*
+    DUAS COISAS QUE SÓ O BALCÃO VIU.
+
+    1. O buscador de peças da OS só mostrava alguma coisa DEPOIS de digitar. No
+       celular isso é pedir para o mecânico adivinhar como a peça foi
+       cadastrada — "OLEO", "ÓLEO MOTOR", "LUBRIFICANTE" — e cada tentativa
+       errada devolvia tela vazia. Agora a lista já vem, em ordem alfabética, e
+       a busca continua servindo para chegar rápido.
+    2. O desconto de balcão ("leva por 250") não tinha onde ser lançado: quem
+       dava desconto mexia no preço da peça, e aí o custo, o relatório e o
+       estoque passavam a mentir juntos.
+  */
+  const problemas = [];
+  const dinheiro = (t) => Number(String(t).replace(/[^\d,-]/g, "").replace(/\./g, "").replace(",", ".")) || 0;
+  const totalNaTela = async () => dinheiro(await p.locator(".order-total strong").first().innerText());
+
+  await ir("Ordens de serviço");
+  await visaoDaOficina("Quadro");
+  await p.waitForTimeout(1000);
+
+  const cadastradas = (await banco("products")).filter((peca) => peca.active !== false);
+  if (cadastradas.length < 3) throw new Error("estoque com menos de 3 peças: não dá para provar lista nem busca");
+
+  const card = p.locator(".board-card").first();
+  if (!(await card.count())) throw new Error("nenhuma OS no quadro para abrir");
+  // O número da OS é o NOME do documento (`_id`), não um campo dentro dela.
+  const aberta = (await card.locator(".order-number").first().innerText()).trim();
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(2800);
+
+  await p.locator(".order-add-actions button", { hasText: /Adicionar peça/i }).first().click();
+  await p.waitForTimeout(1300);
+
+  // 1. SEM DIGITAR NADA, a lista está na tela.
+  const semBusca = await p.locator(".order-item-result").count();
+  if (!semBusca) problemas.push("abri o buscador sem digitar e não veio peça nenhuma na lista");
+  if (semBusca !== Math.min(40, cadastradas.length)) {
+    problemas.push(`sem digitar, a lista mostrou ${semBusca} peça(s) e o estoque tem ${cadastradas.length} ativa(s)`);
+  }
+
+  // Em ordem alfabética: é assim que se acha correndo o olho pela lista.
+  const nomes = await p.locator(".order-item-result strong").allInnerTexts();
+  const ordenados = [...nomes].sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
+  if (nomes.join("|") !== ordenados.join("|")) {
+    problemas.push(`a lista de peças não veio em ordem alfabética: ${nomes.slice(0, 5).join(", ")}...`);
+  }
+
+  // 2. BUSCAR PELO NOME continua funcionando, e filtra de verdade.
+  const alvo = cadastradas.find((peca) => (peca.name || "").trim().split(/\s+/)[0].length > 3) ?? cadastradas[0];
+  const pedaco = alvo.name.trim().split(/\s+/)[0];
+  await p.locator(".order-item-picker input").first().fill(pedaco);
+  await p.waitForTimeout(1300);
+  const achadas = await p.locator(".order-item-result strong").allInnerTexts();
+  if (!achadas.length) problemas.push(`busquei "${pedaco}" e o buscador não achou "${alvo.name}", que está no estoque`);
+  else if (!achadas.some((nome) => mesmoNome(nome, alvo.name))) {
+    problemas.push(`busquei "${pedaco}" e "${alvo.name}" não apareceu entre os ${achadas.length} resultados`);
+  }
+  if (achadas.length > semBusca) problemas.push("a busca devolveu MAIS peças do que a lista inteira");
+
+  // Apagar a busca devolve a lista toda: senão quem errou a palavra fica preso
+  // num resultado que não é o que ele procura.
+  await p.locator(".order-item-picker input").first().fill("");
+  await p.waitForTimeout(1100);
+  if ((await p.locator(".order-item-result").count()) !== semBusca) {
+    problemas.push("apaguei a busca e a lista inteira não voltou");
+  }
+
+  await p.locator(".order-item-result").first().click();
+  await p.waitForTimeout(1300);
+
+  /*
+    3. O DESCONTO.
+
+    O valor digitado sai do TOTAL, e não do preço da peça: a peça continua
+    valendo o que vale, e é a oficina que abre mão da diferença. O que a tela
+    mostra tem de ser o que fica gravado — senão o cliente leva um papel com um
+    valor e paga outro.
+  */
+  const cheio = await totalNaTela();
+  if (!(cheio > 0)) throw new Error(`a OS está zerada (${cheio}): sem conta não dá para provar desconto`);
+  const desconto = Math.max(1, Math.round(cheio * 0.2));
+
+  await p.locator(".order-discount input").first().fill(String(desconto));
+  await p.waitForTimeout(1200);
+  const comDesconto = await totalNaTela();
+  if (Math.abs(comDesconto - (cheio - desconto)) > 0.02) {
+    problemas.push(`dei ${desconto} de desconto em ${cheio} e a tela mostra ${comDesconto}`);
+  }
+  const dica = await p.locator(".order-discount-hint").first().innerText().catch(() => "");
+  if (!/Subtotal/i.test(dica)) problemas.push("a tela não diz de qual subtotal o desconto saiu");
+  if (!/%/.test(dica)) problemas.push("a tela não diz quantos por cento o desconto representa");
+
+  // Desconto maior que a conta não vira dinheiro a devolver: vira a conta
+  // inteira, e a tela avisa em vez de aceitar calada.
+  await p.locator(".order-discount input").first().fill(String(Math.round(cheio * 10)));
+  await p.waitForTimeout(1100);
+  const estourado = await totalNaTela();
+  if (estourado !== 0) problemas.push(`desconto maior que a conta deixou o total em ${estourado}, e deveria zerar`);
+  if (!/maior que o atendimento/i.test(await p.locator(".order-discount-hint").first().innerText().catch(() => ""))) {
+    problemas.push("desconto maior que a conta passou sem aviso nenhum na tela");
+  }
+
+  // E tirar o desconto devolve o total cheio.
+  await p.locator(".order-discount button", { hasText: /Tirar desconto/i }).first().click();
+  await p.waitForTimeout(1000);
+  if (Math.abs((await totalNaTela()) - cheio) > 0.02) problemas.push("tirei o desconto e o total não voltou ao cheio");
+
+  await p.locator(".order-discount input").first().fill(String(desconto));
+  await p.waitForTimeout(1000);
+  await foto("os-desconto");
+  await p.locator(".dialog-footer .primary-button").click();
+  await p.waitForTimeout(5000);
+  await fecharQualquerDialogo();
+
+  // 4. NO BANCO. A tela pode mostrar o que quiser.
+  const gravada = (await banco("serviceOrders")).find((os) => os._id === aberta);
+  if (!gravada) problemas.push(`não achei a OS ${aberta} no banco depois de salvar`);
+  else {
+    if (Math.abs(Number(gravada.discount ?? 0) - desconto) > 0.02) {
+      problemas.push(`gravei ${desconto} de desconto e o banco guardou ${gravada.discount ?? 0}`);
+    }
+    if (Math.abs(Number(gravada.total ?? 0) - (cheio - desconto)) > 0.02) {
+      problemas.push(`o total gravado é ${gravada.total} e a conta com desconto dá ${cheio - desconto}`);
+    }
+  }
+
+  /*
+    4b. E NA HORA DE COBRAR.
+
+    É aqui que o desconto vira dinheiro. O resumo do encerramento mostrava
+    peças e mão de obra e depois um total menor, sem dizer por quê — e quem
+    está no balcão confere justamente essa soma na frente do cliente. A linha
+    do desconto é o que faz a conta fechar.
+  */
+  await ir("Ordens de serviço");
+  await visaoDaOficina("Quadro");
+  await p.waitForTimeout(1000);
+  const cardDaOS = p.locator(".board-card", { hasText: aberta }).locator("button", { hasText: /Abrir OS/ }).first();
+  if (!(await cardDaOS.count())) problemas.push(`a OS ${aberta} sumiu do quadro depois de salvar o desconto`);
+  else {
+    await cardDaOS.click();
+    await p.waitForTimeout(2800);
+    await p.locator(".order-status-control select").selectOption("Finalizada");
+    await p.waitForTimeout(900);
+    await abrirRecebimento();
+    const resumo = (await p.locator(".checkout-totals").first().innerText().catch(() => "")).replace(/\n/g, " ");
+    if (!/Desconto/i.test(resumo)) problemas.push(`o resumo do encerramento não mostra o desconto: "${resumo}"`);
+    const cobrado = dinheiro((resumo.match(/Total da OS\s*([^A-Za-z]+)/) ?? [])[1] ?? "");
+    if (Math.abs(cobrado - (cheio - desconto)) > 0.02) {
+      problemas.push(`o encerramento vai cobrar ${cobrado} e a OS com desconto vale ${cheio - desconto}`);
+    }
+    // Sem confirmar: encerrar de verdade não faz parte do que se está provando.
+    await fecharQualquerDialogo();
+  }
+
+  /*
+    5. NO CELULAR — que é onde ele pediu.
+
+    A lista tem de terminar DENTRO da tela: alta demais, ela empurrava o botão
+    de salvar para trás de mais um rolar. E tem de rolar por dentro, em vez de
+    esticar o diálogo.
+  */
+  await p.setViewportSize({ width: 390, height: 844 });
+  await p.waitForTimeout(1500);
+  // No celular o quadro mostra uma etapa por vez: a pílula escolhe qual.
+  const pilula = p.locator(".board-stage-pills button.selected, .board-stage-pills button").first();
+  if (await pilula.count()) { await pilula.click(); await p.waitForTimeout(1000); }
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(3000);
+  await p.locator(".order-add-actions button", { hasText: /Adicionar peça/i }).first().click();
+  await p.waitForTimeout(1500);
+
+  if (!(await p.locator(".order-item-result").count())) problemas.push("no celular a lista de peças não apareceu sem digitar");
+  // Rolar até o buscador é o que o mecânico faz com o polegar. A partir daí a
+  // lista INTEIRA tem de caber acima do rodapé fixo: com ela mais alta, as
+  // últimas peças ficavam atrás do botão de salvar e ninguém as alcançava.
+  await p.locator(".order-item-picker").first().scrollIntoViewIfNeeded();
+  await p.waitForTimeout(900);
+  const caixa = await p.locator(".order-item-results").first().boundingBox();
+  const rodape = await p.locator(".dialog-footer").first().boundingBox();
+  if (!caixa) problemas.push("no celular o quadro da lista não tem tamanho na tela");
+  else {
+    if (rodape && caixa.y + caixa.height > rodape.y + 2) {
+      problemas.push(`no celular a lista termina em ${Math.round(caixa.y + caixa.height)}px e o rodapé começa em ${Math.round(rodape.y)}px: as últimas peças ficam atrás dele`);
+    }
+    if (caixa.height < 180) problemas.push(`no celular a lista ficou com ${Math.round(caixa.height)}px: peça nenhuma cabe`);
+  }
+  if (rodape && rodape.y + rodape.height > 844) {
+    problemas.push(`no celular o botão de salvar termina em ${Math.round(rodape.y + rodape.height)}px, fora da tela de 844`);
+  }
+  if (cadastradas.length > 6) {
+    const rolaPorDentro = await p.locator(".order-item-results").first().evaluate((el) => el.scrollHeight > el.clientHeight);
+    if (!rolaPorDentro) problemas.push("no celular a lista não rola por dentro: ela estica o diálogo");
+  }
+
+  // E a busca pelo nome, no celular, é a mesma coisa.
+  await p.locator(".order-item-picker input").first().fill(pedaco);
+  await p.waitForTimeout(1300);
+  const noCelular = await p.locator(".order-item-result strong").allInnerTexts();
+  if (!noCelular.some((nome) => mesmoNome(nome, alvo.name))) {
+    problemas.push(`no celular busquei "${pedaco}" e "${alvo.name}" não apareceu`);
+  }
+  await foto("pecas-celular");
+
+  await p.setViewportSize({ width: 1360, height: 950 });
+  await p.waitForTimeout(900);
+  await fecharQualquerDialogo();
+  if (problemas.length) throw new Error("lista de peças e desconto:\n      - " + problemas.join("\n      - "));
+});
+
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();

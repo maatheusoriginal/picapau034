@@ -97,26 +97,57 @@ export function billingReference(reference: Date = new Date()): string {
 export type PartnerTotals = {
   /** Mão de obra antes do desconto. */
   labor: number;
-  /** Peças, que não recebem desconto. */
+  /** Peças, pelo preço cheio. */
   parts: number;
-  /** Quanto o desconto da parceira tirou. */
+  /** Tudo que foi tirado: o desconto da parceira mais o que a oficina deu na mão. */
   discount: number;
-  /** O que vai para a fatura. */
+  /** O desconto combinado com a parceira, só na mão de obra. */
+  partnerDiscount: number;
+  /** O desconto que alguém deu nesta OS, em dinheiro. */
+  manualDiscount: number;
+  /** O que o cliente paga. */
   total: number;
 };
 
 /**
- * O que a parceira deve por esta OS.
+ * O total de uma OS.
  *
- * O desconto combinado vale **somente na mão de obra**. Peça tem preço fixo:
- * dar desconto nela seria vender abaixo do que a oficina pagou ao fornecedor.
+ * Esta é A conta da ordem de serviço, e não uma das contas: a tela, o cupom, o
+ * PDF do cliente, o encerramento e a fatura da parceira chamam todos esta
+ * função. É de propósito — no dia em que existirem duas, elas divergem, e o
+ * dia em que divergirem é o dia em que o cliente recebe um papel com um valor
+ * e paga outro.
+ *
+ * SÃO DOIS DESCONTOS, e eles são coisas diferentes:
+ *
+ * - O da PARCEIRA é combinado no contrato e vale **somente na mão de obra**.
+ *   Peça tem preço fixo: dar desconto nela seria vender abaixo do que a
+ *   oficina pagou ao fornecedor.
+ * - O da OFICINA é o que se dá no balcão, na hora, em dinheiro — "leva por
+ *   250". Esse vale sobre o que sobrou, peça incluída, porque quem decide
+ *   abrir mão é o dono, e ele sabe o que está fazendo.
+ *
+ * O total nunca fica negativo: desconto maior que a conta vira a conta
+ * inteira, e não dinheiro a devolver.
  */
-export function partnerTotals(items: ServiceOrderItem[], laborDiscountPercent: number): PartnerTotals {
+export function partnerTotals(items: ServiceOrderItem[], laborDiscountPercent: number, manualDiscountAmount = 0): PartnerTotals {
   const labor = round2(items.filter((item) => item.type === "Mão de obra").reduce((sum, item) => sum + (item.price || 0), 0));
   const parts = round2(items.filter((item) => item.type !== "Mão de obra").reduce((sum, item) => sum + (item.price || 0), 0));
   const percent = Number.isFinite(laborDiscountPercent) ? Math.min(100, Math.max(0, laborDiscountPercent)) : 0;
-  const discount = round2(labor * (percent / 100));
-  return { labor, parts, discount, total: round2(labor - discount + parts) };
+  const partnerDiscount = round2(labor * (percent / 100));
+  const depoisDaParceira = round2(labor - partnerDiscount + parts);
+  // Desconto quebrado (texto, negativo, vazio) vale zero em vez de derrubar a
+  // conta: o campo é digitado por gente com o cliente na frente.
+  const pedido = Number.isFinite(manualDiscountAmount) ? Math.max(0, manualDiscountAmount) : 0;
+  const manualDiscount = round2(Math.min(pedido, depoisDaParceira));
+  return {
+    labor,
+    parts,
+    partnerDiscount,
+    manualDiscount,
+    discount: round2(partnerDiscount + manualDiscount),
+    total: round2(depoisDaParceira - manualDiscount),
+  };
 }
 
 /** A parceira desta OS, quando ela é faturada. */

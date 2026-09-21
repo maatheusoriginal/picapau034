@@ -266,6 +266,14 @@ export type OrderPrintInput = {
 export function buildOrderDocument({ order, settings, mechanics, copies }: OrderPrintInput): string {
   const items = order.items ?? [];
   const total = order.total ?? items.reduce((sum, item) => sum + item.price, 0);
+  /*
+    O desconto na via do cliente.
+
+    Sem a linha, o cupom mostra um total menor que a soma dos itens logo acima
+    e parece erro de conta — é a primeira coisa que o cliente pergunta no
+    balcão. Com subtotal e desconto, a conta fecha na frente dele.
+  */
+  const desconto = Math.max(0, Number(order.discount ?? 0));
   const warranty = settings?.defaultWarrantyDays;
   const notes = settings?.defaultOsNotes;
 
@@ -288,6 +296,8 @@ export function buildOrderDocument({ order, settings, mechanics, copies }: Order
     <div class="rule"></div>
     <table>${itemRows(items)}</table>
     <div class="rule"></div>
+    ${desconto > 0 ? `<div class="row"><span class="label">Subtotal</span><span>${money(total + desconto)}</span></div>
+    <div class="row"><span class="label">Desconto</span><span>- ${money(desconto)}</span></div>` : ""}
     <div class="row total"><span>Total</span><span>${money(total)}</span></div>
     ${warranty ? `<div class="note">Garantia de ${warranty} dias sobre os serviços executados.</div>` : ""}
     ${notes ? `<div class="note">${escapeHtml(notes)}</div>` : ""}

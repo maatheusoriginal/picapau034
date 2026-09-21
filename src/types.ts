@@ -393,6 +393,14 @@ export type OrderRecord = {
    */
   customerPending?: boolean;
   /**
+   * O desconto dado nesta OS, em reais.
+   *
+   * É o "leva por 250" do balcão, e não o desconto de contrato da parceira —
+   * esse continua vindo do cadastro dela e vale só na mão de obra. Os dois
+   * convivem e entram na mesma conta (ver `partnerTotals`).
+   */
+  discount?: number;
+  /**
    * Esta OS é o retorno de outra: a moto saiu, voltou, e este é o segundo
    * atendimento do mesmo problema. Guarda o número da OS de origem.
    */
