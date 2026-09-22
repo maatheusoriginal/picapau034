@@ -5,9 +5,18 @@ import { matchesSearch, money, orderAttention, orderIsLate, orderMatchesFilter, 
 import { Icon } from "./WorkshopIcon";
 import { OrdersBoard } from "./OrdersBoard";
 
-export function OrdersWorkspace({ orders, budget, canCreate, canTakePart, openDialog, initialFilter, canMove, onMove, onReturn }: {
+export function OrdersWorkspace({ orders, budget, delivered, canCreate, canTakePart, openDialog, initialFilter, canMove, onMove, onReturn, onReprint }: {
   orders: OrderRecord[];
   budget: boolean;
+  /**
+   * A tela das OS já entregues.
+   *
+   * A oficina pediu um lugar só das finalizadas: procurar uma OS do mês
+   * passado no meio da fila do dia é achar no meio do que está acontecendo
+   * agora. Aqui a fila não aparece — só o que já saiu —, e a etapa não é mais
+   * a pergunta, então o quadro dá lugar à lista.
+   */
+  delivered?: boolean;
   canCreate: boolean;
   canTakePart: boolean;
   openDialog: OpenDialog;
@@ -17,9 +26,11 @@ export function OrdersWorkspace({ orders, budget, canCreate, canTakePart, openDi
   onMove?: (order: OrderRecord, status: ServiceOrderStatus) => void | Promise<void>;
   /** Abrir a OS de retorno de uma moto já entregue. Ausente = sem permissão. */
   onReturn?: (order: OrderRecord) => void | Promise<void>;
+  /** Abrir a janela de reimprimir uma via, ou o lote de quem está devendo. */
+  onReprint?: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState(initialFilter || "Em aberto");
+  const [filter, setFilter] = useState(initialFilter || (delivered ? "Finalizadas (entregues)" : "Em aberto"));
   /*
     O quadro é a visão de abertura.
 
@@ -36,7 +47,9 @@ export function OrdersWorkspace({ orders, budget, canCreate, canTakePart, openDi
     distinção a tela abria em Cartões vindo do painel e o quadro só aparecia
     para quem clicasse nele, que é o contrário do combinado.
   */
-  const [view, setView] = useState<"board" | "cards" | "list">(!initialFilter || initialFilter === "Em aberto" ? "board" : "cards");
+  const [view, setView] = useState<"board" | "cards" | "list">(
+    delivered ? "list" : (!initialFilter || initialFilter === "Em aberto" ? "board" : "cards"),
+  );
   const [limit, setLimit] = useState(30);
   const buscados = useMemo(() => orders.filter((order) => matchesSearch(query, order.id, order.customer, order.bike, order.plate, order.mechanic, order.problem)), [orders, query]);
   const filtered = useMemo(() => sortOrders(buscados.filter((order) => orderMatchesFilter(order, filter))), [buscados, filter]);
@@ -63,20 +76,27 @@ export function OrdersWorkspace({ orders, budget, canCreate, canTakePart, openDi
   </article>;
 
   return <div className="orders-workspace">
-    <div className="module-heading"><div><p>Oficina</p><h1>{budget ? "Orçamentos" : "Ordens de serviço"}</h1><span>{budget ? "Da avaliação até a aprovação do cliente." : "Cada moto, seu andamento e o próximo passo."}</span></div><div className="heading-actions">
+    <div className="module-heading"><div><p>Oficina</p><h1>{delivered ? "OS finalizadas" : budget ? "Orçamentos" : "Ordens de serviço"}</h1><span>{delivered ? "As motos que já saíram. Procure pela placa, pelo cliente ou pelo número." : budget ? "Da avaliação até a aprovação do cliente." : "Cada moto, seu andamento e o próximo passo."}</span></div><div className="heading-actions">
+      {/* Reimprimir fica no CABEÇALHO, e não dentro da OS: quem precisa de
+          uma via de novo não sabe em que OS ela está — sabe a placa. Entrar
+          na OS certa é justamente o trabalho que este botão poupa. */}
+      {onReprint && <button className="outline-button large" onClick={onReprint}><Icon name="printer" size={17}/>Reimprimir</button>}
       {/* "Pegar peça" existia SÓ na tela de quem tem o cargo Mecânico. Quem
           atende o balcão e o próprio dono não tinham como lançar uma peça na
           OS por aqui, mesmo tendo permissão de mexer na ordem — e uma oficina
           pequena é o dono que pega a peça na prateleira metade das vezes. */}
-      {canTakePart && !budget && <button className="outline-button large" onClick={() => openDialog("takePart")}><Icon name="box" size={17}/>Pegar peça</button>}
-      {canCreate && <button className="primary-button" onClick={() => openDialog(budget ? "os" : "osChoice")}><Icon name="plus" size={18}/>{budget ? "Novo orçamento" : "Novo atendimento"}</button>}
+      {canTakePart && !budget && !delivered && <button className="outline-button large" onClick={() => openDialog("takePart")}><Icon name="box" size={17}/>Pegar peça</button>}
+      {canCreate && !delivered && <button className="primary-button" onClick={() => openDialog(budget ? "os" : "osChoice")}><Icon name="plus" size={18}/>{budget ? "Novo orçamento" : "Novo atendimento"}</button>}
     </div></div>
-    <div className="order-overview-strip"><button onClick={() => pickFilter("Em aberto")}><strong>{active.length}</strong><span>na oficina</span></button><button onClick={() => pickFilter("Atrasadas")} className="overdue-metric"><strong>{active.filter((order) => orderIsLate(order)).length}</strong><span>com prazo vencido</span></button><button onClick={() => pickFilter("Prontas")}><strong>{active.filter((order) => normalizeOrderStatus(order.status) === "Finalizada").length}</strong><span>prontas para retirar</span></button></div>
+    {delivered ? null : <div className="order-overview-strip"><button onClick={() => pickFilter("Em aberto")}><strong>{active.length}</strong><span>na oficina</span></button><button onClick={() => pickFilter("Atrasadas")} className="overdue-metric"><strong>{active.filter((order) => orderIsLate(order)).length}</strong><span>com prazo vencido</span></button><button onClick={() => pickFilter("Prontas")}><strong>{active.filter((order) => normalizeOrderStatus(order.status) === "Finalizada").length}</strong><span>prontas para retirar</span></button></div>}
     <section className="panel order-board-panel">
       <div className="list-toolbar">
         <label className="mini-search"><Icon name="search" size={18}/><input aria-label="Buscar atendimento" value={query} onChange={(event) => { setQuery(event.target.value); setLimit(30); }} placeholder="Cliente, placa, OS ou mecânico"/></label>
         <div className="view-switch" aria-label="Visualização">
-          <button aria-pressed={view === "board"} onClick={() => setView("board")}>Quadro</button>
+          {/* Sem Quadro nas entregues: o quadro responde "em que pé está cada
+              moto", e aqui todas já saíram — seriam quatro colunas com três
+              vazias. */}
+          {delivered ? null : <button aria-pressed={view === "board"} onClick={() => setView("board")}>Quadro</button>}
           <button aria-pressed={view === "cards"} onClick={() => setView("cards")}>Cartões</button>
           <button aria-pressed={view === "list"} onClick={() => setView("list")}>Lista</button>
         </div>
@@ -84,11 +104,15 @@ export function OrdersWorkspace({ orders, budget, canCreate, canTakePart, openDi
       {view === "board" ? (
         <OrdersBoard orders={buscados} canMove={!!canMove && !!onMove} onMove={onMove} openDialog={openDialog} onShowDelivered={abrirEntregues} entregues={orders.filter((order) => order.closed).length}/>
       ) : <>
-        <div className="order-status-filters" aria-label="Etapa da oficina">{["Em aberto", ...serviceOrderStatuses, "Finalizadas (entregues)", "Todos"].map((status) => <button key={status} className={filter === status ? "selected" : ""} aria-pressed={filter === status} onClick={() => pickFilter(status)}>{status}<b>{orders.filter((order) => orderMatchesFilter(order, status)).length}</b></button>)}</div>
+        {/* Na tela das entregues a etapa não é pergunta: todas terminaram. O
+            filtro fica travado nelas, e quem procura usa a busca. */}
+        {delivered ? null : <div className="order-status-filters" aria-label="Etapa da oficina">{["Em aberto", ...serviceOrderStatuses, "Finalizadas (entregues)", "Todos"].map((status) => <button key={status} className={filter === status ? "selected" : ""} aria-pressed={filter === status} onClick={() => pickFilter(status)}>{status}<b>{orders.filter((order) => orderMatchesFilter(order, status)).length}</b></button>)}</div>}
         {["Atenção", "Hoje", "Atrasadas"].includes(filter) && <div className="active-filter-banner"><span>Filtro: {filter === "Hoje" ? "Entrega prevista hoje" : filter}</span><button onClick={() => pickFilter("Em aberto")}>Remover filtro ×</button></div>}
-        {!filtered.length ? <div className="workspace-empty"><span><Icon name="wrench" size={28}/></span><h3>{orders.length ? "Nenhum atendimento neste filtro" : "Tudo começa com a primeira OS"}</h3><p>{orders.length ? "Busque por outro termo ou escolha outra etapa." : "Cadastre a chegada da moto e acompanhe o serviço por aqui."}</p>{orders.length ? <button className="outline-button" onClick={() => { setQuery(""); pickFilter("Todos"); }}>Limpar filtros</button> : canCreate && <button className="primary-button" onClick={() => openDialog("osChoice")}>Abrir atendimento</button>}</div>
+        {!filtered.length ? <div className="workspace-empty"><span><Icon name={delivered ? "check" : "wrench"} size={28}/></span><h3>{delivered ? (query ? "Nenhuma OS encontrada" : "Nenhuma OS entregue ainda") : orders.length ? "Nenhum atendimento neste filtro" : "Tudo começa com a primeira OS"}</h3><p>{orders.length ? "Busque por outro termo ou escolha outra etapa." : "Cadastre a chegada da moto e acompanhe o serviço por aqui."}</p>{orders.length ? <button className="outline-button" onClick={() => { setQuery(""); pickFilter("Todos"); }}>Limpar filtros</button> : canCreate && <button className="primary-button" onClick={() => openDialog("osChoice")}>Abrir atendimento</button>}</div>
           : view === "cards" ? <div className="order-card-grid">{filtered.slice(0, limit).map(cartao)}</div>
-          : <div className="table-scroll"><table><thead><tr><th>OS / Cliente</th><th>Motocicleta</th><th className="col-secondary">Responsável</th><th className="col-secondary">Previsão</th><th>Situação</th><th/></tr></thead><tbody>{filtered.slice(0, limit).map((order) => <tr key={order.id} onDoubleClick={() => openDialog("order", order.id)} title="Dois cliques abrem a OS"><td><strong className="order-id">{order.id}</strong><span>{order.customer}{order.partnerOrderId ? ` · OS ${order.partnerName || "parceiro"} ${order.partnerOrderId}` : ""}</span></td><td><strong>{order.plate || "Sem placa"}</strong><span>{order.bike}</span></td><td className="col-secondary">{order.mechanic || "Não definido"}</td><td className={`col-secondary ${orderIsLate(order) ? "danger-text" : ""}`}>{shortDate(order.delivery)}</td><td><span className={`status ${order.closed ? "neutral" : statusTone(order.status)}`}><i/>{order.closed ? "Entregue" : normalizeOrderStatus(order.status)}</span></td><td><button className="outline-button" onClick={() => openDialog("order", order.id)} onDoubleClick={(event) => event.stopPropagation()}>Abrir</button></td></tr>)}</tbody></table></div>}
+          : <div className="table-scroll"><table><thead><tr><th>OS / Cliente</th><th>Motocicleta</th><th className="col-secondary">Responsável</th><th className="col-secondary">{delivered ? "Entregue em" : "Previsão"}</th><th>Situação</th><th/></tr></thead><tbody>{filtered.slice(0, limit).map((order) => <tr key={order.id} onDoubleClick={() => openDialog("order", order.id)} title="Dois cliques abrem a OS"><td><strong className="order-id">{order.id}</strong><span>{order.customer}{order.partnerOrderId ? ` · OS ${order.partnerName || "parceiro"} ${order.partnerOrderId}` : ""}</span></td><td><strong>{order.plate || "Sem placa"}</strong><span>{order.bike}</span></td><td className="col-secondary">{order.mechanic || "Não definido"}</td>{/* Numa moto já entregue, "previsão de entrega" não diz nada: o que se
+    procura é QUANDO ela saiu. */}
+<td className={`col-secondary ${!delivered && orderIsLate(order) ? "danger-text" : ""}`}>{delivered ? (order.closedAt || order.time || "—") : shortDate(order.delivery)}</td><td><span className={`status ${order.closed ? "neutral" : statusTone(order.status)}`}><i/>{order.closed ? "Entregue" : normalizeOrderStatus(order.status)}</span></td><td><button className="outline-button" onClick={() => openDialog("order", order.id)} onDoubleClick={(event) => event.stopPropagation()}>Abrir</button></td></tr>)}</tbody></table></div>}
         {!!filtered.length && <footer className="queue-footer"><span>{Math.min(limit, filtered.length)} de {filtered.length} atendimento(s)</span>{filtered.length > limit && <button className="outline-button" onClick={() => setLimit((value) => value + 30)}>Carregar mais</button>}</footer>}
       </>}
     </section>

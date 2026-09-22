@@ -522,3 +522,45 @@ table td strong, table td span { font-size: .875rem; }
   .order-item-result strong { font-size: .9375rem; }
   .order-item-picker { padding: 0 13px 14px; }
 }
+
+/* ---------------------------------------------------------------------------
+   Reimprimir OS
+
+   Quem precisa de uma via de novo sabe a PLACA, não o número da OS — e muitas
+   vezes é serviço que já terminou. A busca vem primeiro e larga; o lote de
+   quem está devendo fica embaixo, separado por uma linha, porque é a outra
+   pergunta ("o que o Gonzaga ainda deve?").
+--------------------------------------------------------------------------- */
+.reprint-body { display: flex; flex-direction: column; gap: 15px; }
+.reprint-results { display: flex; flex-direction: column; max-height: 38vh; overflow-y: auto; scrollbar-width: thin; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.reprint-row { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--line); }
+.reprint-row:last-child { border-bottom: 0; }
+.reprint-row-what { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.reprint-row-what strong { display: flex; align-items: center; gap: 9px; font-size: .9375rem; }
+.reprint-row-what small { font-size: .8125rem; color: var(--muted); line-height: 1.4; }
+.reprint-row-what .plate { padding: 1px 7px; border: 1px solid var(--line); border-radius: 4px; font-size: .8125rem; letter-spacing: .06em; }
+/* A OS que ainda está na oficina aparece na busca, mas marcada: reimprimir a
+   via de um serviço que não terminou é outra conversa. */
+.reprint-row.is-open-order { background: #fffdf5; }
+
+.reprint-batch { border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 11px; }
+.reprint-batch > header strong { display: block; font-size: .9375rem; }
+.reprint-batch > header small { display: block; margin-top: 2px; font-size: .8125rem; color: var(--muted); }
+.reprint-people { display: flex; flex-wrap: wrap; gap: 9px; }
+.reprint-people button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 9px 13px; border: 1px solid var(--line); border-radius: 9px; background: #fff; text-align: left; cursor: pointer; }
+.reprint-people button strong { font-size: .875rem; }
+.reprint-people button small { font-size: .75rem; color: var(--muted); }
+.reprint-people button b { font-size: .9375rem; font-variant-numeric: tabular-nums; }
+.reprint-people button.selected { border-color: #8a5417; background: #fffdf8; }
+.reprint-batch-ready { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; background: #fffdf8; }
+.reprint-batch-ready strong { display: block; font-size: .9375rem; }
+.reprint-batch-ready small { display: block; margin-top: 3px; font-size: .8125rem; color: var(--muted); line-height: 1.45; word-break: break-word; }
+.dialog-footer-note { font-size: .8125rem; color: var(--muted); }
+
+@media (max-width: 560px) {
+  .reprint-results { max-height: 34vh; }
+  .reprint-row { flex-wrap: wrap; }
+  .reprint-people button { width: 100%; }
+  .reprint-batch-ready { flex-direction: column; align-items: stretch; }
+  .reprint-batch-ready .primary-button { justify-content: center; }
+}

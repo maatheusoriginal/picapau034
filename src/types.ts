@@ -38,6 +38,14 @@ export type DialogKind =
    * Acrescenta o item à ordem e baixa o saldo no mesmo movimento.
    */
   | "takePart"
+  /**
+   * Reimprimir: acha a OS pela placa e manda a via que falta.
+   *
+   * Também imprime o LOTE de quem está devendo — uma via de cada OS entregue e
+   * ainda em aberto —, que é a conferência da fatura no papel. Ver
+   * src/order-reprint.ts.
+   */
+  | "reprint"
   | "quick"
   | "product"
   | "import"

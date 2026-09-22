@@ -58,7 +58,8 @@
     "check:order-return": "node --import tsx scripts/check-order-return.ts",
     "check:product-order": "node --import tsx scripts/check-product-order.ts",
     "check:order-number": "node --import tsx scripts/check-order-number.ts",
-    "check:printing": "tsx scripts/check-printing.ts"
+    "check:printing": "tsx scripts/check-printing.ts",
+    "check:order-reprint": "tsx scripts/check-order-reprint.ts"
   },
   "dependencies": {
     "express": "4.21.2",
