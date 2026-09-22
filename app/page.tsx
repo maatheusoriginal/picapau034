@@ -43,7 +43,8 @@ import { buildMovement, cashDifference, cashHistorySummary, cashSummary, closedS
 import { mergeParts, priceFromMarkup, shouldReserveStock, sortProducts, stockDeltas, toAmount, type ReservedPart } from "../src/inventory";
 import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoDoServico } from "../src/mechanic";
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
-import { buildOrderDocument, buildOrderWhatsappMessage, buildSaleDocument, copiesToPrint, orderFromQuickService, whatsappUrl, type OrderCopyChoice } from "../src/documents";
+import { buildOrderDocument, buildOrderWhatsappMessage, buildOrdersBatchDocument, buildSaleDocument, copiesToPrint, ORDER_COPY_LABELS, orderFromQuickService, whatsappUrl, type OrderCopyChoice } from "../src/documents";
+import { orderIsUnpaid, peopleWithUnpaidOrders, searchOrdersToReprint } from "../src/order-reprint";
 import { PrintCopiesMenu } from "../src/components/PrintCopiesMenu";
 import { LedgerWorkspace } from "../src/components/LedgerWorkspace";
 import { OrderRemovalButton } from "../src/components/OrderRemovalButton";
@@ -220,6 +221,9 @@ const navGroups: Array<{
     icon: "wrench",
     items: [
       { label: "Ordens de serviço", icon: "wrench" },
+      // As entregues em lugar próprio: procurar a OS do mês passado no meio da
+      // fila do dia é achar no meio do que está acontecendo agora.
+      { label: "OS finalizadas", icon: "check" },
       { label: "Orçamentos", icon: "file" },
     ],
   },
@@ -2404,7 +2408,7 @@ export function ModuleWorkspace({
     );
   }
 
-  if (active === "Ordens de serviço" || active === "Orçamentos") return <OrdersWorkspace orders={orders} budget={active === "Orçamentos"} canCreate={canCreateOrders} canTakePart={canOperate} openDialog={openDialog} initialFilter={initialFilter} canMove={canOperate} onMove={(order, status) => onAdvanceOrder(order, status, order.mechanicIds ?? [])} onReturn={canCreateOrders ? onReturnOrder : undefined}/>;
+  if (active === "Ordens de serviço" || active === "Orçamentos" || active === "OS finalizadas") return <OrdersWorkspace orders={orders} budget={active === "Orçamentos"} delivered={active === "OS finalizadas"} canCreate={canCreateOrders} canTakePart={canOperate} openDialog={openDialog} initialFilter={initialFilter} canMove={canOperate} onMove={(order, status) => onAdvanceOrder(order, status, order.mechanicIds ?? [])} onReturn={canCreateOrders ? onReturnOrder : undefined} onReprint={() => openDialog("reprint")}/>;
 
   if (active === "Produtos e estoque") {
     // A lista do balcão: procurar por código, referência de fábrica, código de
@@ -2640,6 +2644,7 @@ export function AppDialog({
   onAttendanceSaved,
   canCreatePartBrand,
   canCheckoutOrders,
+  canSeeFinance,
   step,
   setStep,
   close,
@@ -2684,6 +2689,14 @@ export function AppDialog({
   /** Pode criar marca de peça. Ela vive em settings/lists, e a regra libera essa chave para quem gerencia estoque. */
   canCreatePartBrand: boolean;
   canCheckoutOrders: boolean;
+  /**
+   * As contas a receber chegaram a esta sessão?
+   *
+   * Quem não pode ver o financeiro não recebe a coleção, e aí o lote de quem
+   * está devendo passa a valer só pela forma de pagamento da OS. A tela diz
+   * isso em vez de mostrar um número que pode estar velho.
+   */
+  canSeeFinance: boolean;
   step: number;
   setStep: (step: number) => void;
   close: () => void;
@@ -3018,6 +3031,14 @@ export function AppDialog({
    * a peça não foi cobrada, e ninguém sabe em qual moto ela entrou.
    */
   const [pecaBusca, setPecaBusca] = useState("");
+  /*
+    A reimpressão: o que foi digitado e qual lote está aberto.
+
+    Quem procura uma via de novo sabe a PLACA, não o número da OS — e muitas
+    vezes é serviço que já terminou, que não está mais na fila da oficina.
+  */
+  const [reprintQuery, setReprintQuery] = useState("");
+  const [reprintBatchKey, setReprintBatchKey] = useState("");
   // Fica aqui, com os outros estados do diálogo, e não perto da função que o
   // usa: o AppDialog tem returns antecipados, e hook declarado depois de um
   // deles muda a quantidade de hooks entre renderizações — foi o que já deu
@@ -3068,6 +3089,14 @@ export function AppDialog({
     setImportPlan(null);
     setImportFileName("");
     setImportReading(false);
+  }, [dialog]);
+
+  // O diálogo fica montado o tempo todo: sem limpar, reabrir a reimpressão
+  // mostraria a busca da placa anterior e o lote de outro devedor.
+  useEffect(() => {
+    if (dialog === "reprint") return;
+    setReprintQuery("");
+    setReprintBatchKey("");
   }, [dialog]);
 
   // Mesmo motivo no caixa: reabrir o diálogo com o valor da sangria anterior
@@ -3613,6 +3642,7 @@ export function AppDialog({
     os: "Nova ordem de serviço",
     osPast: "Lançar OS que já aconteceu",
     takePart: "Pegar peça do estoque",
+    reprint: "Reimprimir ordem de serviço",
     quick: "Lançar serviço rápido",
     product: "Adicionar produto",
     import: "Importar cadastro de estoque",
@@ -3642,6 +3672,7 @@ export function AppDialog({
     os: "Identifique a moto, registre o serviço e confira antes de abrir.",
     osPast: "Serve para o histórico da moto. Não entra na fila da oficina nem mexe no caixa. As peças podem sair do estoque, se você pedir.",
     takePart: "Escolha a peça e a OS. Ela entra na ordem e sai do estoque no mesmo movimento.",
+    reprint: "Procure pela placa, pelo cliente ou pelo número — inclusive de serviço que já terminou.",
     quick: "Para trocas e ajustes sem cadastro completo.",
     product: "Cadastre a peça e já defina o saldo inicial.",
     import: "Use o modelo CSV preenchido no Google Sheets.",
@@ -4793,6 +4824,9 @@ export function AppDialog({
       os: "Nova ordem de serviço aberta com sucesso.",
       osPast: "OS antiga lançada no histórico da moto.",
       takePart: "Peça lançada na OS e baixada do estoque.",
+      // A reimpressão não passa por aqui: ela manda papel e não salva nada.
+      // A mensagem existe porque o mapa cobre todos os diálogos.
+      reprint: "Impressão enviada.",
       quick: "Serviço rápido lançado e pronto para recebimento.",
       product: "Produto adicionado ao estoque.",
       import: "Planilha recebida e pronta para importação.",
@@ -4869,7 +4903,7 @@ export function AppDialog({
     <div className={`dialog-layer ${["os", "osChoice", "quick", "osPast"].includes(dialog) ? "attendance-layer" : ""}`} role="presentation" onMouseDown={(event) => !saving && event.target === event.currentTarget && close()}>
       <section className={`dialog ${["os", "order", "orderCheckout", "payment", "catalog", "settings", "expense"].includes(dialog) ? "dialog-wide" : ""} ${dialog === "os" ? "dialog-os" : ""} ${dialog === "orderCheckout" ? "dialog-checkout" : ""} ${["os", "osChoice", "quick", "osPast"].includes(dialog) ? `attendance-dialog attendance-${dialog}` : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-busy={saving}>
         <header className="dialog-header">
-          <div><span>{dialog === "os" ? "Nova ordem de serviço" : dialog === "osChoice" ? "Novo atendimento" : ["order", "orderCheckout", "payment", "cash", "expense", "settleReceivable", "settlePayable", "record"].includes(dialog) ? "Operação" : "Cadastro e configuração"}</span><h2 id="dialog-title" tabIndex={-1}>{titles[dialog]}</h2><p>{subtitles[dialog]}</p></div>
+          <div><span>{dialog === "os" ? "Nova ordem de serviço" : dialog === "osChoice" ? "Novo atendimento" : ["order", "orderCheckout", "payment", "cash", "expense", "settleReceivable", "settlePayable", "record", "takePart", "reprint"].includes(dialog) ? "Operação" : "Cadastro e configuração"}</span><h2 id="dialog-title" tabIndex={-1}>{titles[dialog]}</h2><p>{subtitles[dialog]}</p></div>
           <button aria-label="Fechar" disabled={saving} onClick={close}>×</button>
         </header>
 
@@ -5071,6 +5105,108 @@ export function AppDialog({
                 );
               })()}
               {!disponiveis.length ? <div className="admin-pending"><Icon name="alert" size={20}/><div><strong>Nenhuma OS aberta</strong><small>A peça precisa ir para alguma moto. Abra a OS antes de pegar a peça.</small></div></div> : null}
+            </div>
+          );
+        })() : null}
+
+        {dialog === "reprint" ? (() => {
+          /*
+            REIMPRIMIR.
+
+            Duas coisas na mesma janela, porque são a mesma pergunta feita de
+            dois tamanhos: "preciso de um papel que já saiu".
+
+            1. UMA VIA. A via do cliente rasgou, a do caixa sumiu da gaveta. Ele
+               sabe a PLACA — não o número da OS, e muitas vezes é serviço que
+               já terminou e saiu da fila da oficina.
+            2. UM LOTE. O Gonzaga tem oito motos no mês e quer conferir o que
+               está sendo cobrado. Uma via de cada OS que ele ainda deve, num
+               papel só.
+          */
+          const achadas = searchOrdersToReprint(orders, reprintQuery);
+          const devedores = peopleWithUnpaidOrders(orders, accounts);
+          const lote = devedores.find((pessoa) => pessoa.key === reprintBatchKey) ?? null;
+          const mecanicosDa = (order: OrderRecord) => activeMechanics
+            .filter((mecanico) => (order.mechanicIds ?? []).includes(mecanico.id))
+            .map((mecanico) => mecanico.name).join(" + ") || order.mechanic || "";
+          const imprimirUma = (order: OrderRecord, escolha: OrderCopyChoice) => {
+            printDocument(buildOrderDocument({
+              order, settings, mechanics: mecanicosDa(order),
+              copies: copiesToPrint(escolha, settings?.printThreeCopies !== false),
+            }));
+            notify(`${order.id}: ${escolha === "todas" ? "vias" : escolha.toLocaleLowerCase("pt-BR")} enviada(s) para a impressora.`);
+          };
+          const imprimirLote = () => {
+            if (!lote?.orders.length) return;
+            printDocument(buildOrdersBatchDocument({ orders: lote.orders, settings, title: lote.name }));
+            notify(`${lote.orders.length} OS de ${lote.name} enviadas para a impressora.`);
+          };
+          return (
+            <div className="dialog-body reprint-body">
+              <label className="field"><span>Buscar a OS</span>
+                <span className="mini-search"><Icon name="search" size={18}/>
+                  <input autoFocus aria-label="Buscar OS para reimprimir" autoComplete="off" value={reprintQuery}
+                    onChange={(event) => setReprintQuery(event.target.value)}
+                    placeholder="Placa, cliente, moto ou número da OS"/>
+                </span>
+              </label>
+              {achadas.length ? (
+                <div className="reprint-results">
+                  {achadas.map((order) => (
+                    <div className={`reprint-row ${order.closed ? "" : "is-open-order"}`} key={order.id}>
+                      <span className="reprint-row-what">
+                        <strong>{order.id}<b className="plate">{order.plate || "sem placa"}</b></strong>
+                        <small>{order.customer || "Cliente não identificado"} · {order.bike || "Moto não informada"}</small>
+                        <small>{order.closed ? `Entregue em ${order.closedAt || order.time}` : `Ainda na oficina · ${normalizeOrderStatus(order.status)}`}{order.total != null ? ` · ${formatBRL(order.total)}` : ""}</small>
+                      </span>
+                      <PrintCopiesMenu label="Imprimir" onPrint={(escolha) => imprimirUma(order, escolha)}/>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="order-picker-empty"><Icon name="search" size={22}/>
+                  <strong>{reprintQuery.trim() ? "Nenhuma OS encontrada" : "Nenhuma OS entregue ainda"}</strong>
+                  <p>{reprintQuery.trim() ? "Confira a placa ou o número e tente de novo." : "As OS entregues aparecem aqui assim que a primeira moto sair."}</p>
+                </div>
+              )}
+
+              {/* ---------- O LOTE DE QUEM ESTÁ DEVENDO ---------- */}
+              <section className="reprint-batch">
+                <header>
+                  <div><strong>Imprimir em lote</strong><small>Uma via de cada OS entregue que a pessoa ainda não pagou.</small></div>
+                </header>
+                {!canSeeFinance ? (
+                  // Sem acesso ao financeiro o sistema não recebe as contas, e
+                  // "não pagou" passa a valer só pela forma de pagamento. Dizer
+                  // isso é melhor do que mostrar um número que pode estar velho.
+                  <p className="quiet-note">Sem acesso ao financeiro, o lote usa a forma de pagamento da OS: entram as faturadas e as a prazo, mesmo que já tenham sido quitadas depois.</p>
+                ) : null}
+                {devedores.length ? <>
+                  <div className="reprint-people">
+                    {devedores.map((pessoa) => (
+                      <button type="button" key={pessoa.key} className={pessoa.key === reprintBatchKey ? "selected" : ""}
+                        onClick={() => setReprintBatchKey(pessoa.key === reprintBatchKey ? "" : pessoa.key)}>
+                        <strong>{pessoa.name}</strong>
+                        <small>{pessoa.orders.length} {pessoa.orders.length === 1 ? "OS em aberto" : "OS em aberto"}</small>
+                        <b>{formatBRL(pessoa.total)}</b>
+                      </button>
+                    ))}
+                  </div>
+                  {lote ? (
+                    <div className="reprint-batch-ready">
+                      <div>
+                        <strong>{lote.name}</strong>
+                        <small>{lote.orders.map((order) => order.id).join(", ")}</small>
+                      </div>
+                      <button className="primary-button" onClick={imprimirLote}>
+                        <Icon name="printer" size={17}/>Imprimir {lote.orders.length} OS · {formatBRL(lote.total)}
+                      </button>
+                    </div>
+                  ) : <p className="quiet-note">Escolha de quem é o lote.</p>}
+                </> : (
+                  <div className="info-strip"><Icon name="check" size={17}/><span>Ninguém está devendo OS entregue no momento.</span></div>
+                )}
+              </section>
             </div>
           );
         })() : null}
@@ -6104,7 +6240,13 @@ export function AppDialog({
         {dialog === "os" ? <footer className="dialog-footer intake-footer">
           <div className="intake-footer-total"><span>{osItems.length} {osItems.length === 1 ? "item incluído" : "itens incluídos"} · total previsto</span><strong>{formatBRL(osTotal)}</strong></div>
           <div className="intake-footer-actions"><button type="button" className="outline-button" disabled={saving || Boolean(pendingOrder.current)} onClick={() => step === 1 ? close() : goToIntakeStep(step - 1)}>{step === 1 ? "Cancelar" : "Voltar"}</button><button type="button" className="primary-button" disabled={saving || !canOperate} onClick={() => step < 3 ? goToIntakeStep(step + 1) : void submit()}>{saving ? "Salvando..." : pendingOrder.current ? "Concluir baixa das peças" : step === 1 ? "Ir para serviço" : step === 2 ? "Conferir atendimento" : "Abrir ordem de serviço"}<Icon name={step === 3 ? "check" : "arrow"} size={18}/></button></div>
-        </footer> : dialog !== "osChoice" ? <footer className="dialog-footer">
+        </footer> : dialog === "reprint" ? (
+          // A reimpressão não salva nada: o que ela faz é mandar papel, e os
+          // botões disso estão no corpo, ao lado de cada OS. Um "Salvar" aqui
+          // seria um botão que não faz nada, e "Somente consulta" mentiria
+          // sobre uma tela que imprime.
+          <footer className="dialog-footer"><span className="dialog-footer-note">Escolha a OS e a via que precisa sair.</span><button className="ghost-button" onClick={close}>Fechar</button></footer>
+        ) : dialog !== "osChoice" ? <footer className="dialog-footer">
           <button className="ghost-button" onClick={close} disabled={saving}>Cancelar</button>
           <div>{dialog === "order" && currentOrder && !currentOrder.closed && orderStatus === "Finalizada" && canCheckoutOrders && <button className="outline-button" disabled={saving} onClick={() => void receiveOrder()}>Receber e entregar <Icon name="wallet" size={16}/></button>}
           {canOperate && !(dialog === "order" && currentOrder?.closed) ? <button className="primary-button" disabled={saving} onClick={() => void submit()}>{saving ? "Salvando..." : dialog === "quick" ? `Confirmar · ${formatBRL(quickTotal)}` : primaryLabels[dialog] ?? "Salvar"}<Icon name="arrow" size={16}/></button> : <span className="readonly-footer">Somente consulta</span>}</div>
@@ -6781,7 +6923,7 @@ function WorkshopApp({ firebaseSession }: { firebaseSession: ReturnType<typeof u
       </section>
       <nav className="mobile-bottom-nav" aria-label="Atalhos no celular">{directNav.slice(0, 3).map((item) => <button key={item.label} aria-current={active === item.label ? "page" : undefined} onClick={() => setActive(item.label)}><Icon name={item.icon} size={21}/><span>{item.short}</span></button>)}<button onClick={() => setMobileMenu(true)} aria-label="Abrir todas as opções"><Icon name="menu" size={21}/><span>Menu</span></button></nav>
       {recordPreview && <RecordPreview entry={recordPreview} products={products} clients={clients} motorcycles={motorcycles} suppliers={suppliers} orders={orders} close={() => setRecordPreview(null)}/>}
-      <AppDialog onAttendanceSaved={() => { dirtyDialog.current = false; }} dialog={dialog} canCreateCategory={canManageInventory || canManageSettings} canCreatePartBrand={canManageInventory || canManageSettings} canCheckoutOrders={canCheckoutOrders} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={requestCloseDialog} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
+      <AppDialog onAttendanceSaved={() => { dirtyDialog.current = false; }} dialog={dialog} canCreateCategory={canManageInventory || canManageSettings} canCreatePartBrand={canManageInventory || canManageSettings} canCheckoutOrders={canCheckoutOrders} canSeeFinance={canSeeFinance} canOperate={canOperateDialog} step={osStep} setStep={setOsStep} close={requestCloseDialog} finish={finishDialog} changeDialog={openDialog} onAddExpense={addExpense} users={users} partners={partners} quickServices={quickServices} categories={categories} suppliers={suppliers} paymentMachines={paymentMachines} paymentMethods={paymentMethods} products={products} clients={clients} motorcycles={motorcycles} orders={orders} expenses={expenses} notify={notify} cart={cart} setCart={setCart} discount={cartDiscount} setDiscount={setCartDiscount} sales={sales} stockEntries={stockEntries} stockAdjustments={stockAdjustments} accounts={accounts} cashSessions={cashSessions} movements={movements} lists={systemLists} settings={workshopSettings} currentUser={firebaseSession.user} selectedRecordId={selectedRecordId} osPrefix={workshopSettings?.osPrefix ?? "OS"} canManageCustomers={canManageCustomers}/>
       {helpOpen ? (
         <div className="dialog-layer" role="presentation" onMouseDown={(evento) => evento.target === evento.currentTarget && setHelpOpen(false)}>
           <section className="dialog dialog-wide help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title">

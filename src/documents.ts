@@ -262,8 +262,15 @@ export type OrderPrintInput = {
   copies?: string[];
 };
 
-/** Documento da ordem de serviço, pronto para a impressora. */
-export function buildOrderDocument({ order, settings, mechanics, copies }: OrderPrintInput): string {
+/**
+ * UMA via de UMA OS.
+ *
+ * Fica separado porque duas coisas usam o mesmo bloco: o cupom de uma OS, com
+ * as três vias, e o LOTE de quem está devendo, com uma via de cada OS. Se
+ * existissem dois blocos, um deles ia ficar para trás — e o que fica para trás
+ * é o papel que chega na mão do cliente com um número diferente.
+ */
+function orderVia(order: OrderRecord, settings: Partial<SettingsConfig> | null, mechanics: string, label: string): string {
   const items = order.items ?? [];
   const total = order.total ?? items.reduce((sum, item) => sum + item.price, 0);
   /*
@@ -276,8 +283,7 @@ export function buildOrderDocument({ order, settings, mechanics, copies }: Order
   const desconto = Math.max(0, Number(order.discount ?? 0));
   const warranty = settings?.defaultWarrantyDays;
   const notes = settings?.defaultOsNotes;
-
-  const via = (label: string) => `<div class="via">
+  return `<div class="via">
     <div class="copy">${escapeHtml(label)}</div>
     ${workshopHead(settings)}
     <div class="rule"></div>
@@ -304,9 +310,45 @@ export function buildOrderDocument({ order, settings, mechanics, copies }: Order
     <div class="sign">Assinatura do cliente</div>
     <div class="feed"></div>
   </div>`;
+}
 
+/** Documento da ordem de serviço, pronto para a impressora. */
+export function buildOrderDocument({ order, settings, mechanics, copies }: OrderPrintInput): string {
   const escolhidas = copies?.length ? copies : orderCopyLabels(settings?.printThreeCopies !== false);
-  return documentShell(`OS ${order.id}`, settings?.printFormat ?? "Cupom 80mm", escolhidas.map(via).join(""));
+  return documentShell(
+    `OS ${order.id}`,
+    settings?.printFormat ?? "Cupom 80mm",
+    escolhidas.map((label) => orderVia(order, settings, mechanics, label)).join(""),
+  );
+}
+
+/**
+ * O LOTE: uma via de cada OS, num papel só.
+ *
+ * É a conferência de quem está devendo. O Gonzaga tem oito motos que passaram
+ * no mês e quer ver o que está sendo cobrado; imprimir OS por OS é abrir oito
+ * telas e mandar oito vezes para a impressora, e no meio disso uma se perde.
+ *
+ * UMA via por OS, e não as três: um lote de vinte OS em três vias são sessenta
+ * cupons, a bobina acaba e ninguém confere sessenta papéis. O rótulo diz de
+ * quem é a via, e é o mesmo rótulo do cupom de sempre.
+ *
+ * Cada OS quebra a página sozinha (ver `.via` no CSS), então a guilhotina
+ * corta no mesmo lugar de sempre.
+ */
+export function buildOrdersBatchDocument({ orders, settings, label = "Via do cliente", title }: {
+  orders: OrderRecord[];
+  settings: Partial<SettingsConfig> | null;
+  /** Qual via de cada OS. O padrão é a do cliente: é ela que vai para quem paga. */
+  label?: string;
+  /** O nome que aparece na aba da impressão — normalmente quem está devendo. */
+  title?: string;
+}): string {
+  // Lote vazio devolve documento vazio de propósito: mandar uma folha em
+  // branco para a impressora é pior do que não mandar nada, e quem chamou
+  // decide o que dizer na tela.
+  const corpo = orders.map((order) => orderVia(order, settings, order.mechanic ?? "", label)).join("");
+  return documentShell(title || `Lote de ${orders.length} OS`, settings?.printFormat ?? "Cupom 80mm", corpo);
 }
 
 /**

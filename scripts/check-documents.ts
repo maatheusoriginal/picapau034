@@ -12,7 +12,7 @@ import {
   copiesToPrint,
   orderFromQuickService,
   ORDER_COPY_LABELS,
-  buildOrderDocument,
+  buildOrderDocument, buildOrdersBatchDocument,
   buildOrderWhatsappMessage,
   buildSaleDocument,
   escapeHtml,
@@ -269,6 +269,46 @@ const casos: Array<[string, unknown, unknown]> = [
   ["nenhum marcador sobra na mensagem", /\{\w+\}/.test(buildOrderWhatsappMessage(order, settings)), false],
   ["sem modelo configurado ainda sai mensagem", buildOrderWhatsappMessage(order, {}).length > 0, true],
 ];
+
+/* ---------------------------------------------------------------------------
+   O LOTE DE QUEM ESTÁ DEVENDO
+
+   Uma via de cada OS, num papel só. O erro que este bloco impede é o lote
+   sair com as três vias de cada uma: vinte OS viram sessenta cupons, a bobina
+   acaba e ninguém confere sessenta papéis.
+--------------------------------------------------------------------------- */
+const outra: OrderRecord = { ...order, id: "OS-0777", customer: "MARIA SOUZA", plate: "XYZ-9K88", total: 90 };
+const lote = buildOrdersBatchDocument({ orders: [order, outra], settings, title: "GONZAGA ENTREGAS" });
+const viasDoLote = (lote.match(/class="via"/g) ?? []).length;
+casos.push(
+  ["o lote traz uma via por OS, e não três", viasDoLote, 2],
+  ["a primeira OS está no lote", lote.includes(order.id), true],
+  ["a segunda também", lote.includes("OS-0777"), true],
+  ["cada OS leva o cliente dela", lote.includes("MARIA SOUZA"), true],
+  ["a via do lote é a do cliente, que é quem paga", (lote.match(/class="copy">([^<]*)</) ?? [])[1], "Via do cliente"],
+  ["dá para pedir outra via", (buildOrdersBatchDocument({ orders: [order], settings, label: "Via do caixa" }).match(/class="copy">([^<]*)</) ?? [])[1], "Via do caixa"],
+  ["o nome de quem deve vai no título da impressão", /<title>GONZAGA ENTREGAS<\/title>/.test(lote), true],
+  ["cada OS quebra a própria página", lote.includes("break-after: page"), true],
+  ["o lote respeita o formato de papel da oficina", buildOrdersBatchDocument({ orders: [order], settings: { ...settings, printFormat: "Folha A4" } }).includes("size: A4"), true],
+  // Lote vazio não manda folha em branco para a impressora.
+  ["lote vazio sai sem via nenhuma", (buildOrdersBatchDocument({ orders: [], settings }).match(/class="via"/g) ?? []).length, 0],
+);
+
+/*
+  A via do lote é a MESMA via do cupom, byte a byte.
+
+  É a conferência que sustenta tudo: se as duas se separarem, um dia o papel
+  do lote mostra um total, o cupom mostra outro, e quem descobre é o cliente
+  no balcão. Por isso as duas saem da mesma função (`orderVia`) — e isto aqui
+  é o que impede alguém de "melhorar" uma delas sozinha.
+*/
+const corpoDe = (html: string) => html.slice(html.indexOf("<body>") + 6, html.lastIndexOf("</body>"));
+casos.push([
+  "a via do lote é igual, byte a byte, à via do cupom",
+  corpoDe(buildOrdersBatchDocument({ orders: [order], settings, label: "Via do cliente" }))
+    === corpoDe(buildOrderDocument({ order, settings, mechanics: order.mechanic ?? "", copies: ["Via do cliente"] })),
+  true,
+]);
 
 let falhas = 0;
 for (const [nome, obtido, esperado] of casos) {

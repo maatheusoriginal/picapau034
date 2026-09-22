@@ -27,7 +27,7 @@ import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const OUT = process.argv[2] ?? AQUI;
-const GRUPO = { "Ordens de serviço":"Oficina","Orçamentos":"Oficina","PDV Balcão":"Balcão","Serviço rápido":"Balcão",
+const GRUPO = { "Ordens de serviço":"Oficina","OS finalizadas":"Oficina","Orçamentos":"Oficina","PDV Balcão":"Balcão","Serviço rápido":"Balcão",
   "Vendas do balcão":"Balcão","Produtos e estoque":"Estoque","Compras e entradas":"Estoque","Ajuste de estoque":"Estoque","Fornecedores":"Estoque",
   "Clientes":"Cadastros","Motocicletas":"Cadastros","Funcionários":"Cadastros","Financeiro":"Gestão",
   "Contas a receber":"Gestão","Contas a pagar":"Gestão","Histórico geral":"Gestão","Histórico de caixas":"Gestão","Relatórios":"Gestão" };
@@ -3840,6 +3840,141 @@ await passo("imprimir a OS: no computador pela moldura, no celular numa janela p
   }
 
   if (problemas.length) throw new Error("impressão do cupom:\n      - " + problemas.join("\n      - "));
+});
+
+await passo("OS finalizadas tem aba própria, e a reimpressão acha pela placa e imprime o lote de quem deve", async () => {
+  /*
+    TRÊS PEDIDOS DO BALCÃO, UMA RAIZ SÓ: o papel de um serviço que JÁ TERMINOU.
+
+    1. Uma ABA das finalizadas. Procurar a OS do mês passado no meio da fila do
+       dia é achar no meio do que está acontecendo agora.
+    2. REIMPRIMIR pela placa. A via do cliente rasgou; ele sabe a placa, não o
+       número da OS — e a OS já saiu da fila.
+    3. O LOTE de quem está devendo. O Gonzaga tem motos no mês e quer conferir
+       o que está sendo cobrado: uma via de cada OS que ele ainda deve.
+  */
+  const problemas = [];
+  /*
+    Observa o que vai para a impressora, e observa UMA VEZ.
+
+    Instalar o observador de novo embrulharia o anterior: o de fora empurra o
+    papel na lista e chama o de dentro, que empurra outra vez. Um papel virava
+    dois, e o passo acusava a tela de mandar o lote em dois documentos — erro
+    do teste, não do sistema. Depois da primeira vez só a lista é esvaziada.
+  */
+  const vigiar = () => p.evaluate(() => {
+    window.__papeis = [];
+    if (window.__vigiandoImpressao) return;
+    window.__vigiandoImpressao = true;
+    const antes = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "srcdoc");
+    Object.defineProperty(HTMLIFrameElement.prototype, "srcdoc", {
+      set(valor) { window.__papeis.push(String(valor)); antes.set.call(this, valor); },
+      get() { return antes.get.call(this); }, configurable: true,
+    });
+    window.print = () => {};
+  });
+
+  // A oficina precisa de OS ENTREGUE para este passo. As que o roteiro já
+  // encerrou servem; se não houver nenhuma, não há o que reimprimir.
+  const entregues = (await banco("serviceOrders")).filter((os) => os.closed === true);
+  if (!entregues.length) throw new Error("nenhuma OS entregue no banco: sem isso não dá para provar a reimpressão");
+
+  // ---------- 1. A ABA ----------
+  await ir("OS finalizadas");
+  await p.waitForTimeout(1500);
+  const titulo = await p.locator("h1").first().innerText().catch(() => "");
+  if (!/OS finalizadas/i.test(titulo)) problemas.push(`a aba abriu em "${titulo}"`);
+  if (!/\/oficina\/finalizadas/.test(await p.evaluate(() => location.pathname))) {
+    problemas.push("a aba das finalizadas não tem endereço próprio, então o link não volta para ela");
+  }
+  // O quadro e o filtro de etapa não cabem aqui: todas já terminaram.
+  if (await p.locator(".view-switch button", { hasText: /^Quadro$/ }).count()) problemas.push("a aba das entregues ainda oferece o Quadro, que é a fila da oficina");
+  if (await p.locator(".order-status-filters").count()) problemas.push("a aba das entregues ainda mostra o filtro de etapa");
+
+  const listadas = await p.locator("tbody .order-id").allInnerTexts();
+  if (!listadas.length) problemas.push("a aba das entregues abriu vazia, com OS entregue no banco");
+  const aberta = (await banco("serviceOrders")).find((os) => os.closed !== true);
+  if (aberta && listadas.includes(aberta._id)) problemas.push(`a OS ${aberta._id}, que ainda está na oficina, apareceu entre as finalizadas`);
+
+  // A busca pela placa, sem hífen, que é como se digita correndo.
+  const comPlaca = entregues.find((os) => os.plate);
+  if (comPlaca) {
+    await p.locator(".list-toolbar input").first().fill(String(comPlaca.plate).replace(/\W/g, ""));
+    await p.waitForTimeout(1300);
+    if (!(await p.locator("tbody .order-id").allInnerTexts()).includes(comPlaca._id)) {
+      problemas.push(`busquei a placa ${comPlaca.plate} sem hífen e a ${comPlaca._id} não apareceu`);
+    }
+    await p.locator(".list-toolbar input").first().fill("");
+    await p.waitForTimeout(800);
+  }
+
+  // ---------- 2. REIMPRIMIR UMA VIA ----------
+  await p.locator(".heading-actions button", { hasText: /Reimprimir/ }).first().click();
+  await p.waitForTimeout(1800);
+  if (!/Reimprimir/i.test(await p.locator(".dialog h2").first().innerText().catch(() => ""))) {
+    throw new Error("o botão Reimprimir não abriu a janela da reimpressão");
+  }
+  if (!(await p.locator(".reprint-row").count())) problemas.push("a reimpressão abriu sem nenhuma OS à vista, antes de digitar");
+
+  const alvo = comPlaca ?? entregues[0];
+  await p.locator(".reprint-body input").first().fill(String(alvo.plate || alvo._id).replace(/\W/g, ""));
+  await p.waitForTimeout(1400);
+  const achadas = await p.locator(".reprint-row-what strong").allInnerTexts();
+  if (!achadas.some((linha) => linha.includes(alvo._id))) {
+    problemas.push(`procurei "${alvo.plate || alvo._id}" na reimpressão e a ${alvo._id} não apareceu`);
+  }
+
+  await vigiar();
+  await p.locator(".reprint-row .print-copies > button").first().click();
+  await p.waitForTimeout(700);
+  await p.locator(".print-copies-menu button", { hasText: /^Via do cliente$/ }).first().click();
+  await p.waitForTimeout(2000);
+  const umaVia = await p.evaluate(() => window.__papeis ?? []);
+  if (umaVia.length !== 1) problemas.push(`pedi uma via e saíram ${umaVia.length} documento(s)`);
+  else {
+    const vias = [...umaVia[0].matchAll(/class="copy">([^<]*)</g)].map((achado) => achado[1]);
+    if (vias.length !== 1) problemas.push(`pedi UMA via e o papel saiu com ${vias.length}: ${vias.join(", ")}`);
+    if (vias[0] !== "Via do cliente") problemas.push(`pedi a via do cliente e saiu "${vias[0]}"`);
+    if (!umaVia[0].includes(alvo._id)) problemas.push("o papel reimpresso não é o da OS que eu escolhi");
+  }
+
+  // ---------- 3. O LOTE DE QUEM ESTÁ DEVENDO ----------
+  const devedores = await p.locator(".reprint-people button").count();
+  if (!devedores) {
+    // Sem ninguém devendo, a tela tem de DIZER isso — e não sumir em silêncio,
+    // que é como uma tela quebrada se parece com uma tela vazia.
+    const aviso = await p.locator(".reprint-batch").first().innerText().catch(() => "");
+    if (!/Ninguém está devendo/i.test(aviso)) problemas.push("ninguém devendo e a tela não explica por que o lote está vazio");
+  } else {
+    await p.locator(".reprint-people button").first().click();
+    await p.waitForTimeout(900);
+    const pronto = await p.locator(".reprint-batch-ready").first().innerText().catch(() => "");
+    if (!pronto) problemas.push("escolhi o devedor e o lote não ficou pronto para imprimir");
+
+    await vigiar();
+    await p.locator(".reprint-batch-ready .primary-button").click();
+    await p.waitForTimeout(2400);
+    const lote = await p.evaluate(() => window.__papeis ?? []);
+    if (lote.length !== 1) problemas.push(`o lote saiu em ${lote.length} documento(s), e o certo é um papel só`);
+    else {
+      const papel = lote[0];
+      const quantas = (papel.match(/class="via"/g) ?? []).length;
+      const naTela = Number((pronto.match(/Imprimir (\d+) OS/) ?? [])[1] ?? 0);
+      // UMA via por OS: vinte OS em três vias são sessenta cupons.
+      if (naTela && quantas !== naTela) {
+        problemas.push(`a tela prometeu ${naTela} OS e o papel saiu com ${quantas} via(s): o lote é uma via por OS`);
+      }
+      // E nenhuma OS que ainda está na oficina pode entrar num lote de
+      // cobrança: ela não terminou, então não há o que cobrar.
+      const naOficina = (await banco("serviceOrders")).filter((os) => os.closed !== true).map((os) => os._id);
+      const intrusa = naOficina.find((id) => papel.includes(id));
+      if (intrusa) problemas.push(`o lote levou a ${intrusa}, que ainda está na oficina`);
+    }
+  }
+
+  await foto("reimprimir-e-lote");
+  await fecharQualquerDialogo();
+  if (problemas.length) throw new Error("OS finalizadas, reimpressão e lote:\n      - " + problemas.join("\n      - "));
 });
 
 console.log(`\n=== ${falhas} falha(s) ===`);

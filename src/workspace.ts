@@ -2,7 +2,7 @@ import type { OrderRecord, ProductRecord, FirebasePermission, UserRole } from ".
 import { normalizeOrderStatus } from "./types";
 
 export const routePaths: Record<string, string> = {
-  "Visão geral": "/", "Ordens de serviço": "/oficina", "Orçamentos": "/orcamentos",
+  "Visão geral": "/", "Ordens de serviço": "/oficina", "OS finalizadas": "/oficina/finalizadas", "Orçamentos": "/orcamentos",
   "PDV Balcão": "/pdv", "Serviço rápido": "/servico-rapido", "Vendas do balcão": "/vendas",
   "Produtos e estoque": "/estoque", "Compras e entradas": "/compras", "Ajuste de estoque": "/inventario",
   "Fornecedores": "/fornecedores", "Clientes": "/clientes", "Motocicletas": "/motos",
@@ -12,7 +12,10 @@ export const routePaths: Record<string, string> = {
 };
 
 export const workspacePermissions: Record<string, FirebasePermission[]> = {
-  "Ordens de serviço": ["orders.view"], "Orçamentos": ["budgets.view"], "PDV Balcão": ["pos.use"],
+  "Ordens de serviço": ["orders.view"],
+  // Mesma porta das ordens de serviço: é a mesma informação, num recorte.
+  "OS finalizadas": ["orders.view"],
+  "Orçamentos": ["budgets.view"], "PDV Balcão": ["pos.use"],
   "Serviço rápido": ["quickService.use"], "Vendas do balcão": ["pos.use"],
   "Produtos e estoque": ["inventory.view"], "Compras e entradas": ["inventory.manage"],
   "Ajuste de estoque": ["inventory.view"], "Fornecedores": ["inventory.manage"],
