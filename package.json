@@ -57,7 +57,8 @@
     "check:bundle": "node --import tsx scripts/check-bundle.ts",
     "check:order-return": "node --import tsx scripts/check-order-return.ts",
     "check:product-order": "node --import tsx scripts/check-product-order.ts",
-    "check:order-number": "node --import tsx scripts/check-order-number.ts"
+    "check:order-number": "node --import tsx scripts/check-order-number.ts",
+    "check:printing": "tsx scripts/check-printing.ts"
   },
   "dependencies": {
     "express": "4.21.2",
