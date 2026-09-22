@@ -3854,8 +3854,18 @@ await passo("OS finalizadas tem aba própria, e a reimpressão acha pela placa e
        o que está sendo cobrado: uma via de cada OS que ele ainda deve.
   */
   const problemas = [];
+  /*
+    Observa o que vai para a impressora, e observa UMA VEZ.
+
+    Instalar o observador de novo embrulharia o anterior: o de fora empurra o
+    papel na lista e chama o de dentro, que empurra outra vez. Um papel virava
+    dois, e o passo acusava a tela de mandar o lote em dois documentos — erro
+    do teste, não do sistema. Depois da primeira vez só a lista é esvaziada.
+  */
   const vigiar = () => p.evaluate(() => {
     window.__papeis = [];
+    if (window.__vigiandoImpressao) return;
+    window.__vigiandoImpressao = true;
     const antes = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "srcdoc");
     Object.defineProperty(HTMLIFrameElement.prototype, "srcdoc", {
       set(valor) { window.__papeis.push(String(valor)); antes.set.call(this, valor); },
