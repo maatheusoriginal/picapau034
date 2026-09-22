@@ -3715,6 +3715,133 @@ await passo("a lista de peças abre sem digitar, busca pelo nome, e o desconto e
 });
 
 
+await passo("imprimir a OS: no computador pela moldura, no celular numa janela própria", async () => {
+  /*
+    A OFICINA MANDOU IMPRIMIR PELO TELEFONE E SAIU A TELA DO SISTEMA.
+
+    O cupom sempre foi montado numa moldura escondida (iframe), para sair com
+    o CSS dele — 80mm, monoespaçada — sem herdar nada do app. No computador
+    isso funciona e é invisível. No CELULAR não: o serviço de impressão do
+    Android não imprime a moldura, imprime a página de cima — e aí sai o menu,
+    os botões, a tela inteira, no lugar do cupom.
+
+    Agora o telefone manda o cupom para uma janela própria, onde ele É o
+    documento de topo e não existe moldura para o navegador ignorar. Este
+    passo cobra os dois caminhos, porque consertar o celular quebrando o
+    computador seria trocar um defeito por outro pior: o computador é o que
+    imprime os cupons todo dia.
+  */
+  const problemas = [];
+  const vigiar = () => p.evaluate(() => {
+    window.__molduras = [];
+    const antes = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "srcdoc");
+    Object.defineProperty(HTMLIFrameElement.prototype, "srcdoc", {
+      set(valor) { window.__molduras.push(String(valor)); antes.set.call(this, valor); },
+      get() { return antes.get.call(this); }, configurable: true,
+    });
+    // A janela de impressão de verdade travaria o roteiro.
+    window.print = () => { window.__imprimiuATela = true; };
+  });
+
+  // ---------- COMPUTADOR ----------
+  await ir("Ordens de serviço");
+  await visaoDaOficina("Quadro");
+  await p.waitForTimeout(900);
+  await abrirPrimeiraOS();
+  await p.waitForTimeout(2800);
+  await vigiar();
+  await p.locator(".order-actions .print-copies > button").first().click();
+  await p.waitForTimeout(700);
+  await p.locator(".print-copies-menu .print-copies-all").first().click();
+  await p.waitForTimeout(2200);
+
+  const noComputador = await p.evaluate(() => window.__molduras ?? []);
+  if (noComputador.length !== 1) problemas.push(`no computador saíram ${noComputador.length} documento(s) pela moldura, e o esperado é 1`);
+  else {
+    const papel = noComputador[0];
+    const vias = [...papel.matchAll(/class="copy">([^<]*)</g)].map((achado) => achado[1]);
+    if (vias.length !== 3) problemas.push(`o cupom saiu com ${vias.length} via(s): ${vias.join(", ") || "nenhuma"}`);
+    if (!/Via do cliente/.test(papel)) problemas.push("a via do cliente não saiu no cupom");
+    if (!/class="row total"/.test(papel)) problemas.push("o cupom saiu sem a linha de total");
+  }
+  if (await p.evaluate(() => window.__imprimiuATela === true)) {
+    problemas.push("no computador a ordem de imprimir foi para a TELA do sistema, e não para o cupom");
+  }
+  await fecharQualquerDialogo();
+
+  // ---------- CELULAR ----------
+  // Aparelho de verdade: é o que o navegador diz de si que decide o caminho.
+  const celular = await b.newContext({
+    viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+    userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36",
+  });
+  try {
+    await celular.addInitScript(() => { window.print = () => { window.__printDaqui = true; }; });
+    const cel = await celular.newPage();
+    await cel.goto("http://127.0.0.1:5199/"); await cel.waitForTimeout(2200);
+    await cel.getByPlaceholder(/e-mail|email/i).first().fill("dono@picapau.test");
+    await cel.locator('input[type="password"]').first().fill("teste123");
+    await cel.getByRole("button", { name: /^Entrar$/ }).click(); await cel.waitForTimeout(6000);
+    await cel.evaluate(() => {
+      window.__molduras = [];
+      const antes = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "srcdoc");
+      Object.defineProperty(HTMLIFrameElement.prototype, "srcdoc", {
+        set(valor) { window.__molduras.push(String(valor)); antes.set.call(this, valor); },
+        get() { return antes.get.call(this); }, configurable: true,
+      });
+    });
+
+    await cel.locator(".mobile-bottom-nav button", { hasText: /Oficina/ }).first().click();
+    await cel.waitForTimeout(3000);
+    // O quadro do celular mostra uma etapa por vez: vale a que tem card à vista.
+    const pilulas = cel.locator(".board-stage-pills button");
+    let abriu = false;
+    for (let i = 0; i < (await pilulas.count()); i += 1) {
+      await pilulas.nth(i).click();
+      await cel.waitForTimeout(900);
+      const card = cel.locator(".order-board-column:visible .board-card button", { hasText: /Abrir OS/ }).first();
+      if (await card.count() && await card.isVisible().catch(() => false)) { await card.click(); abriu = true; break; }
+    }
+    if (!abriu) throw new Error("no celular não achei OS nenhuma para imprimir");
+    await cel.waitForTimeout(2800);
+
+    await cel.locator(".order-actions .print-copies > button").first().scrollIntoViewIfNeeded();
+    await cel.locator(".order-actions .print-copies > button").first().click();
+    await cel.waitForTimeout(700);
+    await cel.locator(".print-copies-menu .print-copies-all").first().click();
+    await cel.waitForTimeout(2600);
+
+    // 1. Nenhuma moldura: é ela que o Android ignora.
+    const molduras = await cel.evaluate(() => window.__molduras ?? []);
+    if (molduras.length) problemas.push(`no celular o cupom ainda foi para a moldura escondida (${molduras.length}), que é o que o Android não imprime`);
+
+    // 2. Uma janela própria, com o cupom dentro.
+    const abas = celular.pages().filter((pagina) => pagina !== cel);
+    if (abas.length !== 1) problemas.push(`no celular abriram ${abas.length} janela(s) de impressão, e o esperado é 1`);
+    else {
+      const aba = abas[0];
+      await aba.waitForLoadState("domcontentloaded").catch(() => {});
+      const titulo = await aba.title().catch(() => "");
+      if (!/^OS /.test(titulo)) problemas.push(`a janela do celular abriu com o título "${titulo}", e devia ser a OS`);
+      const vias = await aba.locator(".copy").allInnerTexts().catch(() => []);
+      if (vias.length !== 3) problemas.push(`no celular o cupom saiu com ${vias.length} via(s): ${vias.join(", ") || "nenhuma"}`);
+      if (!(await aba.locator(".row.total").count())) problemas.push("no celular o cupom saiu sem a linha de total");
+      // 3. E a ordem de imprimir foi para ELA, que é o documento de topo.
+      if (!(await aba.evaluate(() => window.__printDaqui === true).catch(() => false))) {
+        problemas.push("a janela do cupom abriu, mas a ordem de imprimir não foi para ela");
+      }
+      if (await cel.evaluate(() => window.__printDaqui === true).catch(() => false)) {
+        problemas.push("no celular a ordem de imprimir foi para a TELA do sistema — é exatamente o defeito que a oficina viu");
+      }
+    }
+    await foto("imprimir-celular");
+  } finally {
+    await celular.close().catch(() => {});
+  }
+
+  if (problemas.length) throw new Error("impressão do cupom:\n      - " + problemas.join("\n      - "));
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();
