@@ -576,3 +576,21 @@ table td strong, table td span { font-size: .875rem; }
 .quick-part-chosen span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .quick-part-chosen strong { font-size: .9375rem; }
 .quick-part-chosen small { font-size: .8125rem; color: var(--muted); }
+
+/* ---------------------------------------------------------------------------
+   Moto elétrica: a que não tem placa
+
+   A marcação fica COLADA no campo da placa, e não perdida no fim do
+   formulário: ela é a resposta à pergunta que o campo acabou de fazer. Quem
+   está com a moto elétrica na frente vê as duas coisas juntas e entende que
+   uma substitui a outra.
+--------------------------------------------------------------------------- */
+/* Dentro de uma grade de campos, a marcação ocupa a linha inteira — mas SEM
+   a classe `field`: ela põe `width: 100%` em todo input que estiver dentro, e
+   o quadradinho virava uma barra do tamanho do formulário. Medido na tela. */
+.electric-switch-full { grid-column: 1 / -1; }
+.electric-switch { display: flex; align-items: flex-start; gap: 10px; margin-top: 9px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fffdf8; cursor: pointer; }
+.electric-switch input { width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0; cursor: pointer; }
+.electric-switch > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.electric-switch strong { font-size: .875rem; }
+.electric-switch small { font-size: .8125rem; color: var(--muted); line-height: 1.45; }

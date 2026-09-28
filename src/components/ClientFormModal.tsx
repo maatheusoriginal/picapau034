@@ -5,6 +5,7 @@ import { QuickAddSelect } from "./QuickAddSelect";
 import { defaultSystemLists } from "../types";
 import { fullModelName, modelsOf, versionsOf } from "../motorcycle-catalog";
 import { formatPlate, isValidPlate, motorcycleIdFor, platePattern, samePlate } from "../plate";
+import { electricBikeId, nextElectricCode } from "../electric";
 import { saveFirestoreDoc } from "../../app/firebase/client";
 import { NumberField } from "./NumberField";
 import { nextSequentialId } from "../firestore-data";
@@ -61,6 +62,8 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
   // vinculada, a próxima OS dessa pessoa não a encontra pela busca por placa —
   // que é como o balcão procura quando a moto chega.
   const [motoPlate, setMotoPlate] = useState("");
+  /* A moto do cliente é elétrica, e não tem placa. Ver src/electric.ts. */
+  const [motoEletrica, setMotoEletrica] = useState(false);
   const [motoBrand, setMotoBrand] = useState("Honda");
   const [motoModel, setMotoModel] = useState("");
   const [motoVersion, setMotoVersion] = useState("");
@@ -136,18 +139,25 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
 
     // A moto é obrigatória para quem ainda não tem nenhuma: sem placa vinculada,
     // a próxima OS deste cliente não o encontra pela busca por placa.
-    if (!jaTemMoto && !motoPlate.trim()) {
-      setErroForm("Informe a placa da moto deste cliente. Toda pessoa cadastrada precisa de pelo menos uma moto vinculada.");
+    // A moto elétrica não tem placa: quem a identifica é o código da oficina,
+    // e é o sistema que o gera. Cobrar placa aqui impediria o cadastro de um
+    // cliente cuja única moto é elétrica.
+    if (!jaTemMoto && !motoEletrica && !motoPlate.trim()) {
+      setErroForm("Informe a placa da moto deste cliente, ou marque que ela é elétrica. Toda pessoa cadastrada precisa de pelo menos uma moto vinculada.");
       return;
     }
-    if (motoPlate.trim() && !isValidPlate(motoPlate)) {
+    if (motoEletrica && !motoModel.trim()) {
+      setErroForm("Informe o modelo da moto elétrica: sem placa, é ele que diz qual moto é.");
+      return;
+    }
+    if (!motoEletrica && motoPlate.trim() && !isValidPlate(motoPlate)) {
       setErroForm("A placa não está num dos padrões brasileiros (ABC-1234 ou ABC-1D23).");
       return;
     }
     // Placa que já é de outro cliente seria roubada em silêncio: o id da moto
     // sai da placa, e gravar por cima trocaria o dono da moto de alguém.
     const donoAtual = allMotorcycles.find((moto) => samePlate(moto.plate, motoPlate));
-    if (motoPlate.trim() && donoAtual && donoAtual.ownerId && donoAtual.ownerId !== editingClient?.id) {
+    if (!motoEletrica && motoPlate.trim() && donoAtual && donoAtual.ownerId && donoAtual.ownerId !== editingClient?.id) {
       const nomeDoDono = allClients.find((cliente) => cliente.id === donoAtual.ownerId)?.name;
       setErroForm(`A placa ${formatPlate(motoPlate)} já está cadastrada${nomeDoDono ? ` no nome de ${nomeDoDono}` : ""}. Confira a placa ou edite a moto pelo cadastro de motocicletas.`);
       return;
@@ -157,7 +167,9 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
     setIsSaving(true);
     try {
       const clientId = editingClient?.id || nextSequentialId(allClients, "CLI");
-      const motoId = motoPlate.trim() ? motorcycleIdFor(motoPlate) : "";
+      const codigoEletrica = motoEletrica ? nextElectricCode(allMotorcycles) : "";
+      const identificacaoDaMoto = motoEletrica ? codigoEletrica : formatPlate(motoPlate);
+      const motoId = motoEletrica ? electricBikeId(codigoEletrica) : (motoPlate.trim() ? motorcycleIdFor(motoPlate) : "");
 
       const clientData: ClientRecord = {
         id: clientId,
@@ -203,7 +215,8 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
         await saveFirestoreDoc("motorcycles", motoId, {
           ownerId: clientId,
           ownerName: clientData.name,
-          plate: formatPlate(motoPlate),
+          plate: identificacaoDaMoto,
+          electric: motoEletrica,
           brand: motoBrand,
           model: fullModelName(motoModel, motoVersion),
           year: motoYear.trim(),
@@ -214,7 +227,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
       onSaved(clientData);
       notify(editingClient
         ? "Cliente atualizado com sucesso!"
-        : `Cliente cadastrado${motoId ? ` com a moto ${formatPlate(motoPlate)}` : ""} com sucesso!`);
+        : `Cliente cadastrado${motoId ? ` com a moto ${identificacaoDaMoto}` : ""} com sucesso!`);
       onClose();
     } catch (err: unknown) {
       console.error("Erro ao salvar cliente:", err);
@@ -315,7 +328,26 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                   <div><strong>Motocicleta do cliente</strong><small>{jaTemMoto ? "Este cliente já tem moto cadastrada. Preencha só se quiser adicionar outra." : "Toda pessoa cadastrada precisa de pelo menos uma moto vinculada."}</small></div>
                   {jaTemMoto ? <span className="status-badge green">Já vinculada</span> : <span className="status-badge">Obrigatória</span>}
                 </header>
+                {/* Moto elétrica não tem placa: o sistema gera o código da
+                    oficina no lugar. Sem isto, um cliente cuja única moto é
+                    elétrica não passava do cadastro. */}
+                <label className="electric-switch">
+                  <input type="checkbox" checked={motoEletrica}
+                    onChange={(e) => { setMotoEletrica(e.target.checked); if (e.target.checked) setMotoPlate(""); setErroForm(""); }}/>
+                  <span>
+                    <strong>Moto elétrica (sem placa)</strong>
+                    <small>O sistema gera o código {nextElectricCode(allMotorcycles)} no lugar da placa.</small>
+                  </span>
+                </label>
                 <div className="form-grid-3">
+                  {motoEletrica ? (
+                    <label className="field-group">
+                      <span className="field-label">Código da oficina</span>
+                      <input type="text" readOnly className="dialog-input" value={nextElectricCode(allMotorcycles)}
+                        aria-label="Código da oficina para esta moto elétrica"/>
+                      <span className="settings-hint">Anote numa etiqueta na moto: é por ele que ela é achada depois.</span>
+                    </label>
+                  ) : (
                   <label className="field-group">
                     <span className="field-label">Placa {jaTemMoto ? null : <b className="req">*</b>}</span>
                     <input
@@ -328,6 +360,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
                     />
                     <span className="settings-hint">{motoPlate ? platePattern(motoPlate) : "Padrão antigo ou Mercosul."}</span>
                   </label>
+                  )}
                   {/* <div>, não <label>: botão dentro de label aciona o select junto. */}
                   <div className="field-group">
                     <span className="field-label">Marca</span>
