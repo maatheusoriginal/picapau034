@@ -4155,9 +4155,19 @@ await passo("moto elétrica: sem placa, o sistema dá um código e é ele que id
   // 5. E SAI NO PAPEL: é o que vai na etiqueta da moto.
   await p.locator("tbody tr").first().locator("button", { hasText: /^Abrir$/ }).click();
   await p.waitForTimeout(2800);
-  // O detalhe da OS abre na camada de diálogo comum, e não na do atendimento.
-  const campo = (await p.locator(".dialog .field").filter({ hasText: /Código da oficina/ }).first().innerText().catch(() => "")).replace(/\s+/g, " ");
-  if (!campo.includes(codigo)) problemas.push(`dentro da OS o código não aparece como código: "${campo}"`);
+  /*
+    O detalhe da OS abre na camada de diálogo comum, e não na do atendimento.
+
+    E o valor se lê do INPUT, não do texto do campo: `innerText` de um campo
+    não inclui o que está escrito dentro da caixa, então comparar o texto
+    reprovava sempre — foi o que aconteceu na primeira execução deste passo.
+  */
+  const campoDoCodigo = p.locator(".dialog .field").filter({ hasText: /Código da oficina/ }).first();
+  if (!(await campoDoCodigo.count())) problemas.push("dentro da OS o campo não é chamado de código");
+  else {
+    const mostrado = await campoDoCodigo.locator("input").first().inputValue().catch(() => "");
+    if (mostrado !== codigo) problemas.push(`dentro da OS o campo do código mostra "${mostrado}", e a moto é a ${codigo}`);
+  }
   await p.evaluate(() => {
     window.__papelEletrica = [];
     if (window.__vigiandoEletrica) return;
