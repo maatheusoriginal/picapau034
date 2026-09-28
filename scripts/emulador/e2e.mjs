@@ -3977,6 +3977,103 @@ await passo("OS finalizadas tem aba própria, e a reimpressão acha pela placa e
   if (problemas.length) throw new Error("OS finalizadas, reimpressão e lote:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("serviço rápido: a peça sai do mesmo buscador da OS, e o saldo cai", async () => {
+  /*
+    A PEÇA DO SERVIÇO RÁPIDO ERA UMA LISTA SUSPENSA COM O ESTOQUE INTEIRO.
+
+    No computador já era ruim; no celular é rolar centenas de linhas com o
+    dedo, sem busca nenhuma, e a peça certa está no meio. Agora é o MESMO
+    buscador da OS — um componente só, de propósito: dois buscadores divergem,
+    e quem descobre é o balcão com o cliente na frente.
+
+    Este passo cobra as duas metades: que a tela é a mesma nos dois lugares, e
+    que a peça escolhida por ali chega mesmo na venda e no estoque.
+  */
+  const problemas = [];
+  const secaoDaPeca = () => p.locator(".intake-quick-section").filter({ hasText: "O que foi utilizado?" }).first();
+
+  await ir("Serviço rápido");
+  await p.getByRole("button", { name: /Novo serviço rápido/i }).first().click();
+  await p.waitForTimeout(2400);
+
+  const cadastradas = (await banco("products")).filter((peca) => peca.active !== false && Number(peca.stock) > 0);
+  if (!cadastradas.length) throw new Error("nenhuma peça com saldo para provar o serviço rápido");
+
+  // 1. A LISTA SUSPENSA SUMIU. Era ela o problema.
+  if (await secaoDaPeca().locator("select").count()) {
+    problemas.push("a peça do serviço rápido ainda é uma lista suspensa com o estoque inteiro");
+  }
+
+  // 2. A LISTA APARECE SEM DIGITAR, e em ordem alfabética.
+  const aVista = await secaoDaPeca().locator(".order-item-result").count();
+  if (!aVista) problemas.push("abri o serviço rápido e a lista de peças não apareceu antes de digitar");
+  const nomes = await secaoDaPeca().locator(".order-item-result strong").allInnerTexts();
+  const ordenados = [...nomes].sort((um, outro) => um.localeCompare(outro, "pt-BR", { sensitivity: "base", numeric: true }));
+  if (nomes.join("|") !== ordenados.join("|")) {
+    problemas.push(`a lista do serviço rápido não veio em ordem alfabética: ${nomes.slice(0, 4).join(", ")}...`);
+  }
+
+  // 3. A BUSCA PELO NOME.
+  const alvo = cadastradas.find((peca) => String(peca.name).trim().split(/\s+/)[0].length > 3) ?? cadastradas[0];
+  const pedaco = String(alvo.name).trim().split(/\s+/)[0];
+  await secaoDaPeca().locator(".order-item-picker input").first().fill(pedaco);
+  await p.waitForTimeout(1300);
+  const achadas = await secaoDaPeca().locator(".order-item-result strong").allInnerTexts();
+  if (!achadas.some((nome) => mesmoNome(nome, alvo.name))) {
+    problemas.push(`busquei "${pedaco}" no serviço rápido e "${alvo.name}" não apareceu`);
+  }
+
+  // 4. ESCOLHER guarda a peça e traz o preço do cadastro.
+  await secaoDaPeca().locator(".order-item-result").filter({ hasText: alvo.name }).first().click();
+  await p.waitForTimeout(1200);
+  const escolhida = await p.locator(".quick-part-chosen").first().innerText().catch(() => "");
+  if (!escolhida) problemas.push("escolhi a peça e a tela não mostrou qual ficou");
+  else if (!mesmoNome(escolhida.split("\n")[0] ?? "", alvo.name)) problemas.push(`escolhi "${alvo.name}" e a tela mostra "${escolhida.split("\n")[0]}"`);
+  if (await secaoDaPeca().locator(".order-item-results").count()) {
+    problemas.push("escolhi a peça e a lista do estoque continuou na frente");
+  }
+
+  // 5. NO CELULAR a lista rola por dentro, em vez de esticar o diálogo.
+  await p.setViewportSize({ width: 390, height: 844 });
+  await p.waitForTimeout(1200);
+  await p.locator(".quick-part-chosen button", { hasText: /Trocar/ }).first().click();
+  await p.waitForTimeout(1000);
+  if (!(await secaoDaPeca().locator(".order-item-result").count())) {
+    problemas.push("no celular, 'Trocar' não devolveu a lista de peças");
+  }
+  const caixa = await secaoDaPeca().locator(".order-item-results").first().boundingBox();
+  if (caixa && cadastradas.length > 6) {
+    const rola = await secaoDaPeca().locator(".order-item-results").first().evaluate((el) => el.scrollHeight > el.clientHeight);
+    if (!rola) problemas.push("no celular a lista do serviço rápido não rola por dentro: ela estica o diálogo");
+  }
+  await foto("rapido-peca-celular");
+  await p.setViewportSize({ width: 1360, height: 950 });
+  await p.waitForTimeout(900);
+
+  // 6. E a peça escolhida por ali CHEGA na venda e no estoque — que é o que
+  //    diferencia um buscador bonito de um buscador que funciona.
+  await secaoDaPeca().locator(".order-item-result").filter({ hasText: alvo.name }).first().click();
+  await p.waitForTimeout(1200);
+  await p.getByPlaceholder("Ex.: TROCA DE ÓLEO").fill("SERVICO COM PECA");
+  await p.locator('.dialog input[placeholder="0,00"]').first().fill("40");
+  await p.waitForTimeout(500);
+  const pagamento = p.locator(".dialog select").filter({ has: p.locator('option:text-is("Dinheiro")') }).first();
+  if (await pagamento.count()) await pagamento.selectOption({ label: "Dinheiro" });
+  await p.waitForTimeout(600);
+  await p.locator(".dialog-footer button", { hasText: /Confirmar/ }).first().click();
+  await p.waitForTimeout(5000);
+  await fecharQualquerDialogo();
+
+  const venda = (await banco("sales")).filter((v) => (v.items ?? []).some((item) => mesmoNome(item.name ?? "", alvo.name))).pop();
+  if (!venda) problemas.push(`a peça "${alvo.name}" escolhida no buscador não chegou em venda nenhuma`);
+  const depois = (await banco("products")).find((peca) => peca._id === alvo._id);
+  if (Number(depois?.stock) !== Number(alvo.stock) - 1) {
+    problemas.push(`o saldo de ${alvo.name} era ${alvo.stock} e ficou ${depois?.stock}: esperado ${Number(alvo.stock) - 1}`);
+  }
+
+  if (problemas.length) throw new Error("peça no serviço rápido:\n      - " + problemas.join("\n      - "));
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();

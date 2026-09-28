@@ -45,6 +45,7 @@ import { boardRow, mechanicBoard, mechanicSummary, mechanicsAfterTaking, resumoD
 import { decodeSheetBytes, newProductPayload, parseStockSheet, planStockImport, updatedProductPayload, type ImportPlan } from "../src/import";
 import { buildOrderDocument, buildOrderWhatsappMessage, buildOrdersBatchDocument, buildSaleDocument, copiesToPrint, ORDER_COPY_LABELS, orderFromQuickService, whatsappUrl, type OrderCopyChoice } from "../src/documents";
 import { orderIsUnpaid, peopleWithUnpaidOrders, searchOrdersToReprint } from "../src/order-reprint";
+import { PartPicker } from "../src/components/PartPicker";
 import { PrintCopiesMenu } from "../src/components/PrintCopiesMenu";
 import { LedgerWorkspace } from "../src/components/LedgerWorkspace";
 import { OrderRemovalButton } from "../src/components/OrderRemovalButton";
@@ -5540,7 +5541,43 @@ export function AppDialog({
                 <div className="quick-service-options">{enabledQuickServices.map((service) => <button type="button" className={quickService === service.name ? "selected" : ""} aria-pressed={quickService === service.name} key={service.id} onClick={() => { setQuickService(service.name); setQuickServiceValue(String(service.laborPrice)); if (!service.productRequired) { setQuickProduct("Sem produto"); setQuickPartValue("0"); } }}><Icon name="wrench" size={18}/><span>{service.name}</span><small>{service.duration} min · {formatBRL(service.laborPrice)}</small></button>)}</div>
                 <div className="form-grid"><label className="field field-full"><span>Descrição do serviço <b className="req">*</b></span><input value={quickService} onChange={(event) => setQuickService(emMaiusculo(event.target.value))} placeholder="Ex.: TROCA DE ÓLEO"/></label><label className="field"><span>Valor da mão de obra</span><MoneyField value={quickServiceValue} onChange={setQuickServiceValue} placeholder="0,00"/></label><label className="field"><span>Mecânico</span><select value={activeMechanics.some((mechanic) => mechanic.id === selectedQuickMechanicId) ? selectedQuickMechanicId : activeMechanics[0]?.id ?? ""} onChange={(event) => setSelectedQuickMechanicId(event.target.value)}>{!activeMechanics.length && <option value="">Não definido</option>}{activeMechanics.map((mechanic) => <option value={mechanic.id} key={mechanic.id}>{mechanic.name}</option>)}</select></label></div>
               </section>
-              <section className="intake-quick-section"><div className="intake-section-heading"><span>02 / PEÇA OU PRODUTO</span><h3>O que foi utilizado?</h3></div><div className="form-grid"><label className="field field-full"><span>Peça ou produto</span><select value={quickProduct} onChange={(event) => { setQuickProduct(event.target.value); setQuickQuantity(1); const part = produtosAtivos.find((item) => item.id === event.target.value); setQuickPartValue(String(part ? toAmount(part.price) : 0)); }}><option value="Sem produto">Sem produto · somente serviço</option>{produtosAtivos.map((part) => <option value={part.id} key={part.id}>{part.name} · {part.code} · {part.stock} em estoque</option>)}</select></label>{quickProduct !== "Sem produto" && <><label className="field"><span>Quantidade</span><NumberField min={0.001} step="any" fallback={1} value={quickQuantity} onChange={setQuickQuantity}/></label><label className="field"><span>Preço unitário da peça</span><MoneyField value={quickPartValue} onChange={setQuickPartValue} placeholder="0,00"/></label></>}</div></section>
+              {/*
+                A PEÇA DO SERVIÇO RÁPIDO, no mesmo buscador da OS.
+
+                Era uma lista suspensa com o estoque inteiro. No computador já
+                era ruim; no celular é rolar centenas de linhas com o dedo, sem
+                busca nenhuma — e a peça certa está no meio. Agora é o mesmo
+                `PartPicker` da OS: a lista aparece antes de digitar, em ordem
+                alfabética, e a busca acha pelo nome, pela referência ou pelo
+                código de barras.
+
+                Um componente só de propósito: dois buscadores divergem, e
+                quem descobre é o balcão com o cliente na frente.
+              */}
+              <section className="intake-quick-section"><div className="intake-section-heading"><span>02 / PEÇA OU PRODUTO</span><h3>O que foi utilizado?</h3></div>
+                {quickProduct === "Sem produto" ? <>
+                  <p className="quiet-note">Só serviço? Pode seguir sem escolher peça.</p>
+                  <PartPicker products={produtosAtivos} autoFocus={false}
+                    rotulo="Peça ou produto (opcional)"
+                    vazio="Cadastre as peças em Produtos e estoque para usá-las aqui."
+                    onPick={(part) => { setQuickProduct(part.id); setQuickQuantity(1); setQuickPartValue(String(toAmount(part.price))); }}/>
+                </> : (() => {
+                  const escolhida = produtosAtivos.find((item) => item.id === quickProduct);
+                  return <>
+                    <div className="quick-part-chosen">
+                      <span>
+                        <strong>{escolhida?.name ?? "Peça não encontrada"}</strong>
+                        <small>{escolhida ? `${escolhida.code} · ${escolhida.stock || 0} em estoque` : "Ela pode ter sido apagada do cadastro."}</small>
+                      </span>
+                      <button type="button" className="ghost-button" onClick={() => { setQuickProduct("Sem produto"); setQuickQuantity(1); setQuickPartValue("0"); }}>Trocar</button>
+                    </div>
+                    <div className="form-grid">
+                      <label className="field"><span>Quantidade</span><NumberField min={0.001} step="any" fallback={1} value={quickQuantity} onChange={setQuickQuantity}/></label>
+                      <label className="field"><span>Preço unitário da peça</span><MoneyField value={quickPartValue} onChange={setQuickPartValue} placeholder="0,00"/></label>
+                    </div>
+                  </>;
+                })()}
+              </section>
               <details className="intake-optional" open={isCreditPayment(quickPayment) || undefined}><summary>Cliente e motocicleta <span>Opcional</span></summary><div className="form-grid"><label className="field"><span>Cliente</span><input autoComplete="name" value={quickCustomer} onChange={(event) => setQuickCustomer(emMaiusculo(event.target.value))} placeholder="Nome do cliente"/></label><label className="field"><span>Motocicleta / placa</span><input value={quickVehicle} onChange={(event) => setQuickVehicle(emMaiusculo(event.target.value))} placeholder="Ex.: CG 160 · ABC-1D23"/></label></div></details>
               <section className="intake-quick-section"><div className="intake-section-heading"><span>03 / PAGAMENTO</span><h3>Como o cliente vai pagar?</h3></div><div className="form-grid"><label className="field"><span>Forma de pagamento</span><select value={quickPayment} onChange={(event) => setQuickPayment(event.target.value)}>{activePaymentMethods.filter((method) => method.name !== "Faturamento parceiro").map((method) => <option key={method.id}>{method.name}</option>)}</select></label><label className="field"><span>Conta de entrada</span><select value={currentCashAccount} onChange={(event) => setQuickAccount(event.target.value)}>{cashAccounts.map((account) => <option key={account}>{account}</option>)}{activePaymentMachines.map((machine) => <option key={machine.id}>{machine.name}</option>)}</select></label>{["Crédito", "Débito"].includes(quickPayment) && <label className="field field-full"><span>Maquininha</span><select value={selectedMachine?.id || ""} onChange={(event) => setSelectedMachineId(event.target.value)}>{activePaymentMachines.map((machine) => <option key={machine.id} value={machine.id}>{machine.name}</option>)}</select></label>}</div></section>
               <div className="quick-service-total"><div><span>Total a receber</span><small>Mão de obra {formatBRL(valorDigitado(quickServiceValue))} · peças {formatBRL(quickTotal - valorDigitado(quickServiceValue))}</small></div><strong>{formatBRL(quickTotal)}</strong></div>
