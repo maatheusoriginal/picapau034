@@ -3076,6 +3076,7 @@ export function AppDialog({
     setOrderItems((currentOrder.items ?? []).map((item) => ({ ...item })));
     setOrderCustomer(currentOrder.customerPending ? "" : currentOrder.customer || "");
     setOrderBike(currentOrder.bike || "");
+    // `formatPlate` já devolve o código da moto elétrica intacto.
     setOrderPlate(formatPlate(currentOrder.plate || ""));
     setOrderMileage(currentOrder.mileage || "");
     setOrderProblem(currentOrder.problem || "");

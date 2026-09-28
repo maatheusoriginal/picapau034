@@ -7,7 +7,7 @@
  * moto anterior foi apagada. As duas estão cobertas abaixo.
  */
 import type { MotorcycleRecord } from "../src/types";
-import { isValidPlate, motorcycleIdFor, normalizePlate } from "../src/plate";
+import { formatPlate, isValidPlate, motorcycleIdFor, normalizePlate } from "../src/plate";
 import { bikeIdLabel, electricBikeId, electricCode, isElectricBike, isElectricCode, nextElectricCode } from "../src/electric";
 
 const moto = (extra: Partial<MotorcycleRecord>): MotorcycleRecord => ({
@@ -94,6 +94,26 @@ const casos: Array<[string, unknown, unknown]> = [
 
   // A busca compara texto normalizado: o código tem de sobreviver a isso.
   ["o código normalizado continua o mesmo", normalizePlate("ELET-001"), "ELET001"],
+
+  /* -------------------------------------------------------------------------
+     O FORMATADOR NÃO PODE QUEBRAR O CÓDIGO
+
+     `formatPlate` põe o hífen depois do TERCEIRO caractere, que é onde ele vai
+     numa placa. No código ELET-001 isso devolvia "ELE-T001" — e o número na
+     tela deixava de ser o número da etiqueta colada na moto. O roteiro ponta a
+     ponta pegou isso dentro da OS, mas o mesmo formatador é usado na busca de
+     cliente, na lista de motos, na OS antiga e na hora de GRAVAR a placa da
+     OS: o código quebrado entraria no banco.
+  ------------------------------------------------------------------------- */
+  ["o código sai inteiro do formatador", formatPlate("ELET-001"), "ELET-001"],
+  ["sem hífen, ele não ganha um no lugar errado", formatPlate("ELET001"), "ELET001"],
+  ["e nunca vira ELE-T001", formatPlate("ELET-001") === "ELE-T001", false],
+  ["minúscula sai em maiúscula, como o resto", formatPlate("elet-001"), "ELET-001"],
+  ["passando de 999 continua inteiro", formatPlate("ELET-1000"), "ELET-1000"],
+  // E a placa de verdade continua sendo formatada como sempre foi.
+  ["a placa continua ganhando o hífen", formatPlate("ABC1D23"), "ABC-1D23"],
+  ["a placa antiga também", formatPlate("ABC1234"), "ABC-1234"],
+  ["texto curto continua passando cru", formatPlate("AB"), "AB"],
 ];
 
 let falhas = 0;

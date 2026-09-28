@@ -6,14 +6,32 @@
  * "abc-1d23" são a mesma moto, e comparar o texto cru cadastraria a moto duas
  * vezes.
  */
+import { isElectricCode } from "./electric";
 
 /** Só letras e números, em maiúsculas — a forma de comparar duas placas. */
 export function normalizePlate(value: string): string {
   return (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7);
 }
 
-/** Como a placa aparece na tela: ABC-1D23. */
+/**
+ * Como a placa aparece na tela: ABC-1D23.
+ *
+ * O CÓDIGO DA MOTO ELÉTRICA PASSA INTEIRO, sem ser tocado.
+ *
+ * Esta função põe o hífen depois do TERCEIRO caractere, que é onde ele vai
+ * numa placa. No código ELET-001 isso devolvia "ELE-T001" — e o número na
+ * tela deixava de ser o número da etiqueta colada na moto. Apareceu na OS,
+ * mas o mesmo formatador é usado na busca de cliente, na lista de motos, no
+ * lançamento de OS antiga e na hora de GRAVAR a placa da OS: o código
+ * quebrado entraria no banco.
+ *
+ * A saída é aqui, e não em cada tela: são uma dúzia de chamadas, e a décima
+ * terceira nasceria errada. Uma placa de verdade nunca começa com quatro
+ * letras, então nada que seja placa é afetado (ver src/electric.ts).
+ */
 export function formatPlate(value: string): string {
+  const texto = String(value ?? "").trim();
+  if (isElectricCode(texto)) return texto.toUpperCase();
   const normalized = normalizePlate(value);
   return normalized.length > 3 ? `${normalized.slice(0, 3)}-${normalized.slice(3)}` : normalized;
 }
