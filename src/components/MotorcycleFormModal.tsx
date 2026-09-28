@@ -6,6 +6,7 @@ import { saveFirestoreDoc } from "../../app/firebase/client";
 import { defaultSystemLists } from "../types";
 import { BikeModelFields } from "./BikeModelFields";
 import { motorcycleIdFor } from "../plate";
+import { electricBikeId, isElectricBike, nextElectricCode } from "../electric";
 import { RemovalButton, type RemovalConfig } from "./RemovalButton";
 
 interface MotorcycleFormModalProps {
@@ -55,6 +56,15 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
 
   // Form Fields
   const [plate, setPlate] = useState("");
+  /*
+    Moto elétrica: a que não tem placa.
+
+    Marcando aqui, o campo da placa sai da frente e o sistema gera o código da
+    oficina (ELET-001). Ele fica no mesmo campo `plate` do cadastro, porque é
+    ele que identifica a moto na busca, no cartão, no cupom e no id do
+    documento — ver src/electric.ts.
+  */
+  const [electric, setElectric] = useState(false);
   const [brand, setBrand] = useState("Honda");
   const [model, setModel] = useState("");
   // O modelo é gravado como um texto só ("CG 160 Fan") — é o que a OS imprime
@@ -93,6 +103,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
 
     if (editingMotorcycle) {
       setPlate(editingMotorcycle.plate || "");
+      setElectric(isElectricBike(editingMotorcycle));
       setBrand(editingMotorcycle.brand || "Honda");
       setModel(editingMotorcycle.model || "");
       setYear(editingMotorcycle.year || "");
@@ -106,6 +117,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
       setNotes(editingMotorcycle.notes || "");
     } else {
       setPlate("");
+      setElectric(false);
       setBrand("Honda");
       setModel("");
       setYear(`${new Date().getFullYear()}`);
@@ -144,21 +156,25 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const cleanPlate = normalizePlateInput(plate);
-    if (!cleanPlate) {
-      setErroForm("Informe a placa da motocicleta.");
+    // A moto elétrica não tem placa: o que a identifica é o código da
+    // oficina, e é o sistema que o gera — não há o que cobrar de quem digita.
+    const codigo = electric ? (editingMotorcycle && isElectricBike(editingMotorcycle) ? editingMotorcycle.plate : nextElectricCode(allMotorcycles)) : "";
+    const cleanPlate = electric ? "" : normalizePlateInput(plate);
+    if (!electric && !cleanPlate) {
+      setErroForm("Informe a placa da motocicleta, ou marque que ela é elétrica.");
       return;
     }
 
     if (!model.trim()) {
-      setErroForm("Informe o modelo da moto.");
+      // Sem placa, o modelo é a única coisa que diz que moto é essa.
+      setErroForm(electric ? "Informe o modelo da moto elétrica: sem placa, é ele que diz qual moto é." : "Informe o modelo da moto.");
       return;
     }
 
     setErroForm("");
     setIsSaving(true);
     try {
-      const motoId = editingMotorcycle?.id || motorcycleIdFor(cleanPlate);
+      const motoId = editingMotorcycle?.id || (electric ? electricBikeId(codigo) : motorcycleIdFor(cleanPlate));
       const ownerObj = clients.find((c) => c.id === ownerId);
 
       const motorcycleData: MotorcycleRecord = {
@@ -167,7 +183,8 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
         ownerName: ownerObj ? ownerObj.name : "",
         partnerId,
         partnerName: partners.find((item) => item.id === partnerId)?.name ?? "",
-        plate: formattedPlateDisplay(cleanPlate),
+        plate: electric ? codigo : formattedPlateDisplay(cleanPlate),
+        electric,
         brand,
         model: model.trim(),
         year: year.trim(),
@@ -185,6 +202,7 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
         partnerId: motorcycleData.partnerId,
         partnerName: motorcycleData.partnerName,
         plate: motorcycleData.plate,
+        electric: motorcycleData.electric === true,
         brand: motorcycleData.brand,
         model: motorcycleData.model,
         year: motorcycleData.year,
@@ -263,24 +281,54 @@ export const MotorcycleFormModal: React.FC<MotorcycleFormModalProps> = ({
           <div className="form-section-stack">
             {/* Linha 1: Placa e Proprietário */}
             <div className="form-grid-2">
+              {/*
+                MOTO ELÉTRICA: A QUE NÃO TEM PLACA.
+
+                Marcando aqui, o campo da placa sai da frente — não fica
+                desabilitado pedindo um dado que não existe — e o sistema
+                mostra o código que vai gerar. O código aparece antes de
+                salvar de propósito: é ele que a oficina vai escrever na
+                etiqueta, e ver o número antes evita ter de abrir o cadastro
+                de novo só para descobrir qual saiu.
+              */}
               <label className="field-group">
-                <span className="field-label" style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span>Placa da Moto <b className="req">*</b></span>
-                  {plateTypeIndicator(plate) && (
-                    <span className="plate-badge-indicator">{plateTypeIndicator(plate)}</span>
-                  )}
-                </span>
-                <input
-                  type="text"
-                  required
-                  maxLength={8}
-                  value={plate}
-                  onChange={(e) => setPlate(emMaiusculo(emMaiusculo(e.target.value)))}
-                  placeholder="ABC-1234 ou ABC1D23"
-                  className="dialog-input bold-number"
-                  style={{ textTransform: "uppercase", letterSpacing: "1px" }}
-                  autoFocus
-                />
+                {electric ? <>
+                  <span className="field-label"><span>Código da oficina</span></span>
+                  <input type="text" readOnly className="dialog-input bold-number"
+                    style={{ letterSpacing: "1px" }}
+                    value={editingMotorcycle && isElectricBike(editingMotorcycle) ? editingMotorcycle.plate : nextElectricCode(allMotorcycles)}
+                    aria-label="Código da oficina para esta moto elétrica"/>
+                  <small className="field-hint">Esta moto não tem placa. O código identifica ela no sistema, na OS e no cupom — anote numa etiqueta na moto.</small>
+                </> : <>
+                  <span className="field-label" style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>Placa da Moto <b className="req">*</b></span>
+                    {plateTypeIndicator(plate) && (
+                      <span className="plate-badge-indicator">{plateTypeIndicator(plate)}</span>
+                    )}
+                  </span>
+                  <input
+                    type="text"
+                    required
+                    maxLength={8}
+                    value={plate}
+                    onChange={(e) => setPlate(emMaiusculo(emMaiusculo(e.target.value)))}
+                    placeholder="ABC-1234 ou ABC1D23"
+                    className="dialog-input bold-number"
+                    style={{ textTransform: "uppercase", letterSpacing: "1px" }}
+                    autoFocus
+                  />
+                </>}
+                <label className="electric-switch">
+                  <input type="checkbox" checked={electric}
+                    disabled={Boolean(editingMotorcycle)}
+                    onChange={(e) => { setElectric(e.target.checked); setErroForm(""); }}/>
+                  <span>
+                    <strong>Moto elétrica (sem placa)</strong>
+                    <small>{editingMotorcycle
+                      ? "Numa moto já cadastrada isso não muda: trocar mudaria o que identifica ela, e o histórico ficaria para trás."
+                      : "O sistema gera um código no lugar da placa."}</small>
+                  </span>
+                </label>
               </label>
 
               <label className="field-group">

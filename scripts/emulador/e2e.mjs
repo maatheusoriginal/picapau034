@@ -4074,6 +4074,131 @@ await passo("serviço rápido: a peça sai do mesmo buscador da OS, e o saldo ca
   if (problemas.length) throw new Error("peça no serviço rápido:\n      - " + problemas.join("\n      - "));
 });
 
+await passo("moto elétrica: sem placa, o sistema dá um código e é ele que identifica a moto", async () => {
+  /*
+    A OFICINA PASSOU A PEGAR MOTO ELÉTRICA, E ELA NÃO TEM PLACA.
+
+    Isso não é "um campo a menos". A placa é o que IDENTIFICA a moto no
+    sistema inteiro: é o id dela no banco, é o que a busca procura, é o que
+    sai no cupom e é como o balcão acha o histórico quando a moto volta.
+    Tirar a placa sem pôr nada no lugar faria a moto elétrica sumir.
+
+    No lugar entra o código da oficina — ELET-001 —, que o sistema gera.
+    Este passo cobra as quatro coisas que fazem ele valer como identidade:
+    ele nasce, ele é único, a busca acha por ele, e ele sai no papel.
+  */
+  const problemas = [];
+
+  await ir("Ordens de serviço");
+  await abrirNovaOS();
+  await p.locator(`${CAMADA} .os-search input`).first().fill("DONO DA ELETRICA");
+  await p.waitForTimeout(1000);
+  await p.locator(`${CAMADA} .os-search-actions button`).filter({ hasText: /Cadastrar cliente/ }).first().click();
+  await p.waitForTimeout(1000);
+  await p.locator(`${CAMADA} .os-inline-form input[placeholder="Nome do cliente"]`).fill("DONO DA ELETRICA");
+  await p.locator(`${CAMADA} .os-inline-form input[placeholder="(34) 99999-9999"]`).fill("34955554444");
+  await p.waitForTimeout(700);
+
+  // 1. ANTES DE MARCAR o campo é a placa, como sempre foi.
+  const rotulo = async () => (await p.locator("label:has(#intake-plate) > span").first().innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+  if (!/^Placa/.test(await rotulo())) problemas.push(`antes de marcar, o campo deveria pedir a placa, e diz "${await rotulo()}"`);
+  const marca = p.locator(".electric-switch input").first();
+  if (!(await marca.count())) throw new Error("não achei a opção 'Moto elétrica' na abertura da OS");
+
+  // 2. MARCANDO, a placa sai de cena e entra o código, que ninguém digita.
+  await marca.check();
+  await p.waitForTimeout(1000);
+  if (!/Código/.test(await rotulo())) problemas.push(`marquei elétrica e o campo continua pedindo "${await rotulo()}"`);
+  const codigo = await p.locator("#intake-plate").inputValue().catch(() => "");
+  if (!/^ELET-\d{3,}$/.test(codigo)) problemas.push(`o código gerado veio como "${codigo}"`);
+  if (!(await p.locator("#intake-plate").evaluate((el) => el.readOnly).catch(() => false))) {
+    problemas.push("o código está editável: mudar à mão é mudar o que identifica a moto");
+  }
+
+  const listas = p.locator(`${CAMADA} .os-inline-form.vehicle select`);
+  await listas.nth(0).selectOption("Honda"); await p.waitForTimeout(700);
+  await listas.nth(1).selectOption({ index: 1 }); await p.waitForTimeout(700);
+
+  await irParaServico();
+  await p.locator(`${CAMADA} textarea`).first().fill("BATERIA NAO CARREGA");
+  await p.waitForTimeout(400);
+  await incluirMaoDeObra("REVISAO ELETRICA", "120");
+  await conferirEAbrir();
+  await p.waitForTimeout(4500);
+  await fecharQualquerDialogo();
+
+  // 3. NO BANCO: a OS e a moto guardam o código, e a moto tem id próprio.
+  const os = (await banco("serviceOrders")).find((ordem) => ordem.plate === codigo);
+  if (!os) problemas.push(`nenhuma OS ficou com o código ${codigo}`);
+  else if (os.electric !== true) problemas.push("a OS não guardou que a moto é elétrica, e vai chamar o código de placa depois");
+  const moto = (await banco("motorcycles")).find((item) => item.plate === codigo);
+  if (!moto) problemas.push(`a moto elétrica ${codigo} não virou cadastro`);
+  else {
+    if (moto.electric !== true) problemas.push("o cadastro da moto não ficou marcado como elétrico");
+    // O id NÃO pode passar pelo corte de 7 da placa: ver src/electric.ts.
+    if (moto._id !== `MOTO-${codigo.replace("-", "")}`) problemas.push(`o id da moto elétrica ficou "${moto._id}", e deveria ser MOTO-${codigo.replace("-", "")}`);
+  }
+
+  // 4. A BUSCA ACHA POR ELE — é para isso que o código existe.
+  await ir("Ordens de serviço");
+  await visaoDaOficina("Lista");
+  await p.locator(".list-toolbar input").first().fill(codigo);
+  await p.waitForTimeout(1300);
+  if (!(await p.locator("tbody .order-id").count())) problemas.push(`busquei "${codigo}" na oficina e não achei a OS dela`);
+  // E sem o hífen, que é como se digita correndo.
+  await p.locator(".list-toolbar input").first().fill(codigo.replace("-", ""));
+  await p.waitForTimeout(1300);
+  if (!(await p.locator("tbody .order-id").count())) problemas.push(`busquei "${codigo.replace("-", "")}" sem hífen e não achei a moto elétrica`);
+  await p.locator(".list-toolbar input").first().fill(codigo);
+  await p.waitForTimeout(1200);
+
+  // 5. E SAI NO PAPEL: é o que vai na etiqueta da moto.
+  await p.locator("tbody tr").first().locator("button", { hasText: /^Abrir$/ }).click();
+  await p.waitForTimeout(2800);
+  // O detalhe da OS abre na camada de diálogo comum, e não na do atendimento.
+  const campo = (await p.locator(".dialog .field").filter({ hasText: /Código da oficina/ }).first().innerText().catch(() => "")).replace(/\s+/g, " ");
+  if (!campo.includes(codigo)) problemas.push(`dentro da OS o código não aparece como código: "${campo}"`);
+  await p.evaluate(() => {
+    window.__papelEletrica = [];
+    if (window.__vigiandoEletrica) return;
+    window.__vigiandoEletrica = true;
+    const antes = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "srcdoc");
+    Object.defineProperty(HTMLIFrameElement.prototype, "srcdoc", {
+      set(valor) { window.__papelEletrica.push(String(valor)); antes.set.call(this, valor); },
+      get() { return antes.get.call(this); }, configurable: true,
+    });
+    window.print = () => {};
+  });
+  await p.locator(".order-actions .print-copies > button").first().click();
+  await p.waitForTimeout(700);
+  await p.locator(".print-copies-menu .print-copies-all").first().click();
+  await p.waitForTimeout(2200);
+  const papeis = await p.evaluate(() => window.__papelEletrica ?? []);
+  if (!papeis.length) problemas.push("a OS da moto elétrica não mandou papel nenhum para a impressora");
+  else if (!papeis[0].includes(codigo)) problemas.push("o cupom saiu sem o código: é ele que liga o papel à moto");
+
+  await foto("moto-eletrica");
+  await fecharQualquerDialogo();
+
+  // 6. A SEGUNDA MOTO ELÉTRICA NÃO PODE NASCER COM O MESMO CÓDIGO.
+  await ir("Ordens de serviço");
+  await abrirNovaOS();
+  await p.locator(`${CAMADA} .os-search input`).first().fill("OUTRO DONO ELETRICO");
+  await p.waitForTimeout(1000);
+  await p.locator(`${CAMADA} .os-search-actions button`).filter({ hasText: /Cadastrar cliente/ }).first().click();
+  await p.waitForTimeout(1000);
+  await p.locator(`${CAMADA} .os-inline-form input[placeholder="Nome do cliente"]`).fill("OUTRO DONO ELETRICO");
+  await p.locator(`${CAMADA} .os-inline-form input[placeholder="(34) 99999-9999"]`).fill("34944443333");
+  await p.waitForTimeout(600);
+  await p.locator(".electric-switch input").first().check();
+  await p.waitForTimeout(1000);
+  const segundo = await p.locator("#intake-plate").inputValue().catch(() => "");
+  if (segundo === codigo) problemas.push(`a segunda moto elétrica recebeu o MESMO código ${segundo}: duas motos dividiriam o histórico`);
+  await fecharQualquerDialogo();
+
+  if (problemas.length) throw new Error("moto elétrica:\n      - " + problemas.join("\n      - "));
+});
+
 console.log(`\n=== ${falhas} falha(s) ===`);
 console.log("erros de navegador:", erros.length ? "\n  " + [...new Set(erros)].join("\n  ") : "nenhum");
 await b.close();

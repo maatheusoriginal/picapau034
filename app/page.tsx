@@ -20,6 +20,7 @@ import { formatTyped, valorDigitado } from "../src/number-input";
 import { isPartnerBilled, motorcycleLabel, nextBillingDate, partnerTotals, receivableForOrder, PARTNER_PAYMENT_METHOD } from "../src/partner";
 import { fullModelName, modelsOf, versionsOf } from "../src/motorcycle-catalog";
 import { formatPlate, motorcycleIdFor, normalizePlate, platePattern } from "../src/plate";
+import { bikeIdLabel, electricBikeId, isElectricBike, nextElectricCode } from "../src/electric";
 import { avisoDeMotoDeFora, buscarMotos, estaNaFrota } from "../src/fleet";
 import { somenteAtivos, type BaseDaOficina } from "../src/removal";
 import { acharPorCodigo, ajusteProblema, diferencaDoAjuste, motivosDeAjuste, pareceCodigo, resumoDoAjuste, valorDoAjuste, type Ajuste, type MotivoDeAjuste } from "../src/stock-adjust";
@@ -2839,6 +2840,14 @@ export function AppDialog({
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [selectedMotorcycleId, setSelectedMotorcycleId] = useState("");
   const [osPlate, setOsPlate] = useState("");
+  /*
+    A moto desta OS é elétrica, e por isso não tem placa.
+
+    Marcado na abertura, o campo da placa sai da frente e o sistema gera o
+    código da oficina (ELET-001), que passa a identificar a moto na busca, no
+    cartão, no cupom e no id do cadastro. Ver src/electric.ts.
+  */
+  const [osEletrica, setOsEletrica] = useState(false);
   const [newVehicleMode, setNewVehicleMode] = useState(false);
   const [motorcyclePlate, setMotorcyclePlate] = useState("");
   const [selectedMachineId, setSelectedMachineId] = useState(paymentMachines[0]?.id ?? "");
@@ -2914,7 +2923,7 @@ export function AppDialog({
       setStep(1); setOsOrigin("direct"); setOsPayer("owner"); setSelectedPartnerId(partners.find((item) => item.active)?.id || "");
       setOsItems([]); setOsItemDraft(false); setPieceSearch(""); setLaborDescription(""); setLaborValue("");
       setSelectedMechanicIds(mechanicsForOrders(users).slice(0, 1).map((item) => item.id));
-      setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(false);
+      setCustomerLookup(""); setSelectedCustomerId(""); setSelectedMotorcycleId(""); setOsPlate(""); setOsEletrica(false); setNewVehicleMode(false);
       setOsNewCustomer(false); setOsSkipCustomer(false); setNewCustomerName(""); setVerHistorico(false); setPartnerBikeSearch("");
       setNewVehicleBrand(systemList(lists, "motorcycleBrands")[0] || "Honda"); setNewVehicleModel(""); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setNewVehicleYear(""); setNewVehicleColor("");
       setOsMileage(""); setOsMileageChecked("Não"); setOsFuel(""); setOsProblem(""); setOsPriority("Normal"); setOsDelivery(""); setOsPartnerOrderId("");
@@ -3522,6 +3531,7 @@ export function AppDialog({
   // resultado. Antes o próprio campo já selecionava o primeiro que batesse.
   const clearVehicleDraft = () => {
     setNewVehicleModel(""); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setNewVehicleYear(""); setNewVehicleColor("");
+    setOsEletrica(false);
   };
   const handleCustomerLookup = (value: string) => {
     // "TES1D23" tem dígitos, mas não é telefone: formatar como telefone
@@ -3554,7 +3564,30 @@ export function AppDialog({
   const handleOsPlate = (value: string) => {
     setOsPlate(formatPlate(value)); setSelectedMotorcycleId(""); setNewVehicleMode(true);
   };
-  const existingPlateMatch = newVehicleMode && normalizePlate(osPlate).length === 7
+  /*
+    Esta OS é de moto elétrica?
+
+    Duas portas levam ao mesmo lugar: marcar "elétrica" ao cadastrar a moto na
+    hora, ou escolher do cadastro uma moto que já é elétrica. As duas precisam
+    dar na mesma resposta, senão a OS de uma moto elétrica já cadastrada
+    voltaria a cobrar placa.
+  */
+  /*
+    Quem manda é a MOTO ESCOLHIDA, quando há uma.
+
+    A primeira versão disto perguntava por `newVehicleMode`, e errava: o
+    cadastro rápido de cliente com moto, que é o caminho mais usado do balcão,
+    não liga esse modo. A OS saía sem identificação nenhuma e sem cadastrar a
+    moto — medido no navegador, com a conferência dizendo "Placa: não
+    informada" depois de marcar elétrica.
+
+    A pergunta certa é outra: esta OS é de uma moto que JÁ EXISTE no cadastro?
+    Se é, quem decide é ela. Se não é, a moto está nascendo agora, e quem
+    decide é o que foi marcado na tela.
+  */
+  const motoDoCadastro = selectedMotorcycle && !newVehicleMode ? selectedMotorcycle : null;
+  const eletricaNaOs = motoDoCadastro ? isElectricBike(motoDoCadastro) : osEletrica;
+  const existingPlateMatch = newVehicleMode && !osEletrica && normalizePlate(osPlate).length === 7
     ? motorcycles.find((item) => normalizePlate(item.plate) === normalizePlate(osPlate)) : undefined;
   const useExistingPlate = () => {
     if (!existingPlateMatch || existingPlateMatch.active === false) return;
@@ -3599,7 +3632,7 @@ export function AppDialog({
   // some com o estoque de quem está vendendo no balcão.
   const deductStockOnlyWhenStarted = settings?.deductStockOnlyWhenUsed !== false;
   const getIdentityIssue = (): AttendanceIssue | null => {
-    const issue = attendanceIdentityIssue({ origin: osOrigin, partnerId: selectedPartner?.id, customer: osCustomer, newCustomer: osNewCustomer, skipCustomer: osSkipCustomer, name: newCustomerName, phone: customerLookup, plate: osPlate || selectedMotorcycle?.plate || "", model: newVehicleModel, motorcycle: newVehicleMode ? undefined : selectedMotorcycle });
+    const issue = attendanceIdentityIssue({ origin: osOrigin, partnerId: selectedPartner?.id, customer: osCustomer, newCustomer: osNewCustomer, skipCustomer: osSkipCustomer, name: newCustomerName, phone: customerLookup, plate: osPlate || selectedMotorcycle?.plate || "", model: newVehicleModel, motorcycle: newVehicleMode ? undefined : selectedMotorcycle, electric: eletricaNaOs });
     if (issue) return issue;
     if (existingPlateMatch) return { field: "intake-plate", message: existingPlateMatch.active === false ? "Esta placa pertence a uma moto desativada. Reative o cadastro em Motocicletas para continuar." : "Esta placa já está cadastrada. Confira os dados e use o botão Selecionar esta moto." };
     return null;
@@ -3622,7 +3655,11 @@ export function AppDialog({
     customer: osOrigin === "partner" ? selectedPartner?.name || "" : osSkipCustomer ? "Cliente não identificado" : osNewCustomer ? newCustomerName : osCustomer?.name || "",
     phone: osOrigin === "partner" ? "" : osSkipCustomer ? "" : osNewCustomer ? customerLookup : osCustomer?.phone || "",
     bike: selectedMotorcycle && !newVehicleMode ? [selectedMotorcycle.brand, selectedMotorcycle.model].filter(Boolean).join(" ") : newVehicleModel.trim() ? [newVehicleBrand, newVehicleModel].filter(Boolean).join(" ") : "",
-    plate: osPlate, payer: osOrigin === "partner" && osPayer === "partner" ? `${selectedPartner?.name || "Parceira"} · fatura mensal` : "No ato da entrega",
+    // O resumo mostra o que vai identificar a moto: a placa digitada, o
+    // código que a elétrica vai receber, ou o da moto escolhida do cadastro.
+    plate: eletricaNaOs ? (motoDoCadastro?.plate ?? nextElectricCode(motorcycles)) : (osPlate || selectedMotorcycle?.plate || ""),
+    electric: eletricaNaOs,
+    payer: osOrigin === "partner" && osPayer === "partner" ? `${selectedPartner?.name || "Parceira"} · fatura mensal` : "No ato da entrega",
     mechanics: selectedMechanics.map((item) => item.name).join(", "), problem: osProblem, delivery: osDelivery ? osDelivery.split("-").reverse().join("/") : "", priority: currentPriority,
     mileage: osMileage, fuel: currentFuel, mileageChecked: osMileageChecked === "Sim", partnerOrder: osOrigin === "partner" ? osPartnerOrderId : "",
     items: osItems, parts: partsTotal, labor: laborTotal, discount: partnerDiscount, total: osTotal,
@@ -3686,7 +3723,7 @@ export function AppDialog({
     supplier: "Contato, condições e categorias fornecidas.",
     purchase: "Entrada simples de produtos, sem rotina fiscal.",
     finance: "Dinheiro que entra ou sai sem ser venda nem conta agendada.",
-    order: currentOrder ? `Cliente: ${currentOrder.customer} · Placa ${currentOrder.plate}` : "Detalhes da ordem de serviço",
+    order: currentOrder ? `Cliente: ${currentOrder.customer} · ${bikeIdLabel(currentOrder.electric)} ${currentOrder.plate}` : "Detalhes da ordem de serviço",
     orderCheckout: "Confira os itens executados, receba e encerre a ordem de serviço.",
     settings: "Tudo que pode ser alterado, concentrado em uma tela.",
     cash: "Abra, movimente ou feche o caixa do dia.",
@@ -3714,7 +3751,18 @@ export function AppDialog({
     const daParceira = osOrigin === "partner" && Boolean(selectedPartner);
     const customerName = daParceira ? (selectedMotorcycle?.ownerName || "") : osSkipCustomer ? "" : (osNewCustomer ? newCustomerName.trim() : osCustomer?.name || "");
     const semCliente = !daParceira && osSkipCustomer;
-    const plate = formatPlate(osPlate || selectedMotorcycle?.plate || "");
+    /*
+      O QUE IDENTIFICA A MOTO NESTA OS.
+
+      Moto de placa: a placa. Moto elétrica: o código da oficina, gerado aqui
+      se ela está sendo cadastrada agora, ou o que a moto já tem se ela veio
+      do cadastro. É este texto que vai para o cartão, a busca, o cupom e o
+      PDF — a OS tem um campo só para isso de propósito, senão cada tela
+      escolheria qual dos dois mostrar.
+    */
+    const plate = eletricaNaOs
+      ? (motoDoCadastro?.plate ?? nextElectricCode(motorcycles))
+      : formatPlate(osPlate || selectedMotorcycle?.plate || "");
     const bike = selectedMotorcycle && !newVehicleMode
       ? [selectedMotorcycle.brand, selectedMotorcycle.model].filter(Boolean).join(" ")
       : newVehicleModel.trim() ? [newVehicleBrand, newVehicleModel.trim()].filter(Boolean).join(" ") : "";
@@ -3744,13 +3792,16 @@ export function AppDialog({
     // da mesma moto não a encontraria. O dono é preenchido no encerramento.
     if (canManageCustomers && !motorcycleId && plate) {
       // A placa já identifica a moto de forma única, mesmo padrão do cadastro.
-      motorcycleId = motorcycleIdFor(plate);
+      // A elétrica tem função de id própria: o corte de 7 caracteres da placa
+      // faria ELET-1000 e ELET-100 virarem a mesma moto (ver src/electric.ts).
+      motorcycleId = eletricaNaOs ? electricBikeId(plate) : motorcycleIdFor(plate);
       await saveFirestoreDoc("motorcycles", motorcycleId, {
         ...(clientId ? { ownerId: clientId, ownerName: customerName } : {}),
         // Moto de frota fica sem dono individual: quem responde é a parceira,
         // e é por ela que esta moto é encontrada na próxima OS.
         ...(daParceira ? { partnerId: selectedPartner!.id, partnerName: selectedPartner!.name } : {}),
         plate,
+        electric: eletricaNaOs,
         brand: newVehicleBrand,
         model: newVehicleModel.trim() || bike,
         year: newVehicleYear,
@@ -3776,6 +3827,9 @@ export function AppDialog({
       ...(semCliente ? { customerPending: true } : {}),
       bike: bike || "Motocicleta",
       plate,
+      // A OS guarda sozinha se aquilo é placa ou código: ela é o que se abre
+      // meses depois, inclusive quando a moto saiu do cadastro.
+      ...(eletricaNaOs ? { electric: true } : {}),
       mechanic: selectedMechanics[0]?.name ?? "",
       mechanicIds: selectedMechanics.map((mechanic) => mechanic.id),
       // O ANO entra aqui. Sem ele a data de abertura ficava "08/09, 20:04", e
@@ -5357,7 +5411,7 @@ export function AppDialog({
                     <section className={`os-block ${(selectedMotorcycle && !newVehicleMode) || (newVehicleMode && osPlate.trim()) ? "done" : ""} ${!blocoDaMotoLiberado ? "waiting" : ""}`}>
                       <header className="os-block-head">
                         <span className="os-block-number">2</span>
-                        <div><strong>Motocicleta</strong><small>{motosParaEscolher.length && !newVehicleMode ? "Escolha a moto que está entrando." : "Placa, marca, modelo e versão."}</small></div>
+                        <div><strong>Motocicleta</strong><small>{motosParaEscolher.length && !newVehicleMode ? "Escolha a moto que está entrando." : osEletrica ? "Sem placa: código da oficina, marca, modelo e versão." : "Placa, marca, modelo e versão."}</small></div>
                         {selectedMotorcycle && !newVehicleMode ? <span className="os-block-badge ok">{motorcycleLabel(selectedMotorcycle)}</span> : null}
                       </header>
 
@@ -5451,7 +5505,18 @@ export function AppDialog({
                           {osOrigin !== "partner" && selectedMotorcycle && !newVehicleMode && !motosParaEscolher.length ? <div className="os-picked"><Icon name="bike"/><div><strong>{selectedMotorcycle.brand} {selectedMotorcycle.model}</strong><small>{selectedMotorcycle.plate}</small></div><button type="button" className="os-picked-change" onClick={() => { setSelectedMotorcycleId(""); setOsPlate(""); setNewVehicleMode(true); }}>Trocar moto</button></div> : null}
                           {(osOrigin !== "partner" && motosParaEscolher.length === 0 && !selectedMotorcycle) || newVehicleMode ? (
                             <div className="os-inline-form vehicle">
-                              <label className="field"><span>Placa {(osSkipCustomer || osOrigin === "partner") && <b className="req">*</b>}</span><input id="intake-plate" autoCapitalize="characters" autoComplete="off" spellCheck={false} aria-invalid={intakeFieldError === "intake-plate"} aria-describedby={intakeFieldError === "intake-plate" ? "intake-error" : undefined} value={osPlate} onChange={(event) => handleOsPlate(event.target.value)} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(osPlate)}</small></label>
+                              {/*
+  MOTO ELÉTRICA: A QUE NÃO TEM PLACA.
+
+  A oficina passou a pegar motos elétricas, e cobrar placa delas impedia
+  de abrir a OS de um serviço que já estava sendo feito. Marcando aqui, o
+  campo da placa sai da frente e entra o código da oficina, que o sistema
+  gera — é ele que identifica a moto daqui em diante.
+*/}
+{osEletrica
+  ? <label className="field"><span>Código da oficina</span><input id="intake-plate" readOnly value={nextElectricCode(motorcycles)} aria-label="Código da oficina para esta moto elétrica"/><small className="field-help">Sem placa: anote este código numa etiqueta na moto.</small></label>
+  : <label className="field"><span>Placa {(osSkipCustomer || osOrigin === "partner") && <b className="req">*</b>}</span><input id="intake-plate" autoCapitalize="characters" autoComplete="off" spellCheck={false} aria-invalid={intakeFieldError === "intake-plate"} aria-describedby={intakeFieldError === "intake-plate" ? "intake-error" : undefined} value={osPlate} onChange={(event) => handleOsPlate(event.target.value)} placeholder="ABC-1234 ou ABC-1D23" maxLength={8}/><small className="field-help">{platePattern(osPlate)}</small></label>}
+<label className="electric-switch electric-switch-full"><input type="checkbox" checked={osEletrica} onChange={(event) => { setOsEletrica(event.target.checked); if (event.target.checked) setOsPlate(""); }}/><span><strong>Moto elétrica (sem placa)</strong><small>O sistema gera o código {nextElectricCode(motorcycles)} para identificar esta moto.</small></span></label>
                               {existingPlateMatch && <div className="intake-duplicate"><Icon name="alert" size={20}/><div><strong>Esta placa já está cadastrada</strong><p>{existingPlateMatch.brand} {existingPlateMatch.model} · {existingPlateMatch.ownerName || existingPlateMatch.partnerName || "Sem proprietário identificado"}</p>{existingPlateMatch.active === false ? <p>Reative a moto em Motocicletas para usá-la.</p> : <button type="button" className="outline-button" onClick={useExistingPlate}>Selecionar esta moto</button>}</div></div>}
                               <label className="field"><span>Marca</span>
                                 <select value={newVehicleBrand} onChange={(event) => { setNewVehicleBrand(event.target.value); setNewVehicleCatalogModel(""); setNewVehicleVersion(""); setNewVehicleModel(""); }}>
@@ -6067,7 +6132,12 @@ export function AppDialog({
                       obrigatorio={false}
                       dica={false}
                     />
-                    <label className="field"><span>Placa</span><input value={orderPlate} onChange={(event) => setOrderPlate(formatPlate(event.target.value))} placeholder="ABC-1D23"/></label>
+                    {/* Moto elétrica não tem placa: o campo mostra o código
+                        da oficina e não deixa reescrever à mão — mudar o
+                        código é mudar o que identifica a moto. */}
+                    {currentOrder.electric
+                      ? <label className="field"><span>Código da oficina</span><input value={orderPlate} readOnly aria-label="Código da oficina desta moto elétrica"/></label>
+                      : <label className="field"><span>Placa</span><input value={orderPlate} onChange={(event) => setOrderPlate(formatPlate(event.target.value))} placeholder="ABC-1D23"/></label>}
                     <label className="field"><span>Quilometragem</span><input value={orderMileage} onChange={(event) => setOrderMileage(event.target.value)} placeholder="Ex.: 42500" inputMode="numeric"/></label>
                     <label className="field field-full"><span>Problema relatado</span><textarea value={orderProblem} onChange={(event) => setOrderProblem(emMaiusculo(event.target.value))} placeholder="O que o cliente contou ao deixar a moto"/></label>
                   </div>

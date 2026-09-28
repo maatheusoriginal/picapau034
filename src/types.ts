@@ -401,6 +401,14 @@ export type OrderRecord = {
    */
   customerPending?: boolean;
   /**
+   * A moto desta OS é elétrica, e o que está em `plate` é o código da oficina.
+   *
+   * Fica gravado na própria OS, e não só no cadastro da moto: a OS é o que se
+   * abre meses depois, e ela precisa saber sozinha se aquilo é placa ou
+   * código — inclusive quando a moto foi apagada do cadastro.
+   */
+  electric?: boolean;
+  /**
    * O desconto dado nesta OS, em reais.
    *
    * É o "leva por 250" do balcão, e não o desconto de contrato da parceira —
@@ -887,6 +895,17 @@ export type MotorcycleRecord = {
   chassis?: string;
   renavam?: string;
   notes?: string;
+  /**
+   * Moto elétrica: a que não tem placa.
+   *
+   * Quando é elétrica, o campo `plate` guarda o CÓDIGO DA OFICINA — ELET-001,
+   * gerado pelo sistema — em vez da placa. O campo continua sendo um só de
+   * propósito: é ele que identifica a moto na busca, no cartão, no cupom e no
+   * id do documento, e partir isso em dois campos faria cada tela escolher
+   * qual mostrar. Quem diz qual dos dois é, é esta marca; quem escreve o nome
+   * certo na tela é `bikeIdLabel` (ver src/electric.ts).
+   */
+  electric?: boolean;
   /**
    * Moto desativada some dos seletores (abrir OS, escolher a moto do cliente)
    * e continua na lista de motocicletas e em todas as OS antigas. É o que
