@@ -564,3 +564,15 @@ table td strong, table td span { font-size: .875rem; }
   .reprint-batch-ready { flex-direction: column; align-items: stretch; }
   .reprint-batch-ready .primary-button { justify-content: center; }
 }
+
+/* ---------------------------------------------------------------------------
+   A peça escolhida no serviço rápido
+
+   Depois de escolher, a lista sai da frente e fica só a peça, com o botão de
+   trocar ao lado: quem já achou o que queria não precisa continuar olhando o
+   estoque inteiro, e a quantidade e o preço passam a ser o assunto.
+--------------------------------------------------------------------------- */
+.quick-part-chosen { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 12px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; background: #fffdf8; }
+.quick-part-chosen span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.quick-part-chosen strong { font-size: .9375rem; }
+.quick-part-chosen small { font-size: .8125rem; color: var(--muted); }
